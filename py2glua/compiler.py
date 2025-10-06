@@ -11,7 +11,6 @@ from .convertor import (
     FunctionEmitter,
     ReturnEmitter,
 )
-from .exceptions import NameError
 
 
 def sha1_text(s: str) -> str:
