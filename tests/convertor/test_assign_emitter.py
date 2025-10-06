@@ -2,7 +2,7 @@ import ast
 
 import pytest
 
-from source.py2glua.convertor.assign_emitter import AssignEmitter
+from py2glua.convertor.assign_emitter import AssignEmitter
 
 
 def test_simple_assign_constant():

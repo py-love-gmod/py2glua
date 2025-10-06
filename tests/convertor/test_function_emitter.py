@@ -1,6 +1,6 @@
 import ast
 
-from source.py2glua.convertor.function_emitter import FunctionEmitter
+from py2glua.convertor.function_emitter import FunctionEmitter
 
 
 def _fn_node(src: str) -> ast.FunctionDef:

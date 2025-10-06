@@ -2,7 +2,7 @@ import ast
 
 import pytest
 
-from source.py2glua.convertor.base_emitter import NodeEmitter
+from py2glua.convertor.base_emitter import NodeEmitter
 
 
 def test_emit_not_implemented():

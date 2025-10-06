@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from source.py2glua.compiler import Compiler
+from py2glua.compiler import Compiler
 
 
 def test_compile_str_function_basic():

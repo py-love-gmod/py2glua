@@ -1,7 +1,7 @@
 import ast
 
 import pytest
-from source.py2glua.convertor.return_emitter import ReturnEmitter
+from py2glua.convertor.return_emitter import ReturnEmitter
 
 
 def test_return_constant():
