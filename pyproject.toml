@@ -19,7 +19,7 @@ py2glua = "py2glua.cli:main"
 homepage = "https://github.com/themanyfaceddemon/py2glua"
 
 [tool.setuptools.packages.find]
-where = ["source"]
+where = ["."]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
