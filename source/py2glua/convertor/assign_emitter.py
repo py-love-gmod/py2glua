@@ -11,7 +11,7 @@ class AssignEmitter(NodeEmitter):
 
     def emit(self, node: ast.Assign, indent: int = 0) -> str:
         target = node.targets[0].id  # type: ignore
-        value = self._expr(node)
+        value = self._expr(node.value)
         return f"{self._indent(indent)}local {target} = {value}"
 
     def _expr(self, node):

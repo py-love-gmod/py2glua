@@ -1,7 +1,9 @@
 import ast
-from .base_emitter import NodeEmitter
+
 from .assign_emitter import AssignEmitter
+from .base_emitter import NodeEmitter
 from .return_emitter import ReturnEmitter
+
 
 class FunctionEmitter(NodeEmitter):
     def __init__(self):
