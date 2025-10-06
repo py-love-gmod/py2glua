@@ -3,7 +3,7 @@ import shutil
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from .convertor.compiler import Compiler
+from .compiler import Compiler
 
 
 def _safe_version() -> str:

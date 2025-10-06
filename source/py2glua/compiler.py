@@ -4,10 +4,10 @@ import ast
 from pathlib import Path
 from typing import List
 
-from .assign_emitter import AssignEmitter
-from .binop_emitter import BinOpEmitter
-from .function_emitter import FunctionEmitter
-from .return_emitter import ReturnEmitter
+from .convertor.assign_emitter import AssignEmitter
+from .convertor.binop_emitter import BinOpEmitter
+from .convertor.function_emitter import FunctionEmitter
+from .convertor.return_emitter import ReturnEmitter
 
 
 def sha1_text(s: str) -> str:
