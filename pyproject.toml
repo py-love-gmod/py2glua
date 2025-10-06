@@ -10,7 +10,7 @@ readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
 authors = [{ name = "Cain" }]
-dependencies = []
+dependencies = ["colorama"]
 
 [project.scripts]
 py2glua = "py2glua.cli:main"

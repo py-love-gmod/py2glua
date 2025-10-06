@@ -1,9 +1,14 @@
 import argparse
 import shutil
+import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+from colorama import Fore, Style, init
+
 from .compiler import Compiler
+from .exceptions import CompileError
+from .exceptions import NameError as GuardError
 
 
 def _safe_version() -> str:
@@ -17,10 +22,31 @@ def _safe_version() -> str:
 def _clean_build_dir(path: Path) -> None:
     if path.exists():
         shutil.rmtree(path)
-        print(f"[clean] removed old build directory: {path}")
+        print(
+            f"[{Fore.CYAN}clean{Style.RESET_ALL}] removed old build directory: {path}"
+        )
+
+
+def _build_file(comp, py_file, out_path, fatal) -> None:
+    try:
+        comp.compile_file(py_file, out_path=out_path)
+        print(f"[{Fore.GREEN}build{Style.RESET_ALL}] {py_file} -> {out_path}")
+
+    except (CompileError, GuardError) as e:
+        print(f"[{Fore.RED}error{Style.RESET_ALL}] {e}")
+        if fatal:
+            sys.exit(1)
+
+    except Exception as e:
+        print(
+            f"[{Fore.MAGENTA}fatal{Style.RESET_ALL}] unexpected error: {e.__class__.__name__}: {e}"
+        )
+        if fatal:
+            sys.exit(1)
 
 
 def main() -> None:
+    init(autoreset=True)
     parser = argparse.ArgumentParser(
         prog="py2glua",
         description="Python -> GLua транслитор",
@@ -52,6 +78,11 @@ def main() -> None:
         action="store_true",
         help="Не очищать папку сборки перед компиляцией (по умолчанию: False)",
     )
+    b.add_argument(
+        "--no-fatal",
+        action="store_true",
+        help="Пытается собрать все файла, а не падать после первой ошибки (по умолчанию: False)",
+    )
 
     args = parser.parse_args()
 
@@ -68,13 +99,13 @@ def main() -> None:
                 rel = py_file.relative_to(args.src)
                 lua_path = args.out / rel.with_suffix(".lua")
                 lua_path.parent.mkdir(parents=True, exist_ok=True)
-                comp.compile_file(py_file, out_path=lua_path)
-                print(f"[built] {py_file} -> {lua_path}")
+                _build_file(comp, py_file, lua_path, not args.no_fatal)
 
         else:
             out_path = args.out
             if out_path.is_dir():
                 out_path = out_path / args.src.with_suffix(".lua").name
+                _build_file(comp, args.src, out_path, not args.no_fatal)
 
-            comp.compile_file(args.src, out_path=out_path)
-            print(f"[built] {args.src} -> {out_path}")
+    print(f"[{Fore.CYAN}done {Style.RESET_ALL}] Build done")
+    sys.exit(0)
