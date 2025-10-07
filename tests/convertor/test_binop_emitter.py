@@ -3,7 +3,7 @@ import ast
 import pytest
 
 from py2glua.convertor.binop_emitter import BinOpEmitter
-from py2glua.convertor.exceptions import CompileError
+from py2glua.exceptions import CompileError
 
 
 def test_simple_add():

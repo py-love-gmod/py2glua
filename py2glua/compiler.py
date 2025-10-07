@@ -4,10 +4,13 @@ import ast
 from pathlib import Path
 from typing import List
 
-from .convertor.assign_emitter import AssignEmitter
-from .convertor.binop_emitter import BinOpEmitter
-from .convertor.function_emitter import FunctionEmitter
-from .convertor.return_emitter import ReturnEmitter
+from .analyzer import NameGuard
+from .convertor import (
+    AssignEmitter,
+    BinOpEmitter,
+    FunctionEmitter,
+    ReturnEmitter,
+)
 
 
 def sha1_text(s: str) -> str:
@@ -68,12 +71,12 @@ class Compiler:
 
     def compile_str(self, code: str, *, module_name: str = "<memory>") -> str:
         tree = ast.parse(code, filename=module_name, mode="exec")
-        return self._emit_module(tree)
+        return self._emit_module(tree, filename=module_name)
 
     def compile_file(self, src_path: Path, *, out_path: Path | None = None) -> str:
         code = src_path.read_text(encoding="utf-8")
         tree = ast.parse(code, filename=str(src_path), mode="exec")
-        body = self._emit_module(tree)
+        body = self._emit_module(tree, filename=str(src_path))
 
         if not self.add_header:
             return body
@@ -93,8 +96,10 @@ class Compiler:
 
         return final
 
-    def _emit_module(self, module: ast.Module) -> str:
+    def _emit_module(self, module: ast.Module, filename: str | None = None) -> str:
         lines: List[str] = []
+        NameGuard().validate(module, filename=filename)
+
         for node in module.body:
             if isinstance(node, ast.FunctionDef):
                 lines.append(self.func_emitter.emit(node, indent=0))

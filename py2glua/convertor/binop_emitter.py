@@ -1,7 +1,7 @@
 import ast
 
 from .base_emitter import NodeEmitter
-from .exceptions import CompileError
+from ..exceptions import CompileError
 
 
 class BinOpEmitter(NodeEmitter):

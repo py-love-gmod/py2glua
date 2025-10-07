@@ -10,7 +10,7 @@ def add(a, b):
     return c
 """
     lua = Compiler(add_header=False).compile_str(code)
-    expected = "function add(a, b)\n    local c = a + b\n    return c\nend\n"
+    expected = "local function add(a, b)\n    local c = a + b\n    return c\nend\n"
     assert lua == expected
 
 
