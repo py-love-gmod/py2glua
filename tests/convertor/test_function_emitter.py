@@ -13,15 +13,11 @@ def _fn_node(src: str) -> ast.FunctionDef:
 
 
 def test_function_assign_and_return():
-    src = """
-def add(a, b):
-    c = a + b
-    return c
-"""
+    src = "def add(a, b):\n    c = a + b\n    return c"
     node = _fn_node(src)
     e = FunctionEmitter()
     result = e.emit(node)
-    expected = "function add(a, b)\n    local c = a + b\n    return c\nend"
+    expected = "local function add(a, b)\n    local c = a + b\n    return c\nend"
     assert result == expected
 
 
@@ -34,23 +30,25 @@ def mul(a, b):
     node = _fn_node(src)
     e = FunctionEmitter()
     result = e.emit(node, indent=1)
-    expected = (
-        "    function mul(a, b)\n        local d = a * b\n        return d\n    end"
-    )
+    expected = "    local function mul(a, b)\n        local d = a * b\n        return d\n    end"
     assert result == expected
 
 
 def test_ignores_non_supported_stmts_expr_and_pass():
-    src = """
-def foo():
-    print("x")
-    a = 1
-    pass
-    return a
-"""
+    src = 'def foo():\n    print("x")\n    a = 1\n    pass\n    return a'
     node = _fn_node(src)
     e = FunctionEmitter()
     result = e.emit(node)
-    expected = "function foo()\n    local a = 1\n    return a\nend"
+    expected = "local function foo()\n    local a = 1\n    return a\nend"
+    assert result == expected
+    assert "print" not in result
+
+
+def test_assert_in_def():
+    src = "def foo(x: int):\n    a = 1\n    return a"
+    node = _fn_node(src)
+    e = FunctionEmitter()
+    result = e.emit(node)
+    expected = 'local function foo(x)\n    assert(type(x) == "number", "x must be int")\n    local a = 1\n    return a\nend'
     assert result == expected
     assert "print" not in result

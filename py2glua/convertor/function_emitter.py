@@ -26,7 +26,7 @@ class FunctionEmitter(NodeEmitter):
                 lines.append(self.ret.emit(stmt, indent + 1))
 
         body = "\n".join(lines)
-        return f"{self._indent(indent)}function {node.name}({args})\n{body}\n{self._indent(indent)}end"
+        return f"{self._indent(indent)}local function {node.name}({args})\n{body}\n{self._indent(indent)}end"
 
     def _generate_type_checks(self, node: ast.FunctionDef, indent: int) -> list[str]:
         checks = []
