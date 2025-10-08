@@ -29,7 +29,7 @@ def _safe_version() -> str:
         return version("py2glua")
 
     except PackageNotFoundError:
-        return "0.0.0-dev"
+        return "dev"
 
 
 def _build_logger(debug: bool) -> logging.Logger:
@@ -64,8 +64,8 @@ def main() -> None:
     args = parser.parse_args()
 
     logger = _build_logger(args.debug)
-    logger.debug("py2glua")
-    logger.debug(f"Version: {_safe_version()}")
+    logger.debug("[cli] py2glua")
+    logger.debug(f"[cli] Version: {_safe_version()}")
 
     sys.exit(0)
 
