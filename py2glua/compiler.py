@@ -107,6 +107,9 @@ class Compiler:
             elif isinstance(node, ast.Assign):
                 lines.append(self.assign_emitter.emit(node, indent=0))
 
+            elif isinstance(node, ast.AnnAssign):
+                lines.append(self.assign_emitter.emit(node, indent=0))
+
             elif isinstance(node, ast.Expr):
                 pass
 

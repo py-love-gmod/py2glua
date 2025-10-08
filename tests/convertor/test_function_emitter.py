@@ -52,3 +52,12 @@ def test_assert_in_def():
     expected = 'local function foo(x)\n    assert(type(x) == "number", "x must be int")\n    local a = 1\n    return a\nend'
     assert result == expected
     assert "print" not in result
+
+
+def test_global_function_decorator():
+    src = "@Global.func\ndef foo():\n    return 1"
+    node = _fn_node(src)
+    e = FunctionEmitter()
+    result = e.emit(node)
+    expected = "function foo()\n    return 1\nend"
+    assert result == expected

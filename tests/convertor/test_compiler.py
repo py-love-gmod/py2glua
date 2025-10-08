@@ -51,3 +51,25 @@ def test_compiled_function_body(tmp_path: Path):
     assert "local d = a * b" in text
     assert "return d" in text
     assert text.strip().endswith("end")
+
+
+def test_compile_globals_handling():
+    code = """
+@Global.func
+def greet(name):
+    return name
+
+counter = Global.mark_var(0)
+limit: Global = 10
+"""
+    lua = Compiler(add_header=False).compile_str(code)
+    expected = (
+        "function greet(name)\n"
+        "    return name\n"
+        "end\n"
+        "\n"
+        "counter = 0\n"
+        "\n"
+        "limit = 10\n"
+    )
+    assert lua == expected

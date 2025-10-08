@@ -1,6 +1,6 @@
 import ast
 
-from ..glua import TYPE_REGISTRY
+from ..glua import Global, TYPE_REGISTRY
 from .assign_emitter import AssignEmitter
 from .base_emitter import NodeEmitter
 from .return_emitter import ReturnEmitter
@@ -26,7 +26,12 @@ class FunctionEmitter(NodeEmitter):
                 lines.append(self.ret.emit(stmt, indent + 1))
 
         body = "\n".join(lines)
-        return f"{self._indent(indent)}local function {node.name}({args})\n{body}\n{self._indent(indent)}end"
+        prefix = "" if self._is_global_function(node) else "local "
+        return (
+            f"{self._indent(indent)}{prefix}function {node.name}({args})\n"
+            f"{body}\n"
+            f"{self._indent(indent)}end"
+        )
 
     def _generate_type_checks(self, node: ast.FunctionDef, indent: int) -> list[str]:
         checks = []
@@ -38,3 +43,7 @@ class FunctionEmitter(NodeEmitter):
                     checks.append(self._indent(indent) + cls.lua_check(arg.arg))
 
         return checks
+
+    @staticmethod
+    def _is_global_function(node: ast.FunctionDef) -> bool:
+        return any(Global.is_func_decorator(dec) for dec in node.decorator_list)
