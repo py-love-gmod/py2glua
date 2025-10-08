@@ -5,7 +5,7 @@ from pathlib import Path
 logger = logging.getLogger("py2glua")
 
 SYN_ERR_MSG = """
-[astc] Синтаксическая ошибка при предкомпиляции:
+[astb] Синтаксическая ошибка при предкомпиляции:
 Path         : {path}
 Line | Offset: {line_number} | {line_offset}
 Msg          : {msg}
@@ -13,7 +13,7 @@ Source       : {source_line}
 """
 
 
-class ASTConvertor:
+class ASTBuilder:
     @staticmethod
     def load_from_file(path: Path) -> ast.Module | None:
         """Создаёт AST-модель из Python-файла.
@@ -27,27 +27,27 @@ class ASTConvertor:
             ast.Module | None: дерево модуля или None при ошибке
         """
         if not path.exists():
-            logger.warning(f"[astc] '{path}' не существует")
+            logger.warning(f"[astb] '{path}' не существует")
             return None
 
         if path.suffix.lower() != ".py":
-            logger.warning(f"[astc] '{path}' не является Python-файлом")
+            logger.warning(f"[astb] '{path}' не является Python-файлом")
             return None
 
         try:
             source = path.read_text(encoding="utf-8-sig")
 
         except UnicodeDecodeError as err:
-            logger.error(f"[astc] Ошибка декодирования файла '{path}': {err}")
+            logger.error(f"[astb] Ошибка декодирования файла '{path}': {err}")
             return None
 
         except Exception as err:
-            logger.error(f"[astc] Ошибка чтения файла '{path}': {err}")
+            logger.error(f"[astb] Ошибка чтения файла '{path}': {err}")
             return None
 
         try:
             ast_struct = ast.parse(source, filename=str(path))
-        
+
         except SyntaxError as err:
             source_line = (err.text or "").strip() if err.text else ""
             logger.error(
@@ -62,7 +62,7 @@ class ASTConvertor:
             return None
 
         except Exception as err:
-            logger.exception(f"[astc] Не удалось разобрать AST для '{path}': {err}")
+            logger.exception(f"[astb] Не удалось разобрать AST для '{path}': {err}")
             return None
 
         return ast_struct

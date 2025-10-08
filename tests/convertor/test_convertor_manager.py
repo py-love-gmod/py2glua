@@ -10,6 +10,6 @@ def test_convertor_manager_registratiron():
         pass
 
     assert isinstance(
-        ConvertorManager.get(ast.Assign(targets=[], value=None)),  # type: ignore
+        ConvertorManager.get(ast.parse("x = 1").body[0]),
         BaseConvertor,
     )
