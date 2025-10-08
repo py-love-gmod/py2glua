@@ -1,3 +1,4 @@
+import argparse
 import logging
 import sys
 from importlib.metadata import PackageNotFoundError, version
@@ -23,13 +24,6 @@ class ColorFormater(logging.Formatter):
         return super().format(record)
 
 
-logger = logging.getLogger("py2glua")
-logger.setLevel(logging.DEBUG)
-handler = logging.StreamHandler()
-handler.setFormatter(ColorFormater("[%(levelname)s]: %(message)s"))
-logger.addHandler(handler)
-
-
 def _safe_version() -> str:
     try:
         return version("py2glua")
@@ -38,7 +32,38 @@ def _safe_version() -> str:
         return "0.0.0-dev"
 
 
+def _build_logger(debug: bool) -> logging.Logger:
+    logger = logging.getLogger("py2glua")
+
+    logger.setLevel(logging.DEBUG if debug else logging.INFO)
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(ColorFormater("[%(levelname)s]: %(message)s"))
+    logger.addHandler(handler)
+
+    return logger
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="py2glua",
+        description="Утилита для компиляции python -> glua",
+    )
+
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Переключает логи на более расширенный вывод",
+    )
+
+    return parser
+
+
 def main() -> None:
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    logger = _build_logger(args.debug)
     logger.debug("py2glua")
     logger.debug(f"Version: {_safe_version()}")
 
