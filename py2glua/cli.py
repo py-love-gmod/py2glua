@@ -2,8 +2,11 @@ import argparse
 import logging
 import sys
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 from colorama import Fore, Style, init
+
+from .compiler import Compiler
 
 init(autoreset=True)
 
@@ -56,6 +59,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Переключает логи на более расширенный вывод",
     )
 
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # команда build
+    build_parser = subparsers.add_parser("build", help="Компилирует проект")
+    build_parser.add_argument(
+        "source",
+        type=Path,
+        help="Путь к директории с исходными .py файлами",
+    )
+    build_parser.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        default=None,
+        help="Путь для сохранения результата (если не указан - печать в консоль)",
+    )
+
     return parser
 
 
@@ -66,6 +86,12 @@ def main() -> None:
     logger = _build_logger(args.debug)
     logger.debug("[cli] py2glua")
     logger.debug(f"[cli] Version: {_safe_version()}")
+
+    if args.command == "build":
+        logger.info("[cli] Запуск компиляции...")
+        compiler = Compiler(args.source, args.output)
+        compiler.run()
+        logger.info("[cli] Компиляция завершена")
 
     sys.exit(0)
 
