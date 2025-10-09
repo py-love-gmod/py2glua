@@ -4,7 +4,6 @@ from pathlib import Path
 logger = logging.getLogger("py2glua")
 
 
-# TODO: Доделать
 class Compiler:
     @classmethod
     def rgrob_files(cls, source: Path) -> list[Path] | None:
