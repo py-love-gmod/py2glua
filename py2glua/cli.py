@@ -1,5 +1,6 @@
 import argparse
 import logging
+import shutil
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -101,7 +102,7 @@ def _build(src: Path, out: Path) -> None:
 
 
 def _clean_build(src: Path) -> None:
-    logger.critical("NotImplemented, cli:_clean_build")
+    shutil.rmtree(src)
 
 
 def main() -> None:
