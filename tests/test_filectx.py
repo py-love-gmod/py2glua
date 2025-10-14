@@ -48,10 +48,70 @@ def test_resolve_imports_simple():
     """)
 
     ctx.file_ast = ast.parse(src)
+    ctx.file_path = Path("dummy.py")
     ctx._resolve_imports()
     code = ast.unparse(ctx.file_ast)
     assert "a.b.foo" in code
     assert "x.y.z" in code
+
+
+def test_resolve_imports_relative(tmp_path: Path):
+    pkg = tmp_path / "mypkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "sub.py").write_text("def foo(): pass")
+    (tmp_path / "other.py").write_text("def bar(): pass")
+
+    src = textwrap.dedent("""
+        from .sub import foo
+        from ..other import bar
+        foo()
+        bar()
+    """)
+
+    ctx = FileCTX()
+    ctx.file_ast = ast.parse(src)
+    ctx.file_path = pkg / "__init__.py"
+    ctx._resolve_imports()
+
+    code = ast.unparse(ctx.file_ast)
+
+    assert "mypkg.sub.foo" in code
+    assert "other.bar" in code
+
+
+def test_build_file_imports(tmp_path: Path):
+    pkg = tmp_path / "mypkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "sub.py").write_text("def foo(): pass")
+    (tmp_path / "other.py").write_text("def bar(): pass")
+
+    src = textwrap.dedent("""
+        import sys
+        import logging
+        import mypkg.sub as sub
+        import other
+        sub.foo()
+        other.bar()
+    """)
+
+    ctx = FileCTX()
+    ctx.file_ast = ast.parse(src)
+    ctx.file_path = pkg / "__init__.py"
+
+    ctx._resolve_imports()
+    ctx._build_file_imports(source_path=tmp_path)
+
+    kinds = {imp.split("|")[0] for imp in ctx.file_imports}
+    names = {imp.split("|")[1] for imp in ctx.file_imports}
+
+    assert "std" in kinds
+    assert "loc" in kinds
+    assert "sys" in names
+    assert "logging" in names
+    assert "mypkg" in names
+    assert "other" in names
 
 
 def test_remove_main_block():
