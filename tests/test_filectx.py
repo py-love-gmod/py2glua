@@ -312,3 +312,28 @@ def test_filectx_full_integration(tmp_path: Path):
     code = ast.unparse(ctx.file_ast)
     assert "__realm__" not in code
     assert "__priority__" not in code
+
+
+def test_collect_globals_var_only_on_creation(tmp_path: Path):
+    src_file = tmp_path / "globals_existing.py"
+    src_file.write_text(
+        textwrap.dedent("""
+        from py2glua import Global
+
+        x = 123
+        x = Global.var("321")
+        y = Global.var("y")
+    """)
+    )
+
+    ctx = FileCTX()
+    ctx.build(src_file, tmp_path)
+
+    globals_set = ctx.file_globals
+    assert "var|x" not in globals_set
+    assert "var|y" in globals_set
+    assert len(globals_set) == 1
+
+    code = ast.unparse(ctx.file_ast)
+    assert "x = 123" in code
+    assert "y = 'y'" in code or 'y = "y"' in code

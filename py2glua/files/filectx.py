@@ -379,42 +379,87 @@ class FileCTX:
         class GlobalCollector(ast.NodeTransformer):
             def __init__(self, outer: "FileCTX"):
                 self.outer = outer
+                self.declared: set[str] = set()
                 super().__init__()
 
-            def _handle_global_var(self, node: ast.Call, targets: list[ast.AST]):
+            def _handle_global_var(self, node: ast.Call, targets: list[ast.Name]):
                 if len(node.args) != 1:
                     logger.warning(
-                        f"[FileCTX build] Global.var() called with {len(node.args)} arguments.\n"
-                        f"PATH: {self.outer.file_path}\n"
-                        f"LINE|OFFSET: {node.lineno}|{node.col_offset}"
+                        f"[FileCTX build] Global.var() called with {len(node.args)} argument(s).\n"
+                        f"PATH: {self.outer.file_path}\nLINE|OFFSET: {node.lineno}|{node.col_offset}"
                     )
                     return
 
                 for t in targets:
-                    if isinstance(t, ast.Name):
-                        self.outer.file_globals.add(f"var|{t.id}")
+                    self.outer.file_globals.add(f"var|{t.id}")
 
             def visit_Assign(self, node: ast.Assign):
+                name_targets = [t for t in node.targets if isinstance(t, ast.Name)]
+
                 if isinstance(node.value, ast.Call):
                     func_name = get_full_attr_name(node.value.func)
                     if func_name and func_name.endswith("Global.var"):
-                        self._handle_global_var(node.value, node.targets)  # type: ignore
-                        if len(node.value.args) == 1 and isinstance(
-                            node.value.args[0], ast.Constant
-                        ):
-                            node.value = node.value.args[0]
+                        if not name_targets:
+                            logger.warning(
+                                f"[FileCTX build] Global.var used in complex assignment (no simple Name targets), skipping.\n"
+                                f"PATH: {self.outer.file_path}\nLINE|OFFSET: {node.lineno}|{node.col_offset}"
+                            )
+
+                        else:
+                            already = [
+                                t.id for t in name_targets if t.id in self.declared
+                            ]
+                            if already:
+                                logger.warning(
+                                    f"[FileCTX build] Global.var called for already declared variable(s): {already}. Ignoring Global.var. "
+                                    f"PATH: {self.outer.file_path}\nLINE|OFFSET: {node.lineno}|{node.col_offset}"
+                                )
+
+                            else:
+                                self._handle_global_var(node.value, name_targets)
+                                if len(node.value.args) == 1 and isinstance(
+                                    node.value.args[0], ast.Constant
+                                ):
+                                    node.value = node.value.args[0]
+
+                for t in name_targets:
+                    self.declared.add(t.id)
 
                 return node
 
             def visit_AnnAssign(self, node: ast.AnnAssign):
+                target_name = (
+                    node.target.id if isinstance(node.target, ast.Name) else None
+                )
+
                 if isinstance(node.value, ast.Call):
                     func_name = get_full_attr_name(node.value.func)
                     if func_name and func_name.endswith("Global.var"):
-                        self._handle_global_var(node.value, [node.target])
-                        if len(node.value.args) == 1 and isinstance(
-                            node.value.args[0], ast.Constant
-                        ):
-                            node.value = node.value.args[0]
+                        if target_name is None:
+                            logger.warning(
+                                f"[FileCTX build] Global.var used in annotated complex target, skipping.\n"
+                                f"PATH: {self.outer.file_path}\nLINE|OFFSET: {node.lineno}|{node.col_offset}"
+                            )
+
+                        else:
+                            if target_name in self.declared:
+                                logger.warning(
+                                    f"[FileCTX build] Global.var called for already declared variable: {target_name}. Ignoring Global.var. "
+                                    f"PATH: {self.outer.file_path}\nLINE|OFFSET: {node.lineno}|{node.col_offset}"
+                                )
+
+                            else:
+                                fake_name_node = ast.Name(
+                                    id=target_name, ctx=ast.Store()
+                                )
+                                self._handle_global_var(node.value, [fake_name_node])
+                                if len(node.value.args) == 1 and isinstance(
+                                    node.value.args[0], ast.Constant
+                                ):
+                                    node.value = node.value.args[0]
+
+                if target_name:
+                    self.declared.add(target_name)
 
                 return node
 
@@ -430,6 +475,8 @@ class FileCTX:
                     new_decorators.append(dec)
 
                 node.decorator_list = new_decorators
+
+                self.declared.add(node.name)
                 return node
 
             def visit_ClassDef(self, node: ast.ClassDef):
@@ -444,9 +491,11 @@ class FileCTX:
                     new_decorators.append(dec)
 
                 node.decorator_list = new_decorators
+
+                self.declared.add(node.name)
                 return node
 
         self.file_ast = GlobalCollector(self).visit(self.file_ast)
         ast.fix_missing_locations(self.file_ast)
 
-    # endregion
+        # endregion
