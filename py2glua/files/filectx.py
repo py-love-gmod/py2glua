@@ -149,7 +149,7 @@ class _NameRewriter(ast.NodeTransformer):
 
 
 class _MagicIntResult(NamedTuple):
-    value: int | ast.Attribute
+    value: int
     lineno: int
     col_offset: int
 
@@ -165,7 +165,7 @@ class FileCTX:
         # analyze
         self.file_realm: Realm
         self.file_priority: int
-        self.file_globals: set[str] = set()  # TODO:
+        self.file_globals: set[str] = set()
         self.file_imports: set[str] = set()
 
     def build(self, path: Path, source_path: Path) -> None:
@@ -176,7 +176,7 @@ class FileCTX:
         self._build_file_imports(source_path)
         self.file_realm = self._get_realm()
         self.file_priority = self._get_priority()
-        self._cleanup_magic_ints(("__realm___", "__priority__"))
+        self._collect_globals()
         self._remove_enter_point()
 
     def _load_ast(self, path: Path) -> bool:
@@ -200,17 +200,6 @@ class FileCTX:
 
     # region imports
     def _resolve_imports(self) -> None:
-        """
-        `import a.b as c` -> `import a`
-
-        `from x.y import z as w` -> `import x`
-
-        Все обращения к локальным алиасам (`c`, `w`) заменяем на полную цепочку
-
-        `c.foo` -> `a.b.foo`
-
-        `w()` -> `x.y.z()`
-        """
         if self.file_ast is None:
             return
 
@@ -223,7 +212,7 @@ class FileCTX:
         self.file_ast = rewriter.visit(self.file_ast)
         ast.fix_missing_locations(self.file_ast)
 
-    def _build_file_imports(self, source_path) -> None:
+    def _build_file_imports(self, source_path: Path) -> None:
         imports: set[str] = set()
 
         for node in ast.walk(self.file_ast):
@@ -255,13 +244,13 @@ class FileCTX:
         self.file_ast = MainBlockRemover().visit(self.file_ast)
         ast.fix_missing_locations(self.file_ast)
 
-    def _cleanup_magic_ints(self, names: tuple[str, ...]) -> None:
+    def _cleanup_magic_int(self, name: str) -> None:
         class MagicRemover(ast.NodeTransformer):
             def visit_Assign(self, node: ast.Assign):
                 new_targets = [
                     t
                     for t in node.targets
-                    if not (isinstance(t, ast.Name) and t.id in names)
+                    if not (isinstance(t, ast.Name) and t.id == name)
                 ]
                 if not new_targets:
                     return None
@@ -275,6 +264,46 @@ class FileCTX:
     # endregion
 
     # region magic int for file
+    def _get_full_attr_name(self, node: ast.AST) -> str | None:
+        if isinstance(node, ast.Name):
+            return node.id
+
+        if isinstance(node, ast.Attribute):
+            parent = self._get_full_attr_name(node.value)
+            if parent is None:
+                return None
+
+            return f"{parent}.{node.attr}"
+
+        return None
+
+    def _resolve_enum_attr_to_int(self, node: ast.Attribute) -> int | None:
+        full = self._get_full_attr_name(node)
+        if not full:
+            return None
+
+        parts = full.split(".")
+        if len(parts) < 2:
+            return None
+
+        root, attr = parts[-2], parts[-1]
+
+        if root == "Realm":
+            try:
+                return getattr(Realm, attr).value
+
+            except AttributeError:
+                return None
+
+        if root == "Priority":
+            try:
+                return getattr(Priority, attr).value
+
+            except AttributeError:
+                return None
+
+        return None
+
     def _extract_magic_int(self, name: str) -> _MagicIntResult | None:
         for node in ast.walk(self.file_ast):
             if not isinstance(node, ast.Assign):
@@ -293,12 +322,14 @@ class FileCTX:
                         col_offset=node.value.col_offset,
                     )
 
-                elif isinstance(node.value, ast.Attribute):
-                    return _MagicIntResult(
-                        value=node.value,
-                        lineno=node.value.lineno,
-                        col_offset=node.value.col_offset,
-                    )
+                if isinstance(node.value, ast.Attribute):
+                    resolved = self._resolve_enum_attr_to_int(node.value)
+                    if resolved is not None:
+                        return _MagicIntResult(
+                            value=resolved,
+                            lineno=node.value.lineno,
+                            col_offset=node.value.col_offset,
+                        )
 
         return None
 
@@ -306,17 +337,18 @@ class FileCTX:
         res = self._extract_magic_int("__realm__")
         if res is None:
             logger.warning(
-                f"[FileCTX build] empty __realm__ value for file. Set to Realm.Server\nPATH: {self.file_path}"
+                f"[FileCTX build] empty __realm__ value for file. Set to Realm.SERVER\nPATH: {getattr(self, 'file_path', None)}"
             )
             return Realm.SERVER
 
-        val = res.value if isinstance(res.value, int) else 0
+        val = res.value
         if val < 1 or val > 3:
             logger.error(
-                f"[FileCTX build] invalid __realm__. Set to Realm.Server\nPATH: {self.file_path}\nLINE|OFFSET: {res.lineno}|{res.col_offset}"
+                f"[FileCTX build] invalid __realm__. Set to Realm.SERVER\nPATH: {getattr(self, 'file_path', None)}\nLINE|OFFSET: {res.lineno}|{res.col_offset}"
             )
             return Realm.SERVER
 
+        self._cleanup_magic_int("__realm__")
         return Realm(val)
 
     def _get_priority(self) -> int:
@@ -324,7 +356,97 @@ class FileCTX:
         if res is None:
             return Priority.MEDIUM.value
 
-        val = res.value if isinstance(res.value, int) else Priority.MEDIUM.value
-        return int(val)
+        val = res.value
+        try:
+            ival = int(val)
+
+        except Exception:
+            ival = Priority.MEDIUM.value
+
+        self._cleanup_magic_int("__priority__")
+        return ival
+
+    # endregion
+
+    # region globals
+
+    def _collect_globals(self) -> None:
+        self.file_globals = set()
+
+        def get_full_attr_name(node: ast.AST) -> str | None:
+            return self._get_full_attr_name(node)
+
+        class GlobalCollector(ast.NodeTransformer):
+            def __init__(self, outer: "FileCTX"):
+                self.outer = outer
+                super().__init__()
+
+            def _handle_global_var(self, node: ast.Call, targets: list[ast.AST]):
+                if len(node.args) != 1:
+                    logger.warning(
+                        f"[FileCTX build] Global.var() called with {len(node.args)} arguments.\n"
+                        f"PATH: {self.outer.file_path}\n"
+                        f"LINE|OFFSET: {node.lineno}|{node.col_offset}"
+                    )
+                    return
+
+                for t in targets:
+                    if isinstance(t, ast.Name):
+                        self.outer.file_globals.add(f"var|{t.id}")
+
+            def visit_Assign(self, node: ast.Assign):
+                if isinstance(node.value, ast.Call):
+                    func_name = get_full_attr_name(node.value.func)
+                    if func_name and func_name.endswith("Global.var"):
+                        self._handle_global_var(node.value, node.targets)  # type: ignore
+                        if len(node.value.args) == 1 and isinstance(
+                            node.value.args[0], ast.Constant
+                        ):
+                            node.value = node.value.args[0]
+
+                return node
+
+            def visit_AnnAssign(self, node: ast.AnnAssign):
+                if isinstance(node.value, ast.Call):
+                    func_name = get_full_attr_name(node.value.func)
+                    if func_name and func_name.endswith("Global.var"):
+                        self._handle_global_var(node.value, [node.target])
+                        if len(node.value.args) == 1 and isinstance(
+                            node.value.args[0], ast.Constant
+                        ):
+                            node.value = node.value.args[0]
+
+                return node
+
+            def visit_FunctionDef(self, node: ast.FunctionDef):
+                new_decorators = []
+                for dec in node.decorator_list:
+                    if isinstance(dec, ast.Call):
+                        func_name = get_full_attr_name(dec.func)
+                        if func_name and func_name.endswith("Global.mark"):
+                            self.outer.file_globals.add(f"func|{node.name}")
+                            continue
+
+                    new_decorators.append(dec)
+
+                node.decorator_list = new_decorators
+                return node
+
+            def visit_ClassDef(self, node: ast.ClassDef):
+                new_decorators = []
+                for dec in node.decorator_list:
+                    if isinstance(dec, ast.Call):
+                        func_name = get_full_attr_name(dec.func)
+                        if func_name and func_name.endswith("Global.mark"):
+                            self.outer.file_globals.add(f"class|{node.name}")
+                            continue
+
+                    new_decorators.append(dec)
+
+                node.decorator_list = new_decorators
+                return node
+
+        self.file_ast = GlobalCollector(self).visit(self.file_ast)
+        ast.fix_missing_locations(self.file_ast)
 
     # endregion

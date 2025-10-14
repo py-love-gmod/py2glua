@@ -159,6 +159,23 @@ def test_get_realm_invalid(caplog):
     assert "invalid __realm__" in caplog.text
 
 
+def test_get_realm_shared_enum(tmp_path: Path):
+    src_file = tmp_path / "realm_enum_shared.py"
+    src_file.write_text(
+        textwrap.dedent("""
+        from py2glua.runtime import Realm
+        __realm__ = Realm.SHARED
+        """)
+    )
+
+    ctx = FileCTX()
+    ctx.build(src_file, tmp_path)
+
+    assert ctx.file_realm == Realm.SHARED
+    code = ast.unparse(ctx.file_ast)
+    assert "__realm__" not in code
+
+
 def test_get_priority_present():
     ctx = FileCTX()
     ctx.file_ast = ast.parse("__priority__ = 10")
@@ -174,8 +191,124 @@ def test_get_priority_missing():
 def test_cleanup_magic_ints_removes():
     ctx = FileCTX()
     ctx.file_ast = ast.parse("__realm__ = 1\n__priority__ = 2\nx = 3")
-    ctx._cleanup_magic_ints(("__realm__", "__priority__"))
+    for name in ["__realm__", "__priority__"]:
+        ctx._cleanup_magic_int(name)
+
     code = ast.unparse(ctx.file_ast)
     assert "__realm__" not in code
     assert "__priority__" not in code
     assert "x = 3" in code
+
+
+def test_collect_globals_functions_and_classes(tmp_path: Path):
+    src_file = tmp_path / "a.py"
+    src_file.write_text(
+        textwrap.dedent("""
+        from py2glua import Global
+
+        @Global.mark()
+        def my_func(): pass
+
+        @Global.mark()
+        class MyClass: pass
+
+        x = Global.var(1)
+        y = Global.var(2)
+    """)
+    )
+
+    ctx = FileCTX()
+    ctx.build(src_file, tmp_path)
+
+    globals_set = ctx.file_globals
+    assert "func|my_func" in globals_set
+    assert "class|MyClass" in globals_set
+    assert "var|x" in globals_set
+    assert "var|y" in globals_set
+    assert len(globals_set) == 4
+
+
+def test_collect_globals_after_import_normalization(tmp_path: Path):
+    src_file = tmp_path / "a.py"
+    src_file.write_text(
+        textwrap.dedent("""
+        import py2glua as pg
+
+        @pg.Global.mark()
+        def f(): pass
+
+        @pg.Global.mark()
+        class C: pass
+
+        a = pg.Global.var(1)
+    """)
+    )
+
+    ctx = FileCTX()
+    ctx.build(src_file, tmp_path)
+
+    globals_set = ctx.file_globals
+    assert "func|f" in globals_set
+    assert "class|C" in globals_set
+    assert "var|a" in globals_set
+
+
+def test_collect_globals_var_with_argument(tmp_path: Path, caplog):
+    src_file = tmp_path / "globals_arg.py"
+    src_file.write_text(
+        textwrap.dedent("""
+        from py2glua import Global
+
+        x = Global.var("my_var")
+        y = Global.var()
+        z = Global.var("a", "b")
+    """)
+    )
+
+    ctx = FileCTX()
+    with caplog.at_level(logging.WARNING):
+        ctx.build(src_file, tmp_path)
+
+    globals_set = ctx.file_globals
+    assert "var|x" in globals_set
+    assert "var|y" not in globals_set
+    assert "var|z" not in globals_set
+
+
+def test_filectx_full_integration(tmp_path: Path):
+    src_file = tmp_path / "full.py"
+    src_file.write_text(
+        textwrap.dedent("""
+        from py2glua.runtime import Realm
+        from py2glua import Global
+
+        __realm__ = Realm.CLIENT
+        __priority__ = 5
+
+        @Global.mark()
+        def my_func(): pass
+
+        @Global.mark()
+        class MyClass: pass
+
+        a = Global.var(1)
+        b = Global.var(2)
+    """)
+    )
+
+    ctx = FileCTX()
+    ctx.build(src_file, tmp_path)
+
+    assert ctx.file_realm == Realm.CLIENT
+    assert ctx.file_priority == 5
+
+    globals_set = ctx.file_globals
+    assert "func|my_func" in globals_set
+    assert "class|MyClass" in globals_set
+    assert "var|a" in globals_set
+    assert "var|b" in globals_set
+    assert len(globals_set) == 4
+
+    code = ast.unparse(ctx.file_ast)
+    assert "__realm__" not in code
+    assert "__priority__" not in code
