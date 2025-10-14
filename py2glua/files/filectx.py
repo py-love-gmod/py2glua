@@ -198,8 +198,7 @@ class FileCTX:
 
         return False
 
-    # region cleanup file
-
+    # region imports
     def _resolve_imports(self) -> None:
         """
         `import a.b as c` -> `import a`
@@ -223,6 +222,23 @@ class FileCTX:
         rewriter = _NameRewriter(local_to_parts)
         self.file_ast = rewriter.visit(self.file_ast)
         ast.fix_missing_locations(self.file_ast)
+
+    def _build_file_imports(self, source_path) -> None:
+        imports: set[str] = set()
+
+        for node in ast.walk(self.file_ast):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    full_name = alias.name
+                    top_module = full_name.split(".")[0]
+                    kind = _classify_import(top_module, source_path)
+                    imports.add(f"{kind}|{full_name}")
+
+        self.file_imports = imports
+
+    # endregion
+
+    # region cleanup file
 
     def _remove_enter_point(self) -> None:
         class MainBlockRemover(ast.NodeTransformer):
@@ -312,16 +328,3 @@ class FileCTX:
         return int(val)
 
     # endregion
-
-    def _build_file_imports(self, source_path) -> None:
-        imports: set[str] = set()
-
-        for node in ast.walk(self.file_ast):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    full_name = alias.name
-                    top_module = full_name.split(".")[0]
-                    kind = _classify_import(top_module, source_path)
-                    imports.add(f"{kind}|{full_name}")
-
-        self.file_imports = imports
