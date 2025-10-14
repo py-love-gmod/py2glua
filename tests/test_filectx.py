@@ -1,8 +1,10 @@
 import ast
-import logging
 import textwrap
 from pathlib import Path
 
+import pytest
+
+from py2glua.exceptions import CompileError
 from py2glua.file_meta import Priority
 from py2glua.files.filectx import FileCTX, _MagicIntResult
 from py2glua.runtime import Realm
@@ -12,30 +14,25 @@ def test_load_ast_success(tmp_path: Path):
     src = tmp_path / "a.py"
     src.write_text("x = 1")
     ctx = FileCTX()
-    assert ctx._load_ast(src)
+    ctx._load_ast(src)
     assert isinstance(ctx.file_ast, ast.Module)
     assert ctx.file_path == src
 
 
-def test_load_ast_nonexistent(tmp_path: Path, caplog):
+def test_load_ast_nonexistent(tmp_path: Path):
     bad = tmp_path / "nope.py"
     ctx = FileCTX()
-    with caplog.at_level(logging.ERROR):
-        ok = ctx._load_ast(bad)
-
-    assert not ok
-    assert "file dont exists" in caplog.text
+    with pytest.raises(CompileError):
+        ctx._load_ast(bad)
 
 
-def test_load_ast_wrong_ext(tmp_path: Path, caplog):
+def test_load_ast_wrong_ext(tmp_path: Path):
     bad = tmp_path / "x.txt"
     bad.write_text("meh")
     ctx = FileCTX()
-    with caplog.at_level(logging.ERROR):
-        ok = ctx._load_ast(bad)
 
-    assert not ok
-    assert "not a .py file" in caplog.text
+    with pytest.raises(CompileError):
+        ctx._load_ast(bad)
 
 
 def test_resolve_imports_simple():
@@ -148,15 +145,12 @@ def test_get_realm_valid(monkeypatch):
     assert ctx._get_realm().value == 2
 
 
-def test_get_realm_invalid(caplog):
+def test_get_realm_invalid():
     ctx = FileCTX()
     ctx.file_path = Path("dummy.py")
     ctx.file_ast = ast.parse("__realm__ = 99")
-    with caplog.at_level(logging.ERROR):
-        val = ctx._get_realm()
-
-    assert val.value == Realm.SERVER.value
-    assert "invalid __realm__" in caplog.text
+    with pytest.raises(CompileError):
+        ctx._get_realm()
 
 
 def test_get_realm_shared_enum(tmp_path: Path):
@@ -253,7 +247,7 @@ def test_collect_globals_after_import_normalization(tmp_path: Path):
     assert "var|a" in globals_set
 
 
-def test_collect_globals_var_with_argument(tmp_path: Path, caplog):
+def test_collect_globals_var_with_argument(tmp_path: Path):
     src_file = tmp_path / "globals_arg.py"
     src_file.write_text(
         textwrap.dedent("""
@@ -266,13 +260,8 @@ def test_collect_globals_var_with_argument(tmp_path: Path, caplog):
     )
 
     ctx = FileCTX()
-    with caplog.at_level(logging.WARNING):
+    with pytest.raises(CompileError):
         ctx.build(src_file, tmp_path)
-
-    globals_set = ctx.file_globals
-    assert "var|x" in globals_set
-    assert "var|y" not in globals_set
-    assert "var|z" not in globals_set
 
 
 def test_filectx_full_integration(tmp_path: Path):
@@ -327,13 +316,5 @@ def test_collect_globals_var_only_on_creation(tmp_path: Path):
     )
 
     ctx = FileCTX()
-    ctx.build(src_file, tmp_path)
-
-    globals_set = ctx.file_globals
-    assert "var|x" not in globals_set
-    assert "var|y" in globals_set
-    assert len(globals_set) == 1
-
-    code = ast.unparse(ctx.file_ast)
-    assert "x = 123" in code
-    assert "y = 'y'" in code or 'y = "y"' in code
+    with pytest.raises(CompileError):
+        ctx.build(src_file, tmp_path)

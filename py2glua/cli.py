@@ -112,10 +112,14 @@ def main() -> None:
 
     logger.debug(f"Py2Glua\nVerison: {_verison()}")
 
-    if not args.no_clean_out:
-        logger.debug(f"Clean out dir\nOUT: {args.out}")
-        _clean_build(args.out)
+    try:
+        if not args.no_clean_out:
+            logger.debug(f"Clean out dir\nOUT: {args.out}")
+            _clean_build(args.out)
 
-    if args.cmd == "build":
-        logger.debug(f"Start build\nSRC: {args.src}\nOUT: {args.out}")
-        _build(args.src, args.out)
+        if args.cmd == "build":
+            logger.debug(f"Start build\nSRC: {args.src}\nOUT: {args.out}")
+            _build(args.src, args.out)
+
+    except Exception as err:
+        logger.error(err)

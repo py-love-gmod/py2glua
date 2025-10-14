@@ -5,6 +5,7 @@ import sysconfig
 from pathlib import Path
 from typing import Literal, NamedTuple
 
+from ..exceptions import CompileError
 from ..file_meta import Priority
 from ..runtime import Realm
 
@@ -169,9 +170,7 @@ class FileCTX:
         self.file_imports: set[str] = set()
 
     def build(self, path: Path, source_path: Path) -> None:
-        if not self._load_ast(path):
-            return
-
+        self._load_ast(path)
         self._resolve_imports()
         self._build_file_imports(source_path)
         self.file_realm = self._get_realm()
@@ -179,24 +178,19 @@ class FileCTX:
         self._collect_globals()
         self._remove_enter_point()
 
-    def _load_ast(self, path: Path) -> bool:
+    def _load_ast(self, path: Path) -> None:
         if not path.exists():
-            logger.error(f"[FileCTX build] file dont exists\nPath: {path}")
-            return False
+            raise CompileError("[FileCTX build] file dont exists", path, 0, 0)
 
         if path.suffix.lower() != ".py":
-            logger.error(f"[FileCTX build] not a .py file\nPath: {path}")
-            return False
+            raise CompileError("[FileCTX build] not a .py file", path, 0, 0)
 
         try:
             self.file_ast = ast.parse(path.read_text(encoding="utf-8-sig"))
             self.file_path = path
-            return True
 
         except Exception as err:
-            logger.error(f"[FileCTX build] {err}")
-
-        return False
+            raise CompileError(f"[FileCTX build] {err}", path, 0, 0)
 
     # region imports
     def _resolve_imports(self) -> None:
@@ -337,16 +331,18 @@ class FileCTX:
         res = self._extract_magic_int("__realm__")
         if res is None:
             logger.warning(
-                f"[FileCTX build] empty __realm__ value for file. Set to Realm.SERVER\nPATH: {getattr(self, 'file_path', None)}"
+                f"[FileCTX build] empty __realm__ value for file. Set to Realm.SERVER\nPATH: {self.file_path}"
             )
             return Realm.SERVER
 
         val = res.value
         if val < 1 or val > 3:
-            logger.error(
-                f"[FileCTX build] invalid __realm__. Set to Realm.SERVER\nPATH: {getattr(self, 'file_path', None)}\nLINE|OFFSET: {res.lineno}|{res.col_offset}"
+            raise CompileError(
+                "[FileCTX build] invalid __realm__",
+                self.file_path,
+                res.lineno,
+                res.col_offset,
             )
-            return Realm.SERVER
 
         self._cleanup_magic_int("__realm__")
         return Realm(val)
@@ -384,11 +380,12 @@ class FileCTX:
 
             def _handle_global_var(self, node: ast.Call, targets: list[ast.Name]):
                 if len(node.args) != 1:
-                    logger.warning(
-                        f"[FileCTX build] Global.var() called with {len(node.args)} argument(s).\n"
-                        f"PATH: {self.outer.file_path}\nLINE|OFFSET: {node.lineno}|{node.col_offset}"
+                    raise CompileError(
+                        f"[FileCTX build] Global.var() called with {len(node.args)} argument(s).",
+                        self.outer.file_path,
+                        node.lineno,
+                        node.col_offset,
                     )
-                    return
 
                 for t in targets:
                     self.outer.file_globals.add(f"var|{t.id}")
@@ -400,9 +397,11 @@ class FileCTX:
                     func_name = get_full_attr_name(node.value.func)
                     if func_name and func_name.endswith("Global.var"):
                         if not name_targets:
-                            logger.warning(
-                                f"[FileCTX build] Global.var used in complex assignment (no simple Name targets), skipping.\n"
-                                f"PATH: {self.outer.file_path}\nLINE|OFFSET: {node.lineno}|{node.col_offset}"
+                            raise CompileError(
+                                "[FileCTX build] Global.var used in complex assignment",
+                                self.outer.file_path,
+                                node.lineno,
+                                node.col_offset,
                             )
 
                         else:
@@ -410,9 +409,11 @@ class FileCTX:
                                 t.id for t in name_targets if t.id in self.declared
                             ]
                             if already:
-                                logger.warning(
-                                    f"[FileCTX build] Global.var called for already declared variable(s): {already}. Ignoring Global.var. "
-                                    f"PATH: {self.outer.file_path}\nLINE|OFFSET: {node.lineno}|{node.col_offset}"
+                                raise CompileError(
+                                    f"[FileCTX build] Global.var called for already declared variable: {already}",
+                                    self.outer.file_path,
+                                    node.lineno,
+                                    node.col_offset,
                                 )
 
                             else:
@@ -436,16 +437,20 @@ class FileCTX:
                     func_name = get_full_attr_name(node.value.func)
                     if func_name and func_name.endswith("Global.var"):
                         if target_name is None:
-                            logger.warning(
-                                f"[FileCTX build] Global.var used in annotated complex target, skipping.\n"
-                                f"PATH: {self.outer.file_path}\nLINE|OFFSET: {node.lineno}|{node.col_offset}"
+                            raise CompileError(
+                                "[FileCTX build] Global.var used in annotated complex target",
+                                self.outer.file_path,
+                                node.lineno,
+                                node.col_offset,
                             )
 
                         else:
                             if target_name in self.declared:
-                                logger.warning(
-                                    f"[FileCTX build] Global.var called for already declared variable: {target_name}. Ignoring Global.var. "
-                                    f"PATH: {self.outer.file_path}\nLINE|OFFSET: {node.lineno}|{node.col_offset}"
+                                raise CompileError(
+                                    f"[FileCTX build] Global.var called for already declared variable: {target_name}",
+                                    self.outer.file_path,
+                                    node.lineno,
+                                    node.col_offset,
                                 )
 
                             else:
