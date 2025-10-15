@@ -1,10 +1,15 @@
 import argparse
 import logging
 import shutil
+import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from colorama import Fore, Style, init
+
+from .config import Py2GluaConfig
+from .exceptions import CompileError
+from .files import TreeCTX
 
 init(autoreset=True)
 
@@ -24,6 +29,9 @@ class AlignedColorFormatter(logging.Formatter):
         self.level_width = level_width
 
     def format(self, record):
+        if not isinstance(record.msg, str):
+            record.msg = str(record.msg)
+
         levelname = record.levelname
         color = self.COLORS.get(levelname, "")
         padded_level = f"{color}{levelname:<{self.level_width}}{Style.RESET_ALL}"
@@ -62,15 +70,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # region Main args
     parser.add_argument(
+        "-d",
         "--debug",
         action="store_true",
         help="Включить режим отладки",
-    )
-
-    parser.add_argument(
-        "--no-clean-out",
-        action="store_true",
-        help="Не очищать папку собранного кода перед билдом",
     )
     # endregion
 
@@ -78,10 +81,36 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build", help="Собирает python код в glua код")
     b.add_argument(
+        "-d",
+        "--debug",
+        action="store_true",
+        default=None,
+        dest="build_debug",
+        help="Переключает режим билда с релизного на дебаг",
+    )
+
+    b.add_argument(
+        "-c",
+        "--clean_build",
+        action="store_true",
+        default=None,
+        help="Очищать ли папку out перед сборкой",
+    )
+
+    b.add_argument(
+        "-o",
+        "--optimization",
+        type=int,
+        choices=[0, 1, 2, 3],
+        default=None,
+        help="Уровень оптимизации при трансляции",
+    )
+
+    b.add_argument(
         "src",
         type=Path,
         nargs="?",
-        default=Path("source"),
+        default=None,
         help="Исходная папка для исходного кода (по умолчанию: ./source)",
     )
 
@@ -89,7 +118,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "out",
         type=Path,
         nargs="?",
-        default=Path("build"),
+        default=None,
         help="Папка для собранного кода (по умолчанию: ./build)",
     )
     # endregion
@@ -97,12 +126,48 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _build(src: Path, out: Path) -> None:
-    logger.critical("NotImplemented, cli:_build")
+def _clean_build(src: Path | None) -> None:
+    if src and src.exists():
+        shutil.rmtree(src)
 
 
-def _clean_build(src: Path) -> None:
-    shutil.rmtree(src)
+def _build_config(src: Path, out: Path, args) -> None:
+    try:
+        Py2GluaConfig.load(Path.cwd() / "py2glua.toml")
+
+    except RuntimeError:
+        logger.warning(
+            "The py2glua.toml is empty or does not exist in the startup path\nDefault settings are used"
+        )
+        Py2GluaConfig.default()
+
+    if src is not None:
+        Py2GluaConfig.data["build"]["source"] = Path(src)
+
+    if out is not None:
+        Py2GluaConfig.data["build"]["output"] = Path(out)
+
+    if args.build_debug is not None:
+        Py2GluaConfig.data["build"]["debug"] = bool(args.build_debug)
+
+    if args.clean_build is not None:
+        Py2GluaConfig.data["build"]["clean_build"] = bool(args.clean_build)
+
+    if args.optimization is not None:
+        Py2GluaConfig.data["build"]["optimization"] = int(args.optimization)
+
+
+def _build(src: Path, out: Path, args) -> None:
+    _build_config(src, out, args)
+
+    if Py2GluaConfig.data["build"]["clean_build"]:
+        _clean_build(Py2GluaConfig.data["build"]["output"])
+
+    tree_ctx = TreeCTX()
+    tree_ctx.build(Py2GluaConfig.data["build"]["source"])
+
+    for val in tree_ctx.files_ctxs:
+        print(val)
 
 
 def main() -> None:
@@ -113,13 +178,23 @@ def main() -> None:
     logger.debug(f"Py2Glua\nVerison: {_verison()}")
 
     try:
-        if not args.no_clean_out:
-            logger.debug(f"Clean out dir\nOUT: {args.out}")
-            _clean_build(args.out)
-
         if args.cmd == "build":
             logger.debug(f"Start build\nSRC: {args.src}\nOUT: {args.out}")
-            _build(args.src, args.out)
+            _build(args.src, args.out, args)
+
+        sys.exit(0)
+
+    except CompileError as err:
+        logger.error(err)
+        logger.error("Exit code 1")
+        sys.exit(1)
+
+    except KeyError as err:
+        logger.error(f"Error accessing key {err}", exc_info=True)
+        logger.error("Exit code 2")
+        sys.exit(2)
 
     except Exception as err:
-        logger.error(err)
+        logger.error(str(err), exc_info=True)
+        logger.error("Exit code 3")
+        sys.exit(3)

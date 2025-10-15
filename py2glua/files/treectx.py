@@ -10,6 +10,12 @@ class TreeCTX:
     def __init__(self) -> None:
         self.files_ctxs: dict[str, FileCTX] = {}
 
+    def build(self, source: Path) -> None:
+        for path in source.rglob("*.py", case_sensitive=False):
+            fctx = FileCTX()
+            fctx.build(path, source)
+            self.add_file(fctx)
+
     def add_file(self, file_ctx: FileCTX) -> bool:
         file_path = str(file_ctx.file_path.resolve())
         if file_path in self.files_ctxs:
