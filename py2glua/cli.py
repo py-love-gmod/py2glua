@@ -9,7 +9,6 @@ from colorama import Fore, Style, init
 
 from .config import Py2GluaConfig
 from .exceptions import CompileError
-from .files import TreeCTX
 
 init(autoreset=True)
 
@@ -163,11 +162,7 @@ def _build(src: Path, out: Path, args) -> None:
     if Py2GluaConfig.data["build"]["clean_build"]:
         _clean_build(Py2GluaConfig.data["build"]["output"])
 
-    tree_ctx = TreeCTX()
-    tree_ctx.build(Py2GluaConfig.data["build"]["source"])
-
-    for val in tree_ctx.files_ctxs:
-        print(val)
+    # TODO:
 
 
 def main() -> None:
