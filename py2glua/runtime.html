@@ -27,19 +27,34 @@
                     <a class="class" href="#Realm">Realm</a>
                             <ul class="memberlist">
                         <li>
-                                <a class="variable" href="#Realm.SERVER">SERVER</a>
+                                <a class="class" href="#Realm.SERVER">Realm.SERVER</a>
+                                        <ul class="memberlist">
+                            </ul>
+
                         </li>
                         <li>
-                                <a class="variable" href="#Realm.CLIENT">CLIENT</a>
+                                <a class="class" href="#Realm.CLIENT">Realm.CLIENT</a>
+                                        <ul class="memberlist">
+                            </ul>
+
                         </li>
                         <li>
-                                <a class="variable" href="#Realm.SHARED">SHARED</a>
+                                <a class="class" href="#Realm.SHARED">Realm.SHARED</a>
+                                        <ul class="memberlist">
+                            </ul>
+
                         </li>
                 </ul>
 
             </li>
             <li>
-                    <a class="variable" href="#PY2GLUA_DEBUG">PY2GLUA_DEBUG</a>
+                    <a class="class" href="#PY2GLUA_DEBUG">PY2GLUA_DEBUG</a>
+                            <ul class="memberlist">
+                        <li>
+                                <a class="variable" href="#PY2GLUA_DEBUG.value">value</a>
+                        </li>
+                </ul>
+
             </li>
     </ul>
 
@@ -62,13 +77,16 @@ py2glua<wbr>.runtime    </h1>
 
                         <label class="view-source-button" for="mod-runtime-view-source"><span>View Source</span></label>
 
-                        <div class="pdoc-code codehilite"><pre><span></span><span id="L-1"><a href="#L-1"><span class="linenos">1</span></a><span class="kn">from</span><span class="w"> </span><span class="nn">.realm</span><span class="w"> </span><span class="kn">import</span> <span class="n">Realm</span>
-</span><span id="L-2"><a href="#L-2"><span class="linenos">2</span></a>
-</span><span id="L-3"><a href="#L-3"><span class="linenos">3</span></a><span class="c1"># Переменная отвечающая за дебаг сборку</span>
-</span><span id="L-4"><a href="#L-4"><span class="linenos">4</span></a><span class="n">PY2GLUA_DEBUG</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
-</span><span id="L-5"><a href="#L-5"><span class="linenos">5</span></a>
-</span><span id="L-6"><a href="#L-6"><span class="linenos">6</span></a>
-</span><span id="L-7"><a href="#L-7"><span class="linenos">7</span></a><span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;Realm&quot;</span><span class="p">,</span> <span class="s2">&quot;PY2GLUA_DEBUG&quot;</span><span class="p">]</span>
+                        <div class="pdoc-code codehilite"><pre><span></span><span id="L-1"><a href="#L-1"><span class="linenos"> 1</span></a><span class="kn">from</span><span class="w"> </span><span class="nn">.realm</span><span class="w"> </span><span class="kn">import</span> <span class="n">Realm</span>
+</span><span id="L-2"><a href="#L-2"><span class="linenos"> 2</span></a>
+</span><span id="L-3"><a href="#L-3"><span class="linenos"> 3</span></a>
+</span><span id="L-4"><a href="#L-4"><span class="linenos"> 4</span></a><span class="k">class</span><span class="w"> </span><span class="nc">PY2GLUA_DEBUG</span><span class="p">:</span>
+</span><span id="L-5"><a href="#L-5"><span class="linenos"> 5</span></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Переменная отвечающая за дебаг сборку&quot;&quot;&quot;</span>
+</span><span id="L-6"><a href="#L-6"><span class="linenos"> 6</span></a>
+</span><span id="L-7"><a href="#L-7"><span class="linenos"> 7</span></a>    <span class="n">value</span> <span class="o">=</span> <span class="kc">False</span>
+</span><span id="L-8"><a href="#L-8"><span class="linenos"> 8</span></a>
+</span><span id="L-9"><a href="#L-9"><span class="linenos"> 9</span></a>
+</span><span id="L-10"><a href="#L-10"><span class="linenos">10</span></a><span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;Realm&quot;</span><span class="p">,</span> <span class="s2">&quot;PY2GLUA_DEBUG&quot;</span><span class="p">]</span>
 </span></pre></div>
 
 
@@ -78,84 +96,128 @@ py2glua<wbr>.runtime    </h1>
 <div class="attr class">
             
     <span class="def">class</span>
-    <span class="name">Realm</span><wbr>(<span class="base">enum.IntEnum</span>):
+    <span class="name">Realm</span>:
 
                 <label class="view-source-button" for="Realm-view-source"><span>View Source</span></label>
 
     </div>
     <a class="headerlink" href="#Realm"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="Realm-5"><a href="#Realm-5"><span class="linenos"> 5</span></a><span class="k">class</span><span class="w"> </span><span class="nc">Realm</span><span class="p">(</span><span class="n">IntEnum</span><span class="p">):</span>
-</span><span id="Realm-6"><a href="#Realm-6"><span class="linenos"> 6</span></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Среда выполнения кода. Данный класс можно использовать как и для определения среды всего файла, так и для проверки среды в рантайме.</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="Realm-2"><a href="#Realm-2"><span class="linenos"> 2</span></a><span class="k">class</span><span class="w"> </span><span class="nc">Realm</span><span class="p">:</span>
+</span><span id="Realm-3"><a href="#Realm-3"><span class="linenos"> 3</span></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Среда выполнения кода. Данный класс можно использовать как и для определения среды всего файла, так и для проверки среды в рантайме.&quot;&quot;&quot;</span>
+</span><span id="Realm-4"><a href="#Realm-4"><span class="linenos"> 4</span></a>
+</span><span id="Realm-5"><a href="#Realm-5"><span class="linenos"> 5</span></a>    <span class="k">class</span><span class="w"> </span><span class="nc">SERVER</span><span class="p">:</span>
+</span><span id="Realm-6"><a href="#Realm-6"><span class="linenos"> 6</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Код выполняется исключительно на сервере&quot;&quot;&quot;</span>
 </span><span id="Realm-7"><a href="#Realm-7"><span class="linenos"> 7</span></a>
-</span><span id="Realm-8"><a href="#Realm-8"><span class="linenos"> 8</span></a><span class="sd">    Attributes:</span>
-</span><span id="Realm-9"><a href="#Realm-9"><span class="linenos"> 9</span></a><span class="sd">        SERVER (int): Код выполняется исключительно на сервере</span>
-</span><span id="Realm-10"><a href="#Realm-10"><span class="linenos">10</span></a><span class="sd">        CLIENT (int): Код выполняется исключительно на клиенте</span>
-</span><span id="Realm-11"><a href="#Realm-11"><span class="linenos">11</span></a><span class="sd">        SHARED (int): Код выполняется одновременно и на клиенте, и на сервере</span>
-</span><span id="Realm-12"><a href="#Realm-12"><span class="linenos">12</span></a><span class="sd">    &quot;&quot;&quot;</span>
-</span><span id="Realm-13"><a href="#Realm-13"><span class="linenos">13</span></a>
-</span><span id="Realm-14"><a href="#Realm-14"><span class="linenos">14</span></a>    <span class="n">SERVER</span> <span class="o">=</span> <span class="mi">1</span>
-</span><span id="Realm-15"><a href="#Realm-15"><span class="linenos">15</span></a>    <span class="n">CLIENT</span> <span class="o">=</span> <span class="mi">2</span>
-</span><span id="Realm-16"><a href="#Realm-16"><span class="linenos">16</span></a>    <span class="n">SHARED</span> <span class="o">=</span> <span class="mi">3</span>
+</span><span id="Realm-8"><a href="#Realm-8"><span class="linenos"> 8</span></a>    <span class="k">class</span><span class="w"> </span><span class="nc">CLIENT</span><span class="p">:</span>
+</span><span id="Realm-9"><a href="#Realm-9"><span class="linenos"> 9</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Код выполняется исключительно на клиенте&quot;&quot;&quot;</span>
+</span><span id="Realm-10"><a href="#Realm-10"><span class="linenos">10</span></a>
+</span><span id="Realm-11"><a href="#Realm-11"><span class="linenos">11</span></a>    <span class="k">class</span><span class="w"> </span><span class="nc">SHARED</span><span class="p">:</span>
+</span><span id="Realm-12"><a href="#Realm-12"><span class="linenos">12</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Код выполняется одновременно и на клиенте, и на сервере&quot;&quot;&quot;</span>
 </span></pre></div>
 
 
             <div class="docstring"><p>Среда выполнения кода. Данный класс можно использовать как и для определения среды всего файла, так и для проверки среды в рантайме.</p>
-
-<p>Attributes:
-    SERVER (int): Код выполняется исключительно на сервере
-    CLIENT (int): Код выполняется исключительно на клиенте
-    SHARED (int): Код выполняется одновременно и на клиенте, и на сервере</p>
 </div>
 
 
-                            <div id="Realm.SERVER" class="classattr">
-                                <div class="attr variable">
-            <span class="name">SERVER</span>        =
-<span class="default_value">&lt;<a href="#Realm.SERVER">Realm.SERVER</a>: 1&gt;</span>
+                </section>
+                <section id="Realm.SERVER">
+                            <input id="Realm.SERVER-view-source" class="view-source-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
+<div class="attr class">
+            
+    <span class="def">class</span>
+    <span class="name">Realm.SERVER</span>:
 
-        
+                <label class="view-source-button" for="Realm.SERVER-view-source"><span>View Source</span></label>
+
     </div>
     <a class="headerlink" href="#Realm.SERVER"></a>
-    
-    
+            <div class="pdoc-code codehilite"><pre><span></span><span id="Realm.SERVER-5"><a href="#Realm.SERVER-5"><span class="linenos">5</span></a>    <span class="k">class</span><span class="w"> </span><span class="nc">SERVER</span><span class="p">:</span>
+</span><span id="Realm.SERVER-6"><a href="#Realm.SERVER-6"><span class="linenos">6</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Код выполняется исключительно на сервере&quot;&quot;&quot;</span>
+</span></pre></div>
 
-                            </div>
-                            <div id="Realm.CLIENT" class="classattr">
-                                <div class="attr variable">
-            <span class="name">CLIENT</span>        =
-<span class="default_value">&lt;<a href="#Realm.CLIENT">Realm.CLIENT</a>: 2&gt;</span>
 
-        
+            <div class="docstring"><p>Код выполняется исключительно на сервере</p>
+</div>
+
+
+                </section>
+                <section id="Realm.CLIENT">
+                            <input id="Realm.CLIENT-view-source" class="view-source-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
+<div class="attr class">
+            
+    <span class="def">class</span>
+    <span class="name">Realm.CLIENT</span>:
+
+                <label class="view-source-button" for="Realm.CLIENT-view-source"><span>View Source</span></label>
+
     </div>
     <a class="headerlink" href="#Realm.CLIENT"></a>
-    
-    
+            <div class="pdoc-code codehilite"><pre><span></span><span id="Realm.CLIENT-8"><a href="#Realm.CLIENT-8"><span class="linenos">8</span></a>    <span class="k">class</span><span class="w"> </span><span class="nc">CLIENT</span><span class="p">:</span>
+</span><span id="Realm.CLIENT-9"><a href="#Realm.CLIENT-9"><span class="linenos">9</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Код выполняется исключительно на клиенте&quot;&quot;&quot;</span>
+</span></pre></div>
 
-                            </div>
-                            <div id="Realm.SHARED" class="classattr">
-                                <div class="attr variable">
-            <span class="name">SHARED</span>        =
-<span class="default_value">&lt;<a href="#Realm.SHARED">Realm.SHARED</a>: 3&gt;</span>
 
-        
+            <div class="docstring"><p>Код выполняется исключительно на клиенте</p>
+</div>
+
+
+                </section>
+                <section id="Realm.SHARED">
+                            <input id="Realm.SHARED-view-source" class="view-source-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
+<div class="attr class">
+            
+    <span class="def">class</span>
+    <span class="name">Realm.SHARED</span>:
+
+                <label class="view-source-button" for="Realm.SHARED-view-source"><span>View Source</span></label>
+
     </div>
     <a class="headerlink" href="#Realm.SHARED"></a>
-    
-    
+            <div class="pdoc-code codehilite"><pre><span></span><span id="Realm.SHARED-11"><a href="#Realm.SHARED-11"><span class="linenos">11</span></a>    <span class="k">class</span><span class="w"> </span><span class="nc">SHARED</span><span class="p">:</span>
+</span><span id="Realm.SHARED-12"><a href="#Realm.SHARED-12"><span class="linenos">12</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Код выполняется одновременно и на клиенте, и на сервере&quot;&quot;&quot;</span>
+</span></pre></div>
 
-                            </div>
+
+            <div class="docstring"><p>Код выполняется одновременно и на клиенте, и на сервере</p>
+</div>
+
+
                 </section>
                 <section id="PY2GLUA_DEBUG">
-                    <div class="attr variable">
-            <span class="name">PY2GLUA_DEBUG</span><span class="annotation">: bool</span>        =
+                            <input id="PY2GLUA_DEBUG-view-source" class="view-source-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
+<div class="attr class">
+            
+    <span class="def">class</span>
+    <span class="name">PY2GLUA_DEBUG</span>:
+
+                <label class="view-source-button" for="PY2GLUA_DEBUG-view-source"><span>View Source</span></label>
+
+    </div>
+    <a class="headerlink" href="#PY2GLUA_DEBUG"></a>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="PY2GLUA_DEBUG-5"><a href="#PY2GLUA_DEBUG-5"><span class="linenos">5</span></a><span class="k">class</span><span class="w"> </span><span class="nc">PY2GLUA_DEBUG</span><span class="p">:</span>
+</span><span id="PY2GLUA_DEBUG-6"><a href="#PY2GLUA_DEBUG-6"><span class="linenos">6</span></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Переменная отвечающая за дебаг сборку&quot;&quot;&quot;</span>
+</span><span id="PY2GLUA_DEBUG-7"><a href="#PY2GLUA_DEBUG-7"><span class="linenos">7</span></a>
+</span><span id="PY2GLUA_DEBUG-8"><a href="#PY2GLUA_DEBUG-8"><span class="linenos">8</span></a>    <span class="n">value</span> <span class="o">=</span> <span class="kc">False</span>
+</span></pre></div>
+
+
+            <div class="docstring"><p>Переменная отвечающая за дебаг сборку</p>
+</div>
+
+
+                            <div id="PY2GLUA_DEBUG.value" class="classattr">
+                                <div class="attr variable">
+            <span class="name">value</span>        =
 <span class="default_value">False</span>
 
         
     </div>
-    <a class="headerlink" href="#PY2GLUA_DEBUG"></a>
+    <a class="headerlink" href="#PY2GLUA_DEBUG.value"></a>
     
     
 
+                            </div>
                 </section>
     </main>
 </body>
