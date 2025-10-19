@@ -318,7 +318,7 @@ class For(IRNode):
 @dataclass
 class With(IRNode):
     context: IRNode
-    target: IRNode | None  # optional "as x"
+    target: IRNode | None
     body: list[IRNode] = field(default_factory=list)
 
     def walk(self) -> Iterator[IRNode]:
@@ -326,8 +326,43 @@ class With(IRNode):
         yield from self.context.walk()
         if self.target:
             yield from self.target.walk()
-
         for node in self.body:
+            yield from node.walk()
+
+
+@dataclass
+class ExceptHandler(IRNode):
+    type: IRNode | None
+    name: str | None
+    body: list[IRNode] = field(default_factory=list)
+
+    def walk(self) -> Iterator[IRNode]:
+        yield self
+        if self.type:
+            yield from self.type.walk()
+        for node in self.body:
+            yield from node.walk()
+
+
+@dataclass
+class Try(IRNode):
+    body: list[IRNode] = field(default_factory=list)
+    handlers: list[ExceptHandler] = field(default_factory=list)
+    orelse: list[IRNode] = field(default_factory=list)
+    finalbody: list[IRNode] = field(default_factory=list)
+
+    def walk(self) -> Iterator[IRNode]:
+        yield self
+        for node in self.body:
+            yield from node.walk()
+
+        for h in self.handlers:
+            yield from h.walk()
+
+        for node in self.orelse:
+            yield from node.walk()
+
+        for node in self.finalbody:
             yield from node.walk()
 
 

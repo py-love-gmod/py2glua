@@ -14,6 +14,7 @@ from .ir_base import (
     Constant,
     Continue,
     DictLiteral,
+    ExceptHandler,
     File,
     For,
     FunctionDef,
@@ -25,6 +26,7 @@ from .ir_base import (
     Pass,
     Return,
     Subscript,
+    Try,
     TupleLiteral,
     UnaryOp,
     UnaryOpType,
@@ -66,7 +68,7 @@ class IRBuilder:
 
     @staticmethod
     def _append_child(
-        parent: File | FunctionDef | If | While | For,
+        parent: File | FunctionDef | If | While | For | With | Try,
         child: IRNode,
     ) -> None:
         child.parent = parent
@@ -74,7 +76,7 @@ class IRBuilder:
 
     @staticmethod
     def _append_children(
-        parent: File | FunctionDef | If | While | For,
+        parent: File | FunctionDef | If | While | For | With | Try,
         children: Iterable[IRNode],
     ) -> None:
         for ch in children:
@@ -670,7 +672,6 @@ class IRBuilder:
             parent=None,
             body=[],
         )
-
         context_ir.parent = with_ir
         if target_ir:
             target_ir.parent = with_ir
@@ -681,15 +682,101 @@ class IRBuilder:
                 continue
 
             if isinstance(ir, list):
-                for ch in ir:
-                    ch.parent = with_ir
-                    with_ir.body.append(ch)
+                cls._append_children(with_ir, ir)
 
             else:
-                ir.parent = with_ir
-                with_ir.body.append(ir)
+                cls._append_child(with_ir, ir)
 
         return with_ir
+
+    @classmethod
+    def build_Try(cls, node: ast.Try) -> Try:
+        try_ir = Try(
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+            parent=None,
+            body=[],
+            handlers=[],
+            orelse=[],
+            finalbody=[],
+        )
+
+        for stmt in node.body:
+            ir = cls.build_node(stmt)
+            if not ir:
+                continue
+
+            if isinstance(ir, list):
+                cls._append_children(try_ir, ir)
+
+            else:
+                cls._append_child(try_ir, ir)
+
+        for h in node.handlers:
+            type_ir = cls.build_node(h.type) if h.type is not None else None
+            if type_ir is not None:
+                assert isinstance(type_ir, IRNode)
+
+            name_str = (
+                h.name if isinstance(h.name, str) or h.name is None else str(h.name)
+            )
+
+            handler_ir = ExceptHandler(
+                type=type_ir,
+                name=name_str,
+                lineno=h.lineno,
+                col_offset=h.col_offset,
+                parent=try_ir,
+                body=[],
+            )
+            if type_ir:
+                type_ir.parent = handler_ir
+
+            for stmt in h.body:
+                ir = cls.build_node(stmt)
+                if not ir:
+                    continue
+
+                if isinstance(ir, list):
+                    for ch in ir:
+                        ch.parent = handler_ir
+                        handler_ir.body.append(ch)
+
+                else:
+                    ir.parent = handler_ir
+                    handler_ir.body.append(ir)
+
+            try_ir.handlers.append(handler_ir)
+
+        for stmt in node.orelse:
+            ir = cls.build_node(stmt)
+            if not ir:
+                continue
+
+            if isinstance(ir, list):
+                for ch in ir:
+                    ch.parent = try_ir
+                    try_ir.orelse.append(ch)
+
+            else:
+                ir.parent = try_ir
+                try_ir.orelse.append(ir)
+
+        for stmt in node.finalbody:
+            ir = cls.build_node(stmt)
+            if not ir:
+                continue
+
+            if isinstance(ir, list):
+                for ch in ir:
+                    ch.parent = try_ir
+                    try_ir.finalbody.append(ch)
+
+            else:
+                ir.parent = try_ir
+                try_ir.finalbody.append(ir)
+
+        return try_ir
 
     @staticmethod
     def build_Break(node: ast.Break) -> Break:

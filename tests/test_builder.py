@@ -14,6 +14,7 @@ from py2glua.ir.ir_base import (
     Constant,
     Continue,
     DictLiteral,
+    ExceptHandler,
     File,
     For,
     FunctionDef,
@@ -23,6 +24,7 @@ from py2glua.ir.ir_base import (
     Pass,
     Return,
     Subscript,
+    Try,
     TupleLiteral,
     UnaryOp,
     UnaryOpType,
@@ -375,6 +377,65 @@ with manager as m:
     assert isinstance(w, With)
     assert isinstance(w.target, VarLoad)
     assert w.target.name == "m"
+
+
+def test_try_except_basic():
+    src = """
+try:
+    x = 1
+except:
+    x = 2
+"""
+    ir = build_ir(src)
+    node = ir.body[0]
+    assert isinstance(node, Try)
+    assert node.handlers and isinstance(node.handlers[0], ExceptHandler)
+    h = node.handlers[0]
+    assert h.type is None
+    assert h.name is None
+    assert any(isinstance(ch, VarStore) for ch in node.body)
+    assert any(isinstance(ch, VarStore) for ch in h.body)
+    assert node.orelse == []
+    assert node.finalbody == []
+
+
+def test_try_except_specific_with_name():
+    src = """
+try:
+    do()
+except ValueError as e:
+    handle(e)
+"""
+    ir = build_ir(src)
+    t = ir.body[0]
+    assert isinstance(t, Try)
+    assert len(t.handlers) == 1
+    h = t.handlers[0]
+    assert isinstance(h.type, VarLoad) or isinstance(h.type, Attribute)
+    assert h.name == "e"
+    assert any(isinstance(ch, Call) for ch in h.body)
+
+
+def test_try_except_multiple_else_finally():
+    src = """
+try:
+    a = 1
+except KeyError:
+    a = 2
+except Exception as exc:
+    a = 3
+else:
+    a = 4
+finally:
+    a = 5
+"""
+    ir = build_ir(src)
+    t = ir.body[0]
+    assert isinstance(t, Try)
+    assert len(t.handlers) == 2
+    assert any(isinstance(ch, VarStore) for ch in t.body)
+    assert any(isinstance(ch, VarStore) for ch in t.orelse)
+    assert any(isinstance(ch, VarStore) for ch in t.finalbody)
 
 
 def test_break():
