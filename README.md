@@ -2,6 +2,10 @@
 
 Sorry, but for now no English docs :(
 
+## Ссылки и всякое
+[![Build Docs](https://github.com/themanyfaceddemon/py2glua/actions/workflows/docs.yml/badge.svg?branch=master)](https://github.com/themanyfaceddemon/py2glua/actions/workflows/docs.yml)
+[Документация](https://themanyfaceddemon.github.io/py2glua/)
+
 ## Цель
 Создать обёртку над Python, которая позволит переводить питоновский код в GLua-код.
 

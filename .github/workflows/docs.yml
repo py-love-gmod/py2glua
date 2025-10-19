@@ -1,0 +1,47 @@
+name: Build docs
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  build-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pdoc
+
+      - name: Generate docs
+        run: python make_docs.py
+
+      - name: Deploy to docs branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git worktree add ../docs-out docs || git worktree add ../docs-out origin/docs
+          rsync -av --delete --exclude ".git" docs/ ../docs-out/
+
+          cd ../docs-out
+          git add .
+
+          if git diff --cached --quiet; then
+            echo "No documentation changes."
+          else
+            git commit -m "Auto-update docs"
+            git push origin HEAD:docs
+          fi
