@@ -31,6 +31,7 @@ from .ir_base import (
     VarLoad,
     VarStore,
     While,
+    With,
 )
 
 
@@ -648,6 +649,47 @@ class IRBuilder:
             ) else cls._append_children(for_ir, orelse_ir)
 
         return for_ir
+
+    @classmethod
+    def build_With(cls, node: ast.With) -> With:
+        item = node.items[0]
+
+        context_ir = cls.build_node(item.context_expr)
+        assert isinstance(context_ir, IRNode)
+
+        target_ir = None
+        if item.optional_vars:
+            target_ir = cls.build_node(item.optional_vars)
+            assert isinstance(target_ir, IRNode)
+
+        with_ir = With(
+            context=context_ir,
+            target=target_ir,
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+            parent=None,
+            body=[],
+        )
+
+        context_ir.parent = with_ir
+        if target_ir:
+            target_ir.parent = with_ir
+
+        for stmt in node.body:
+            ir = cls.build_node(stmt)
+            if not ir:
+                continue
+
+            if isinstance(ir, list):
+                for ch in ir:
+                    ch.parent = with_ir
+                    with_ir.body.append(ch)
+
+            else:
+                ir.parent = with_ir
+                with_ir.body.append(ir)
+
+        return with_ir
 
     @staticmethod
     def build_Break(node: ast.Break) -> Break:

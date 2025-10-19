@@ -29,6 +29,7 @@ from py2glua.ir.ir_base import (
     VarLoad,
     VarStore,
     While,
+    With,
 )
 
 
@@ -350,6 +351,30 @@ for i in range(3):
     assert isinstance(iter_call.func, VarLoad)
     assert iter_call.func.name == "range"
     assert all(isinstance(ch, Call) for ch in loop.body)
+
+
+def test_with_basic():
+    src = """
+with ctx:
+    x = 1
+"""
+    ir = build_ir(src)
+    node = ir.body[0]
+    assert isinstance(node, With)
+    assert isinstance(node.context, VarLoad)
+    assert node.body and isinstance(node.body[0], VarStore)
+
+
+def test_with_as():
+    src = """
+with manager as m:
+    y = 2
+"""
+    ir = build_ir(src)
+    w = ir.body[0]
+    assert isinstance(w, With)
+    assert isinstance(w.target, VarLoad)
+    assert w.target.name == "m"
 
 
 def test_break():

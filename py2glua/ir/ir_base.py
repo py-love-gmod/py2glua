@@ -316,6 +316,22 @@ class For(IRNode):
 
 
 @dataclass
+class With(IRNode):
+    context: IRNode
+    target: IRNode | None  # optional "as x"
+    body: list[IRNode] = field(default_factory=list)
+
+    def walk(self) -> Iterator[IRNode]:
+        yield self
+        yield from self.context.walk()
+        if self.target:
+            yield from self.target.walk()
+
+        for node in self.body:
+            yield from node.walk()
+
+
+@dataclass
 class Break(IRNode):
     def walk(self) -> Iterator[IRNode]:
         yield self
