@@ -9,18 +9,20 @@ from .ir_base import (
     BoolOpType,
     Break,
     Call,
+    ClassDef,
     Compare,
     Constant,
     Continue,
     DictLiteral,
     File,
     For,
-    Function,
+    FunctionDef,
     If,
     Import,
     ImportType,
     IRNode,
     ListLiteral,
+    Pass,
     Return,
     Subscript,
     TupleLiteral,
@@ -63,7 +65,7 @@ class IRBuilder:
 
     @staticmethod
     def _append_child(
-        parent: File | Function | If | While | For,
+        parent: File | FunctionDef | If | While | For,
         child: IRNode,
     ) -> None:
         child.parent = parent
@@ -71,7 +73,7 @@ class IRBuilder:
 
     @staticmethod
     def _append_children(
-        parent: File | Function | If | While | For,
+        parent: File | FunctionDef | If | While | For,
         children: Iterable[IRNode],
     ) -> None:
         for ch in children:
@@ -379,6 +381,7 @@ class IRBuilder:
 
     # endregion
 
+    # region Container
     @classmethod
     def build_List(cls, node: ast.List) -> ListLiteral:
         elements = []
@@ -443,13 +446,15 @@ class IRBuilder:
 
         return dict_ir
 
+    # endregion
+
     # region Functions
     @classmethod
-    def build_FunctionDef(cls, node: ast.FunctionDef) -> Function:
+    def build_FunctionDef(cls, node: ast.FunctionDef) -> FunctionDef:
         args = [a.arg for a in node.args.args]
         decorators = [ast.unparse(d) for d in node.decorator_list]
 
-        fn = Function(
+        fn = FunctionDef(
             name=node.name,
             args=args,
             decorators=decorators,
@@ -484,6 +489,49 @@ class IRBuilder:
         if value_ir:
             value_ir.parent = ret
         return ret
+
+    # endregion
+
+    # region Classes
+    @classmethod
+    def build_ClassDef(cls, node: ast.ClassDef):
+        name = node.name
+        bases_ir: list[IRNode] = []
+        for base in node.bases:
+            base_ir = cls.build_node(base)
+            assert isinstance(base_ir, IRNode)
+            bases_ir.append(base_ir)
+
+        decorators = [ast.unparse(d) for d in node.decorator_list]
+        class_ir = ClassDef(
+            name=name,
+            bases=bases_ir,
+            decorators=decorators,
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+            parent=None,
+            body=[],
+        )
+
+        for base_ir in bases_ir:
+            base_ir.parent = class_ir
+
+        for stmt in node.body:
+            stmt_ir = cls.build_node(stmt)
+            if not stmt_ir:
+                continue
+
+            if isinstance(stmt_ir, list):
+                for ch in stmt_ir:
+                    ch.parent = class_ir
+
+                class_ir.body.extend(stmt_ir)
+
+            else:
+                stmt_ir.parent = class_ir
+                class_ir.body.append(stmt_ir)
+
+        return class_ir
 
     # endregion
 
@@ -612,6 +660,14 @@ class IRBuilder:
     @staticmethod
     def build_Continue(node: ast.Continue) -> Continue:
         return Continue(
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+            parent=None,
+        )
+
+    @staticmethod
+    def build_Pass(node: ast.Pass) -> Pass:
+        return Pass(
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,

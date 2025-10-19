@@ -222,7 +222,7 @@ class Compare(IRNode):
 
 # region ФУНКЦИИ
 @dataclass
-class Function(IRNode):
+class FunctionDef(IRNode):
     name: str
     args: list[str] = field(default_factory=list)
     decorators: list[str] = field(default_factory=list)
@@ -242,6 +242,25 @@ class Return(IRNode):
         yield self
         if self.value:
             yield from self.value.walk()
+
+
+# endregion
+
+
+# region КЛАССЫ
+@dataclass
+class ClassDef(IRNode):
+    name: str
+    bases: list[IRNode] = field(default_factory=list)
+    decorators: list[str] = field(default_factory=list)
+    body: list[IRNode] = field(default_factory=list)
+
+    def walk(self) -> Iterator[IRNode]:
+        yield self
+        for base in self.bases:
+            yield from base.walk()
+        for node in self.body:
+            yield from node.walk()
 
 
 # endregion
@@ -304,6 +323,12 @@ class Break(IRNode):
 
 @dataclass
 class Continue(IRNode):
+    def walk(self) -> Iterator[IRNode]:
+        yield self
+
+
+@dataclass
+class Pass(IRNode):
     def walk(self) -> Iterator[IRNode]:
         yield self
 
