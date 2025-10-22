@@ -32,6 +32,8 @@ class File(IRNode):
     meta_tags: list[str] = field(default_factory=list)
     body: list[IRNode] = field(default_factory=list)
 
+    meta: dict = field(default_factory=dict)
+
     def walk(self) -> Iterator[IRNode]:
         yield self
         for node in self.body:
@@ -203,6 +205,7 @@ class BoolOp(IRNode):
         yield self
         if self.left:
             yield from self.left.walk()
+
         if self.right:
             yield from self.right.walk()
 
@@ -261,6 +264,7 @@ class ClassDef(IRNode):
         yield self
         for base in self.bases:
             yield from base.walk()
+
         for node in self.body:
             yield from node.walk()
 
@@ -280,6 +284,7 @@ class If(IRNode):
         yield from self.test.walk()
         for node in self.body:
             yield from node.walk()
+
         for node in self.orelse:
             yield from node.walk()
 
@@ -295,6 +300,7 @@ class While(IRNode):
         yield from self.test.walk()
         for node in self.body:
             yield from node.walk()
+
         for node in self.orelse:
             yield from node.walk()
 
@@ -328,6 +334,7 @@ class With(IRNode):
         yield from self.context.walk()
         if self.target:
             yield from self.target.walk()
+
         for node in self.body:
             yield from node.walk()
 
@@ -342,6 +349,7 @@ class ExceptHandler(IRNode):
         yield self
         if self.type:
             yield from self.type.walk()
+
         for node in self.body:
             yield from node.walk()
 
