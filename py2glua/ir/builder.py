@@ -41,7 +41,7 @@ class IRBuilder:
     # region Entry
     @classmethod
     def build_ir(cls, module: ast.Module) -> File:
-        file = File(lineno=None, col_offset=None, parent=None)
+        file = File(lineno=None, col_offset=None, parent=None, file=None)
         for stmt in module.body:
             ir_nodes = cls.build_node(stmt)
             if not ir_nodes:
@@ -52,6 +52,13 @@ class IRBuilder:
 
             else:
                 cls._append_child(file, ir_nodes)
+
+        for node in file.walk():
+            if node is file:
+                continue
+
+            else:
+                node.file = file
 
         return file
 
@@ -72,7 +79,7 @@ class IRBuilder:
         child: IRNode,
     ) -> None:
         child.parent = parent
-        parent.body.append(child)  # type: ignore[attr-defined]
+        parent.body.append(child)
 
     @staticmethod
     def _append_children(
@@ -81,7 +88,7 @@ class IRBuilder:
     ) -> None:
         for ch in children:
             ch.parent = parent
-            parent.body.append(ch)  # type: ignore[attr-defined]
+            parent.body.append(ch)
 
     # endregion
 
@@ -98,6 +105,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
 
     @staticmethod
@@ -112,6 +120,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
 
     # endregion
@@ -124,6 +133,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
 
     @staticmethod
@@ -133,6 +143,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
 
     @classmethod
@@ -152,6 +163,7 @@ class IRBuilder:
                     lineno=node.lineno,
                     col_offset=node.col_offset,
                     parent=None,
+                    file=None,
                 )
                 value_ir.parent = store
                 stores.append(store)
@@ -184,6 +196,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
         value_ir.parent = store
         store.annotation = ast.unparse(node.annotation)
@@ -201,6 +214,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
         right = cls.build_node(node.value)
         assert isinstance(right, IRNode)
@@ -212,6 +226,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
         left.parent = binop
         right.parent = binop
@@ -222,6 +237,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
         binop.parent = store
         return [store]
@@ -242,6 +258,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
         left.parent = binop
         right.parent = binop
@@ -260,6 +277,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
 
     @classmethod
@@ -285,6 +303,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
         operand_ir.parent = unop_ir
         return unop_ir
@@ -321,6 +340,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
         left.parent = cmp_ir
         right.parent = cmp_ir
@@ -343,6 +363,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
 
         func_ir.parent = call_ir
@@ -361,6 +382,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
         value_ir.parent = attr_ir
         return attr_ir
@@ -377,6 +399,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
         value_ir.parent = sub_ir
         index_ir.parent = sub_ir
@@ -398,6 +421,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
         for el in elements:
             el.parent = list_ir
@@ -417,6 +441,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
         for el in elements:
             el.parent = tup_ir
@@ -443,6 +468,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
         for el in keys + values:
             el.parent = dict_ir
@@ -464,6 +490,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
             body=[],
         )
 
@@ -488,9 +515,11 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
         if value_ir:
             value_ir.parent = ret
+
         return ret
 
     # endregion
@@ -513,6 +542,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
             body=[],
         )
 
@@ -549,6 +579,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
         test_ir.parent = if_ir
 
@@ -560,6 +591,7 @@ class IRBuilder:
             if isinstance(body_ir, list):
                 for ch in body_ir:
                     ch.parent = if_ir
+
                 if_ir.body.extend(body_ir)
 
             else:
@@ -574,6 +606,7 @@ class IRBuilder:
             if isinstance(orelse_ir, list):
                 for ch in orelse_ir:
                     ch.parent = if_ir
+
                 if_ir.orelse.extend(orelse_ir)
 
             else:
@@ -592,6 +625,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
         test_ir.parent = while_ir
 
@@ -628,6 +662,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
         target_ir.parent = for_ir
         iter_ir.parent = for_ir
@@ -670,6 +705,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
             body=[],
         )
         context_ir.parent = with_ir
@@ -695,6 +731,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
             body=[],
             handlers=[],
             orelse=[],
@@ -727,6 +764,7 @@ class IRBuilder:
                 lineno=h.lineno,
                 col_offset=h.col_offset,
                 parent=try_ir,
+                file=None,
                 body=[],
             )
             if type_ir:
@@ -784,6 +822,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
 
     @staticmethod
@@ -792,6 +831,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
 
     @staticmethod
@@ -800,6 +840,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
+            file=None,
         )
 
     # endregion

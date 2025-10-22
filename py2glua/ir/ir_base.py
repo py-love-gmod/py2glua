@@ -13,6 +13,8 @@ from ..runtime import Realm
 class IRNode:
     lineno: int | None
     col_offset: int | None
+
+    file: File | None
     parent: IRNode | None
 
     def walk(self) -> Iterator[IRNode]:

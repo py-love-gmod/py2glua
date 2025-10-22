@@ -53,6 +53,17 @@ def test_empty_file():
     assert ir.body == []
 
 
+def test_link_to_file():
+    ir = build_ir("""
+def foo(a, b):
+    x = a + b
+    return x
+""")
+    assert isinstance(ir, File)
+    for node in ir.body:
+        assert node.file is ir
+
+
 # endregion
 
 
