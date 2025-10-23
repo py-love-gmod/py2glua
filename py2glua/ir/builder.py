@@ -1,6 +1,8 @@
 import ast
+from pathlib import Path
 from typing import Iterable
 
+from ..exceptions import DeliberatelyUnsupportedError
 from .ir_base import (
     Attribute,
     BinOp,
@@ -40,10 +42,22 @@ from .ir_base import (
 class IRBuilder:
     # region Entry
     @classmethod
-    def build_ir(cls, module: ast.Module) -> File:
-        file = File(lineno=None, col_offset=None, parent=None, file=None)
+    def build_ir(
+        cls,
+        module: ast.Module,
+        *,
+        path: Path | str | None = None,
+    ) -> File:
+        file_path = Path(path) if isinstance(path, str) else path
+        file = File(
+            lineno=None,
+            col_offset=None,
+            parent=None,
+            file=None,
+            path=file_path,
+        )
         for stmt in module.body:
-            ir_nodes = cls.build_node(stmt)
+            ir_nodes = cls.build_node(stmt, file)
             if not ir_nodes:
                 continue
 
@@ -53,17 +67,14 @@ class IRBuilder:
             else:
                 cls._append_child(file, ir_nodes)
 
-        for node in file.walk():
-            if node is file:
-                continue
-
-            else:
-                node.file = file
-
         return file
 
     @classmethod
-    def build_node(cls, node: ast.AST | None):
+    def build_node(
+        cls,
+        node: ast.AST | None,
+        file: File | None = None,
+    ):
         if node is None:
             return None
 
@@ -71,7 +82,7 @@ class IRBuilder:
         if handler is None:
             raise NotImplementedError(f"Unsupported AST node: {type(node).__name__}")
 
-        return handler(node)
+        return handler(node, file)
 
     @staticmethod
     def _append_child(
@@ -94,7 +105,7 @@ class IRBuilder:
 
     # region Imports
     @staticmethod
-    def build_Import(node: ast.Import) -> Import:
+    def build_Import(node: ast.Import, file: File | None) -> Import:
         names = [alias.name for alias in node.names]
         aliases = [alias.asname for alias in node.names]
         return Import(
@@ -105,11 +116,11 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
 
     @staticmethod
-    def build_ImportFrom(node: ast.ImportFrom) -> Import:
+    def build_ImportFrom(node: ast.ImportFrom, file: File | None) -> Import:
         names = [alias.name for alias in node.names]
         aliases = [alias.asname for alias in node.names]
         return Import(
@@ -120,35 +131,35 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
 
     # endregion
 
     # region Constants / Vars / Assignments
     @staticmethod
-    def build_Name(node: ast.Name) -> VarLoad:
+    def build_Name(node: ast.Name, file: File | None) -> VarLoad:
         return VarLoad(
             name=node.id,
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
 
     @staticmethod
-    def build_Constant(node: ast.Constant) -> Constant:
+    def build_Constant(node: ast.Constant, file: File | None) -> Constant:
         return Constant(
             value=node.value,
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
 
     @classmethod
-    def build_Assign(cls, node: ast.Assign) -> list[VarStore]:
-        value_ir = cls.build_node(node.value)
+    def build_Assign(cls, node: ast.Assign, file: File | None) -> list[VarStore]:
+        value_ir = cls.build_node(node.value, file)
         if not isinstance(value_ir, IRNode):
             raise NotImplementedError(
                 f"Assign value of type {type(value_ir).__name__} is not supported yet"
@@ -163,7 +174,7 @@ class IRBuilder:
                     lineno=node.lineno,
                     col_offset=node.col_offset,
                     parent=None,
-                    file=None,
+                    file=file,
                 )
                 value_ir.parent = store
                 stores.append(store)
@@ -176,7 +187,7 @@ class IRBuilder:
         return stores
 
     @classmethod
-    def build_AnnAssign(cls, node: ast.AnnAssign) -> VarStore:
+    def build_AnnAssign(cls, node: ast.AnnAssign, file: File | None) -> VarStore:
         if not isinstance(node.target, ast.Name):
             raise NotImplementedError(
                 f"Unsupported annotated target: {type(node.target).__name__}"
@@ -187,7 +198,7 @@ class IRBuilder:
                 "Annotated assignment without value is not supported yet"
             )
 
-        value_ir = cls.build_node(node.value)
+        value_ir = cls.build_node(node.value, file)
         assert isinstance(value_ir, IRNode)
 
         store = VarStore(
@@ -196,14 +207,14 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
         value_ir.parent = store
         store.annotation = ast.unparse(node.annotation)
         return store
 
     @classmethod
-    def build_AugAssign(cls, node: ast.AugAssign) -> list[VarStore]:
+    def build_AugAssign(cls, node: ast.AugAssign, file: File | None) -> list[VarStore]:
         if not isinstance(node.target, ast.Name):
             raise NotImplementedError(
                 f"Unsupported augmented target: {type(node.target).__name__}"
@@ -214,9 +225,9 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
-        right = cls.build_node(node.value)
+        right = cls.build_node(node.value, file)
         assert isinstance(right, IRNode)
 
         binop = BinOp(
@@ -226,7 +237,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
         left.parent = binop
         right.parent = binop
@@ -237,7 +248,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
         binop.parent = store
         return [store]
@@ -246,9 +257,9 @@ class IRBuilder:
 
     # region Expressions
     @classmethod
-    def build_BinOp(cls, node: ast.BinOp) -> BinOp:
-        left = cls.build_node(node.left)
-        right = cls.build_node(node.right)
+    def build_BinOp(cls, node: ast.BinOp, file: File | None) -> BinOp:
+        left = cls.build_node(node.left, file)
+        right = cls.build_node(node.right, file)
         assert isinstance(left, IRNode)
         assert isinstance(right, IRNode)
         binop = BinOp(
@@ -258,18 +269,18 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
         left.parent = binop
         right.parent = binop
         return binop
 
     @classmethod
-    def build_BoolOp(cls, node: ast.BoolOp) -> BoolOp:
+    def build_BoolOp(cls, node: ast.BoolOp, file: File | None) -> BoolOp:
         op_map = {ast.And: BoolOpType.AND, ast.Or: BoolOpType.OR}
         op_type = op_map[type(node.op)]
-        left = cls.build_node(node.values[0])
-        right = cls.build_node(node.values[1])
+        left = cls.build_node(node.values[0], file)
+        right = cls.build_node(node.values[1], file)
         return BoolOp(
             op=op_type,
             left=left,
@@ -277,11 +288,11 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
 
     @classmethod
-    def build_UnaryOp(cls, node: ast.UnaryOp) -> UnaryOp:
+    def build_UnaryOp(cls, node: ast.UnaryOp, file: File | None) -> UnaryOp:
         op_map = {
             ast.UAdd: UnaryOpType.POS,
             ast.USub: UnaryOpType.NEG,
@@ -294,7 +305,7 @@ class IRBuilder:
                 f"Unsupported unary operator: {type(node.op).__name__}"
             )
 
-        operand_ir = cls.build_node(node.operand)
+        operand_ir = cls.build_node(node.operand, file)
         assert isinstance(operand_ir, IRNode)
 
         unop_ir = UnaryOp(
@@ -303,13 +314,13 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
         operand_ir.parent = unop_ir
         return unop_ir
 
     @classmethod
-    def build_Compare(cls, node: ast.Compare) -> Compare:
+    def build_Compare(cls, node: ast.Compare, file: File | None) -> Compare:
         op_map = {
             ast.Eq: BoolOpType.EQ,
             ast.NotEq: BoolOpType.NE,
@@ -328,8 +339,8 @@ class IRBuilder:
                 f"Unsupported compare operator: {type(node.ops[0]).__name__}"
             )
 
-        left = cls.build_node(node.left)
-        right = cls.build_node(node.comparators[0])
+        left = cls.build_node(node.left, file)
+        right = cls.build_node(node.comparators[0], file)
         assert isinstance(left, IRNode)
         assert isinstance(right, IRNode)
 
@@ -340,20 +351,20 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
         left.parent = cmp_ir
         right.parent = cmp_ir
         return cmp_ir
 
     @classmethod
-    def build_Call(cls, node: ast.Call) -> Call:
-        func_ir = cls.build_node(node.func)
+    def build_Call(cls, node: ast.Call, file: File | None) -> Call:
+        func_ir = cls.build_node(node.func, file)
         assert isinstance(func_ir, IRNode)
 
         args_ir: list[IRNode] = []
         for arg in node.args:
-            arg_ir = cls.build_node(arg)
+            arg_ir = cls.build_node(arg, file)
             assert isinstance(arg_ir, IRNode)
             args_ir.append(arg_ir)
 
@@ -363,7 +374,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
 
         func_ir.parent = call_ir
@@ -373,8 +384,18 @@ class IRBuilder:
         return call_ir
 
     @classmethod
-    def build_Attribute(cls, node: ast.Attribute) -> Attribute:
-        value_ir = cls.build_node(node.value)
+    def build_Await(cls, node: ast.Await, file: File | None) -> IRNode:
+        path = file.path if file else None
+        raise DeliberatelyUnsupportedError(
+            "Asynchronous await expressions are not supported",
+            file_path=path,
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+        )
+
+    @classmethod
+    def build_Attribute(cls, node: ast.Attribute, file: File | None) -> Attribute:
+        value_ir = cls.build_node(node.value, file)
         assert isinstance(value_ir, IRNode)
         attr_ir = Attribute(
             value=value_ir,
@@ -382,15 +403,15 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
         value_ir.parent = attr_ir
         return attr_ir
 
     @classmethod
-    def build_Subscript(cls, node: ast.Subscript) -> Subscript:
-        value_ir = cls.build_node(node.value)
-        index_ir = cls.build_node(node.slice)
+    def build_Subscript(cls, node: ast.Subscript, file: File | None) -> Subscript:
+        value_ir = cls.build_node(node.value, file)
+        index_ir = cls.build_node(node.slice, file)
         assert isinstance(value_ir, IRNode)
         assert isinstance(index_ir, IRNode)
         sub_ir = Subscript(
@@ -399,7 +420,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
         value_ir.parent = sub_ir
         index_ir.parent = sub_ir
@@ -409,10 +430,10 @@ class IRBuilder:
 
     # region Container
     @classmethod
-    def build_List(cls, node: ast.List) -> ListLiteral:
+    def build_List(cls, node: ast.List, file: File | None) -> ListLiteral:
         elements = []
         for elt in node.elts:
-            ir = cls.build_node(elt)
+            ir = cls.build_node(elt, file)
             assert isinstance(ir, IRNode)
             elements.append(ir)
 
@@ -421,7 +442,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
         for el in elements:
             el.parent = list_ir
@@ -429,10 +450,10 @@ class IRBuilder:
         return list_ir
 
     @classmethod
-    def build_Tuple(cls, node: ast.Tuple) -> TupleLiteral:
+    def build_Tuple(cls, node: ast.Tuple, file: File | None) -> TupleLiteral:
         elements = []
         for elt in node.elts:
-            ir = cls.build_node(elt)
+            ir = cls.build_node(elt, file)
             assert isinstance(ir, IRNode)
             elements.append(ir)
 
@@ -441,7 +462,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
         for el in elements:
             el.parent = tup_ir
@@ -449,11 +470,11 @@ class IRBuilder:
         return tup_ir
 
     @classmethod
-    def build_Dict(cls, node: ast.Dict) -> DictLiteral:
+    def build_Dict(cls, node: ast.Dict, file: File | None) -> DictLiteral:
         keys, values = [], []
         for k, v in zip(node.keys, node.values):
-            key_ir = cls.build_node(k) if k is not None else None
-            val_ir = cls.build_node(v)
+            key_ir = cls.build_node(k, file) if k is not None else None
+            val_ir = cls.build_node(v, file)
             if key_ir:
                 assert isinstance(key_ir, IRNode)
                 key_ir.parent = None
@@ -468,7 +489,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
         for el in keys + values:
             el.parent = dict_ir
@@ -479,7 +500,19 @@ class IRBuilder:
 
     # region Functions
     @classmethod
-    def build_FunctionDef(cls, node: ast.FunctionDef) -> FunctionDef:
+    def build_AsyncFunctionDef(
+        cls, node: ast.AsyncFunctionDef, file: File | None
+    ) -> IRNode:
+        path = file.path if file else None
+        raise DeliberatelyUnsupportedError(
+            "Asynchronous functions are not supported",
+            file_path=path,
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+        )
+
+    @classmethod
+    def build_FunctionDef(cls, node: ast.FunctionDef, file: File | None) -> FunctionDef:
         args = [a.arg for a in node.args.args]
         decorators = [ast.unparse(d) for d in node.decorator_list]
 
@@ -490,12 +523,12 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
             body=[],
         )
 
         for stmt in node.body:
-            ir = cls.build_node(stmt)
+            ir = cls.build_node(stmt, file)
             if not ir:
                 continue
             if isinstance(ir, list):
@@ -508,14 +541,14 @@ class IRBuilder:
         return fn
 
     @classmethod
-    def build_Return(cls, node: ast.Return) -> Return:
-        value_ir = cls.build_node(node.value) if node.value else None
+    def build_Return(cls, node: ast.Return, file: File | None) -> Return:
+        value_ir = cls.build_node(node.value, file) if node.value else None
         ret = Return(
             value=value_ir,
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
         if value_ir:
             value_ir.parent = ret
@@ -526,11 +559,11 @@ class IRBuilder:
 
     # region Classes
     @classmethod
-    def build_ClassDef(cls, node: ast.ClassDef):
+    def build_ClassDef(cls, node: ast.ClassDef, file: File | None):
         name = node.name
         bases_ir: list[IRNode] = []
         for base in node.bases:
-            base_ir = cls.build_node(base)
+            base_ir = cls.build_node(base, file)
             assert isinstance(base_ir, IRNode)
             bases_ir.append(base_ir)
 
@@ -542,7 +575,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
             body=[],
         )
 
@@ -550,7 +583,7 @@ class IRBuilder:
             base_ir.parent = class_ir
 
         for stmt in node.body:
-            stmt_ir = cls.build_node(stmt)
+            stmt_ir = cls.build_node(stmt, file)
             if not stmt_ir:
                 continue
 
@@ -570,8 +603,8 @@ class IRBuilder:
 
     # region Control Flow
     @classmethod
-    def build_If(cls, node: ast.If) -> If:
-        test_ir = cls.build_node(node.test)
+    def build_If(cls, node: ast.If, file: File | None) -> If:
+        test_ir = cls.build_node(node.test, file)
         assert isinstance(test_ir, IRNode)
 
         if_ir = If(
@@ -579,12 +612,12 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
         test_ir.parent = if_ir
 
         for stmt in node.body:
-            body_ir = cls.build_node(stmt)
+            body_ir = cls.build_node(stmt, file)
             if not body_ir:
                 continue
 
@@ -599,7 +632,7 @@ class IRBuilder:
                 if_ir.body.append(body_ir)
 
         for stmt in node.orelse:
-            orelse_ir = cls.build_node(stmt)
+            orelse_ir = cls.build_node(stmt, file)
             if not orelse_ir:
                 continue
 
@@ -616,8 +649,8 @@ class IRBuilder:
         return if_ir
 
     @classmethod
-    def build_While(cls, node: ast.While) -> While:
-        test_ir = cls.build_node(node.test)
+    def build_While(cls, node: ast.While, file: File | None) -> While:
+        test_ir = cls.build_node(node.test, file)
         assert isinstance(test_ir, IRNode)
 
         while_ir = While(
@@ -625,12 +658,12 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
         test_ir.parent = while_ir
 
         for stmt in node.body:
-            body_ir = cls.build_node(stmt)
+            body_ir = cls.build_node(stmt, file)
             if not body_ir:
                 continue
 
@@ -639,7 +672,7 @@ class IRBuilder:
             ) else cls._append_children(while_ir, body_ir)
 
         for stmt in node.orelse:
-            orelse_ir = cls.build_node(stmt)
+            orelse_ir = cls.build_node(stmt, file)
             if not orelse_ir:
                 continue
 
@@ -650,9 +683,19 @@ class IRBuilder:
         return while_ir
 
     @classmethod
-    def build_For(cls, node: ast.For) -> For:
-        target_ir = cls.build_node(node.target)
-        iter_ir = cls.build_node(node.iter)
+    def build_AsyncFor(cls, node: ast.AsyncFor, file: File | None) -> IRNode:
+        path = file.path if file else None
+        raise DeliberatelyUnsupportedError(
+            "Asynchronous for-loops are not supported",
+            file_path=path,
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+        )
+
+    @classmethod
+    def build_For(cls, node: ast.For, file: File | None) -> For:
+        target_ir = cls.build_node(node.target, file)
+        iter_ir = cls.build_node(node.iter, file)
         assert isinstance(target_ir, IRNode)
         assert isinstance(iter_ir, IRNode)
 
@@ -662,13 +705,13 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
         target_ir.parent = for_ir
         iter_ir.parent = for_ir
 
         for stmt in node.body:
-            body_ir = cls.build_node(stmt)
+            body_ir = cls.build_node(stmt, file)
             if not body_ir:
                 continue
 
@@ -677,7 +720,7 @@ class IRBuilder:
             ) else cls._append_children(for_ir, body_ir)
 
         for stmt in node.orelse:
-            orelse_ir = cls.build_node(stmt)
+            orelse_ir = cls.build_node(stmt, file)
             if not orelse_ir:
                 continue
 
@@ -688,15 +731,25 @@ class IRBuilder:
         return for_ir
 
     @classmethod
-    def build_With(cls, node: ast.With) -> With:
+    def build_AsyncWith(cls, node: ast.AsyncWith, file: File | None) -> IRNode:
+        path = file.path if file else None
+        raise DeliberatelyUnsupportedError(
+            "Asynchronous with-statements are not supported",
+            file_path=path,
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+        )
+
+    @classmethod
+    def build_With(cls, node: ast.With, file: File | None) -> With:
         item = node.items[0]
 
-        context_ir = cls.build_node(item.context_expr)
+        context_ir = cls.build_node(item.context_expr, file)
         assert isinstance(context_ir, IRNode)
 
         target_ir = None
         if item.optional_vars:
-            target_ir = cls.build_node(item.optional_vars)
+            target_ir = cls.build_node(item.optional_vars, file)
             assert isinstance(target_ir, IRNode)
 
         with_ir = With(
@@ -705,7 +758,7 @@ class IRBuilder:
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
             body=[],
         )
         context_ir.parent = with_ir
@@ -713,7 +766,7 @@ class IRBuilder:
             target_ir.parent = with_ir
 
         for stmt in node.body:
-            ir = cls.build_node(stmt)
+            ir = cls.build_node(stmt, file)
             if not ir:
                 continue
 
@@ -726,12 +779,12 @@ class IRBuilder:
         return with_ir
 
     @classmethod
-    def build_Try(cls, node: ast.Try) -> Try:
+    def build_Try(cls, node: ast.Try, file: File | None) -> Try:
         try_ir = Try(
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
             body=[],
             handlers=[],
             orelse=[],
@@ -739,7 +792,7 @@ class IRBuilder:
         )
 
         for stmt in node.body:
-            ir = cls.build_node(stmt)
+            ir = cls.build_node(stmt, file)
             if not ir:
                 continue
 
@@ -750,7 +803,9 @@ class IRBuilder:
                 cls._append_child(try_ir, ir)
 
         for h in node.handlers:
-            type_ir = cls.build_node(h.type) if h.type is not None else None
+            type_ir = (
+                cls.build_node(h.type, file) if h.type is not None else None
+            )
             if type_ir is not None:
                 assert isinstance(type_ir, IRNode)
 
@@ -764,14 +819,14 @@ class IRBuilder:
                 lineno=h.lineno,
                 col_offset=h.col_offset,
                 parent=try_ir,
-                file=None,
+                file=file,
                 body=[],
             )
             if type_ir:
                 type_ir.parent = handler_ir
 
             for stmt in h.body:
-                ir = cls.build_node(stmt)
+                ir = cls.build_node(stmt, file)
                 if not ir:
                     continue
 
@@ -787,7 +842,7 @@ class IRBuilder:
             try_ir.handlers.append(handler_ir)
 
         for stmt in node.orelse:
-            ir = cls.build_node(stmt)
+            ir = cls.build_node(stmt, file)
             if not ir:
                 continue
 
@@ -801,7 +856,7 @@ class IRBuilder:
                 try_ir.orelse.append(ir)
 
         for stmt in node.finalbody:
-            ir = cls.build_node(stmt)
+            ir = cls.build_node(stmt, file)
             if not ir:
                 continue
 
@@ -817,38 +872,38 @@ class IRBuilder:
         return try_ir
 
     @staticmethod
-    def build_Break(node: ast.Break) -> Break:
+    def build_Break(node: ast.Break, file: File | None) -> Break:
         return Break(
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
 
     @staticmethod
-    def build_Continue(node: ast.Continue) -> Continue:
+    def build_Continue(node: ast.Continue, file: File | None) -> Continue:
         return Continue(
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
 
     @staticmethod
-    def build_Pass(node: ast.Pass) -> Pass:
+    def build_Pass(node: ast.Pass, file: File | None) -> Pass:
         return Pass(
             lineno=node.lineno,
             col_offset=node.col_offset,
             parent=None,
-            file=None,
+            file=file,
         )
 
     # endregion
 
     # region Misc
     @classmethod
-    def build_Expr(cls, node: ast.Expr) -> IRNode:
-        value_ir = cls.build_node(node.value)
+    def build_Expr(cls, node: ast.Expr, file: File | None) -> IRNode:
+        value_ir = cls.build_node(node.value, file)
         assert isinstance(value_ir, IRNode)
         return value_ir
 

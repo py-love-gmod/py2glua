@@ -1,5 +1,9 @@
 import ast
+from pathlib import Path
 
+import pytest
+
+from py2glua.exceptions import DeliberatelyUnsupportedError
 from py2glua.ir.builder import IRBuilder
 from py2glua.ir.ir_base import (
     Attribute,
@@ -41,6 +45,34 @@ def build_ir(src: str) -> File:
     ir = IRBuilder.build_ir(tree)
     assert isinstance(ir, File)
     return ir
+
+
+# endregion
+
+
+# region Unsupported features
+def test_async_function_not_supported():
+    tree = ast.parse("async def foo():\n    pass\n")
+    with pytest.raises(DeliberatelyUnsupportedError):
+        IRBuilder.build_ir(tree, path=Path("async_file.py"))
+
+
+def test_await_not_supported():
+    code = ast.parse("await bar()")
+    with pytest.raises(DeliberatelyUnsupportedError):
+        IRBuilder.build_ir(code)
+
+
+def test_async_for_not_supported():
+    code = ast.parse("async for item in ['1', '2']:\n    pass")
+    with pytest.raises(DeliberatelyUnsupportedError):
+        IRBuilder.build_ir(code)
+
+
+def test_async_with_not_supported():
+    code = ast.parse("async with bar():\n    pass")
+    with pytest.raises(DeliberatelyUnsupportedError):
+        IRBuilder.build_ir(code)
 
 
 # endregion
