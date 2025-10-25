@@ -2,7 +2,10 @@ import logging
 import subprocess
 import sys
 
-modules = ["py2glua.runtime"]
+modules = [
+    "py2glua.glua",
+    "py2glua.runtime",
+]
 output_dir = "docs"
 
 cmd = ["pdoc"] + modules + ["-o", output_dir, "-d", "markdown"]
