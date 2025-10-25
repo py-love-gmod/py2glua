@@ -433,3 +433,10 @@ class DictLiteral(IRNode):
 
 
 # endregion
+
+# TODO:
+# lambda
+# match/case
+# comprehension ## [x+1 for x in arr]
+# walrus ## :=
+# f-строки
