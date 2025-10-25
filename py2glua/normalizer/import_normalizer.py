@@ -1,33 +1,17 @@
+import re
 import sys
 from pathlib import Path
 
 from ..config import Py2GluaConfig
 from ..ir.ir_base import (
     Attribute,
-    BinOp,
-    BoolOp,
-    Call,
     ClassDef,
-    Compare,
-    DictLiteral,
-    ExceptHandler,
     File,
-    For,
     FunctionDef,
-    If,
     Import,
     ImportType,
     IRNode,
-    ListLiteral,
-    Return,
-    Subscript,
-    Try,
-    TupleLiteral,
-    UnaryOp,
     VarLoad,
-    VarStore,
-    While,
-    With,
 )
 from .base_normalizer import BaseNormalizer
 
@@ -37,26 +21,53 @@ class ImportNormalizer(BaseNormalizer):
 
     @classmethod
     def run(cls, file: File) -> None:
-        file.meta["import_map"] = {}
+        import_map = cls._collect_imports_and_tag_types(file)
+        if not import_map:
+            return
 
-        for node in file.walk():
-            if isinstance(node, Import):
-                cls._normilize_import(node, file)
+        file.meta["import_map"] = import_map
+        try:
+            cls._apply_import_map(file, import_map)
+
+        finally:
+            file.meta.pop("import_map", None)
+
+    @classmethod
+    def _collect_imports_and_tag_types(cls, file: File) -> dict[str, str]:
+        import_map: dict[str, str] = {}
 
         for node in file.walk():
             if not isinstance(node, Import):
-                cls._normilize_nodes(node, file)
+                continue
 
-        del file.meta["import_map"]
+            cls._set_import_type(node)
 
-    @classmethod
-    def _set_import_type(cls, node: Import):
-        module = node.module
-        if module is None:
-            module = node.names[0] if node.names else None
-            if module is None:
-                node.import_type = ImportType.UNKNOWN
-                return
+            if node.module and node.names:
+                module = node.module
+                for name, alias in zip(node.names, node.aliases):
+                    full = f"{module}.{name}"
+                    import_map[name] = full
+                    if alias:
+                        import_map[alias] = full
+
+                node.module = None
+                node.names = [f"{module}.{n}" for n in node.names]
+                node.aliases = [None] * len(node.names)
+                continue
+
+            if node.module is None and node.names:
+                for name, alias in zip(node.names, node.aliases):
+                    if alias:
+                        import_map[alias] = name
+
+        return import_map
+
+    @staticmethod
+    def _set_import_type(node: Import) -> None:
+        module = node.module or (node.names[0] if node.names else None)
+        if not module:
+            node.import_type = ImportType.UNKNOWN
+            return
 
         if module in sys.stdlib_module_names:
             node.import_type = ImportType.PYTHON_STD
@@ -66,17 +77,34 @@ class ImportNormalizer(BaseNormalizer):
             node.import_type = ImportType.INTERNAL
             return
 
-        source_root: Path = Py2GluaConfig.data["build"]["source"]
-        mod_path = source_root / module.replace(".", "/")
-        candidate_files = [
-            mod_path.with_suffix(".py"),
-            mod_path / "__init__.py",
-        ]
-        if any(p.exists() for p in candidate_files):
+        src_root: Path = Py2GluaConfig.data["build"]["source"]
+        mod_path = src_root / module.replace(".", "/")
+        if (mod_path.with_suffix(".py")).exists() or (
+            mod_path / "__init__.py"
+        ).exists():
             node.import_type = ImportType.LOCAL
             return
 
         node.import_type = ImportType.EXTERNAL
+
+    @classmethod
+    def _apply_import_map(cls, file: File, import_map: dict[str, str]) -> None:
+        for node in file.walk():
+            if isinstance(node, VarLoad) and node.name in import_map:
+                qualified = import_map[node.name]
+                chain_top = cls._build_attr_chain(qualified, node)
+                cls._replace_node(node, chain_top)
+
+        for node in file.walk():
+            if isinstance(node, (FunctionDef, ClassDef)):
+                if not getattr(node, "decorators", None):
+                    continue
+                node.decorators = [
+                    cls._qualify_decorator_string(d, import_map)
+                    if isinstance(d, str)
+                    else d
+                    for d in node.decorators
+                ]
 
     @staticmethod
     def _build_attr_chain(qualified: str, template: IRNode) -> IRNode:
@@ -89,7 +117,6 @@ class ImportNormalizer(BaseNormalizer):
             name=parts[0],
         )
         cur = root
-
         for attr in parts[1:]:
             nxt = Attribute(
                 lineno=template.lineno,
@@ -104,240 +131,56 @@ class ImportNormalizer(BaseNormalizer):
 
         return cur
 
-    @staticmethod
-    def _replace_in_parent(parent: IRNode | None, old: IRNode, new: IRNode) -> None:
+    @classmethod
+    def _replace_node(cls, old: IRNode, new: IRNode) -> None:
+        parent = old.parent
         if parent is None:
             return
 
-        def repl_in_list(items: list[IRNode]) -> bool:
-            for i, it in enumerate(items):
-                if it is old:
-                    items[i] = new
-                    new.parent = parent
-                    return True
-
-            return False
-
-        if isinstance(parent, VarStore):
-            if parent.value is old:
-                parent.value = new
-                new.parent = parent
-                return
-
-        if isinstance(parent, Call):
-            if parent.func is old:
-                parent.func = new
-                new.parent = parent
-                return
-
-            if repl_in_list(parent.args):
-                return
-
-        if isinstance(parent, Attribute):
-            if parent.value is old:
-                parent.value = new
-                new.parent = parent
-                return
-
-        if isinstance(parent, Subscript):
-            if parent.value is old:
-                parent.value = new
-                new.parent = parent
-                return
-
-            if parent.index is old:
-                parent.index = new
-                new.parent = parent
-                return
-
-        if isinstance(parent, UnaryOp):
-            if parent.operand is old:
-                parent.operand = new
-                new.parent = parent
-                return
-
-        if isinstance(parent, BinOp):
-            if parent.left is old:
-                parent.left = new
-                new.parent = parent
-                return
-
-            if parent.right is old:
-                parent.right = new
-                new.parent = parent
-                return
-
-        if isinstance(parent, BoolOp):
-            if parent.left is old:
-                parent.left = new
-                new.parent = parent
-                return
-
-            if parent.right is old:
-                parent.right = new
-                new.parent = parent
-                return
-
-        if isinstance(parent, Compare):
-            if parent.left is old:
-                parent.left = new
-                new.parent = parent
-                return
-
-            if parent.right is old:
-                parent.right = new
-                new.parent = parent
-                return
-
-        if isinstance(parent, Return):
-            if parent.value is old:
-                parent.value = new
-                new.parent = parent
-                return
-
-        if isinstance(parent, FunctionDef):
-            if repl_in_list(parent.body):
-                return
-
-        if isinstance(parent, ClassDef):
-            if repl_in_list(parent.bases):
-                return
-
-            if repl_in_list(parent.body):
-                return
-
-        if isinstance(parent, If):
-            if parent.test is old:
-                parent.test = new
-                new.parent = parent
-                return
-
-            if repl_in_list(parent.body):
-                return
-
-            if repl_in_list(parent.orelse):
-                return
-
-        if isinstance(parent, While):
-            if parent.test is old:
-                parent.test = new
-                new.parent = parent
-                return
-
-            if repl_in_list(parent.body):
-                return
-
-            if repl_in_list(parent.orelse):
-                return
-
-        if isinstance(parent, For):
-            if parent.target is old:
-                parent.target = new
-                new.parent = parent
-                return
-
-            if parent.iter is old:
-                parent.iter = new
-                new.parent = parent
-                return
-
-            if repl_in_list(parent.body):
-                return
-
-            if repl_in_list(parent.orelse):
-                return
-
-        if isinstance(parent, With):
-            if parent.context is old:
-                parent.context = new
-                new.parent = parent
-                return
-
-            if parent.target is old:
-                parent.target = new
-                new.parent = parent
-                return
-
-            if repl_in_list(parent.body):
-                return
-
-        if isinstance(parent, ExceptHandler):
-            if parent.type is old:
-                parent.type = new
-                new.parent = parent
-                return
-
-            if repl_in_list(parent.body):
-                return
-
-        if isinstance(parent, Try):
-            if repl_in_list(parent.body):
-                return
-
-            if repl_in_list(parent.orelse):
-                return
-
-            if repl_in_list(parent.finalbody):
-                return
-
-        if isinstance(parent, ListLiteral):
-            if repl_in_list(parent.elements):
-                return
-
-        if isinstance(parent, TupleLiteral):
-            if repl_in_list(parent.elements):
-                return
-
-        if isinstance(parent, DictLiteral):
-            if repl_in_list(parent.keys):
-                return
-
-            if repl_in_list(parent.values):
-                return
-
-        if isinstance(parent, File):
-            if repl_in_list(parent.body):
-                return
-
-    @classmethod
-    def _normilize_import(cls, node: Import, file: File):
-        cls._set_import_type(node)
-
-        import_map: dict[str, str] = file.meta["import_map"]
-
-        if node.module is not None and node.names:
-            new_names: list[str] = []
-            new_aliases: list[str | None] = []
-
-            for name, alias in zip(node.names, node.aliases):
-                full = f"{node.module}.{name}"
-                import_map[name] = full
-                if alias:
-                    import_map[alias] = full
-
-                new_names.append(full)
-                new_aliases.append(None)
-
-            node.module = None
-            node.names = new_names
-            node.aliases = new_aliases
+        replaced = cls._replace_in_object_attr(parent, old, new)
+        if replaced:
+            new.parent = parent
             return
 
-        if node.module is None and node.names:
-            for name, alias in zip(node.names, node.aliases):
-                if alias:
-                    import_map[alias] = name
-
+        replaced = cls._replace_in_object_list(parent, old, new)
+        if replaced:
+            new.parent = parent
             return
 
-    @classmethod
-    def _normilize_nodes(cls, node: IRNode, file: File):
-        import_map: dict[str, str] = file.meta.get("import_map", {})
+    @staticmethod
+    def _replace_in_object_attr(obj: IRNode, old: IRNode, new: IRNode) -> bool:
+        for k, v in vars(obj).items():
+            if k in {"parent", "file"}:
+                continue
+
+            if v is old:
+                setattr(obj, k, new)
+                return True
+
+        return False
+
+    @staticmethod
+    def _replace_in_object_list(obj: IRNode, old: IRNode, new: IRNode) -> bool:
+        changed = False
+        for k, v in vars(obj).items():
+            if k in {"parent", "file"}:
+                continue
+
+            if isinstance(v, list):
+                for i, it in enumerate(v):
+                    if it is old:
+                        v[i] = new
+                        changed = True
+        return changed
+
+    @staticmethod
+    def _qualify_decorator_string(src: str, import_map: dict[str, str]) -> str:
         if not import_map:
-            return
+            return src
 
-        if isinstance(node, VarLoad) and node.name in import_map:
-            qualified = import_map[node.name]
-            chain_top = cls._build_attr_chain(qualified, node)
-            parent = node.parent
-            cls._replace_in_parent(parent, node, chain_top)
+        result = src
+        for short, full in sorted(import_map.items(), key=lambda kv: -len(kv[0])):
+            pattern = rf"(?<!\.)\b{re.escape(short)}\b"
+            result = re.sub(pattern, full, result)
+
+        return result

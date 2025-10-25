@@ -102,12 +102,16 @@ class VarStore(IRNode):
 class Call(IRNode):
     func: IRNode
     args: list[IRNode] = field(default_factory=list)
+    kwargs: dict[str, IRNode] = field(default_factory=dict)
 
     def walk(self) -> Iterator[IRNode]:
         yield self
         yield from self.func.walk()
         for arg in self.args:
             yield from arg.walk()
+
+        for kw_value in self.kwargs.values():
+            yield from kw_value.walk()
 
 
 @dataclass

@@ -39,7 +39,7 @@ from py2glua.ir.ir_base import (
 )
 
 
-# region helpers
+# helpers
 def build_ir(src: str) -> File:
     tree = ast.parse(src)
     ir = IRBuilder.build_ir(tree)
@@ -47,533 +47,431 @@ def build_ir(src: str) -> File:
     return ir
 
 
-# endregion
-
-
-# region Unsupported features
-def test_async_function_not_supported():
-    tree = ast.parse("async def foo():\n    pass\n")
+# UNSUPPORTED / ERRORS
+@pytest.mark.parametrize(
+    "code",
+    [
+        "async def foo():\n    pass\n",
+        "async for i in it:\n    pass\n",
+        "async with ctx:\n    pass\n",
+    ],
+)
+def test_unsupported_async_constructs(code):
+    tree = ast.parse(code)
     with pytest.raises(DeliberatelyUnsupportedError):
-        IRBuilder.build_ir(tree, path=Path("async_file.py"))
+        IRBuilder.build_ir(tree, path=Path("file.py"))
 
 
 def test_await_not_supported():
-    code = ast.parse("await bar()")
+    tree = ast.parse("await bar()")
     with pytest.raises(DeliberatelyUnsupportedError):
-        IRBuilder.build_ir(code)
+        IRBuilder.build_ir(tree)
 
 
-def test_async_for_not_supported():
-    code = ast.parse("async for item in ['1', '2']:\n    pass")
-    with pytest.raises(DeliberatelyUnsupportedError):
-        IRBuilder.build_ir(code)
+def test_annassign_without_value_raises():
+    with pytest.raises(NotImplementedError):
+        build_ir("x: int")
 
 
-def test_async_with_not_supported():
-    code = ast.parse("async with bar():\n    pass")
-    with pytest.raises(DeliberatelyUnsupportedError):
-        IRBuilder.build_ir(code)
+def test_unsupported_op_to_str_raises():
+    class Dummy(ast.AST): ...
+
+    with pytest.raises(NotImplementedError):
+        IRBuilder._op_to_str(Dummy())
 
 
-# endregion
-
-
-# region ETC
-def test_empty_file():
+# FILE BASICS
+def test_empty_file_builds():
     ir = build_ir("")
     assert isinstance(ir, File)
     assert ir.body == []
 
 
-def test_link_to_file():
-    ir = build_ir("""
-def foo(a, b):
-    x = a + b
-    return x
-""")
-    assert isinstance(ir, File)
+def test_all_top_nodes_linked_to_file():
+    ir = build_ir("def f():\n    pass\nx = 1")
     for node in ir.body:
         assert node.file is ir
 
 
-# endregion
+# IMPORTS
+def test_import_basic_and_from_import():
+    ir = build_ir("import math, sys as system\nfrom os import path, getcwd as gcwd")
+    imp1, imp2 = ir.body
+    assert isinstance(imp1, Import)
+    assert isinstance(imp2, Import)
+    assert (
+        imp1.module is None
+        and imp1.names == ["math", "sys"]
+        and imp1.aliases == [None, "system"]
+    )
+    assert (
+        imp2.module == "os"
+        and imp2.names == ["path", "getcwd"]
+        and imp2.aliases == [None, "gcwd"]
+    )
 
 
-# region IMPORTS
-def test_import_basic():
-    ir = build_ir("import math, sys as system")
-    assert len(ir.body) == 1
-    node = ir.body[0]
-    assert isinstance(node, Import)
-    assert node.names == ["math", "sys"]
-    assert node.aliases == [None, "system"]
+# VARIABLES / ASSIGNMENTS
+def test_varstore_constant_and_augassign():
+    ir = build_ir("x = 1\ny += z")
+    s1, s2 = ir.body
+    assert (
+        isinstance(s1, VarStore)
+        and isinstance(s1.value, Constant)
+        and s1.value.value == 1
+    )
+    assert isinstance(s2, VarStore)
+    assert isinstance(s2.value, BinOp) and s2.value.op is BinOpType.ADD
+    assert isinstance(s2.value.left, VarLoad) and isinstance(s2.value.right, VarLoad)
 
 
-def test_import_from_basic():
-    ir = build_ir("from os import path, system as sys")
-    assert len(ir.body) == 1
-    node = ir.body[0]
-    assert isinstance(node, Import)
-    assert node.module == "os"
-    assert node.names == ["path", "system"]
-    assert node.aliases == [None, "sys"]
+def test_annassign_with_value_and_binop():
+    ir = build_ir("x: float = a + b")
+    s = ir.body[0]
+    assert isinstance(s, VarStore) and s.annotation == "float"
+    assert isinstance(s.value, BinOp) and s.value.op is BinOpType.ADD
 
 
-# endregion
+# BINARY OPS
+@pytest.mark.parametrize(
+    "expr, expected",
+    [
+        ("1 + 2", BinOpType.ADD),
+        ("1 - 2", BinOpType.SUB),
+        ("2 * 3", BinOpType.MUL),
+        ("5 / 2", BinOpType.DIV),
+        ("5 % 2", BinOpType.MOD),
+        ("5 | 2", BinOpType.BIT_OR),
+        ("5 & 2", BinOpType.BIT_AND),
+        ("5 ^ 2", BinOpType.BIT_XOR),
+        ("5 << 2", BinOpType.BIT_LSHIFT),
+        ("5 >> 2", BinOpType.BIT_RSHIFT),
+        ("5 // 2", BinOpType.FLOOR_DIV),
+        ("2 ** 3", BinOpType.POW),
+    ],
+)
+def test_binops_all(expr, expected):
+    ir = build_ir(f"x = {expr}")
+    s = ir.body[0]
+    assert isinstance(s, VarStore)
+    assert isinstance(s.value, BinOp)
+    assert s.value.op is expected
 
 
-# region VARIABLES / CONSTANTS / ASSIGNMENTS
-def test_varstore_constant():
-    ir = build_ir("x = 1")
-    node = ir.body[0]
-    assert isinstance(node, VarStore)
-    assert node.name == "x"
-    assert isinstance(node.value, Constant)
-    assert node.value.value == 1
+# UNARY OPS
+@pytest.mark.parametrize(
+    "expr, expected",
+    [
+        ("+x", UnaryOpType.POS),
+        ("-x", UnaryOpType.NEG),
+        ("not x", UnaryOpType.NOT),
+        ("~x", UnaryOpType.BIT_NOT),
+    ],
+)
+def test_unary_ops_all(expr, expected):
+    ir = build_ir(f"x = {expr}")
+    s = ir.body[0]
+    assert isinstance(s, VarStore)
+    assert isinstance(s.value, UnaryOp)
+    assert s.value.op is expected
 
 
-def test_augassign_basic():
-    ir = build_ir("x += y")
-    store = ir.body[0]
-    assert isinstance(store, VarStore)
-    value = store.value
-    assert isinstance(value, BinOp)
-    assert value.op is BinOpType.ADD
-    assert isinstance(value.left, VarLoad)
-    assert isinstance(value.right, VarLoad)
-
-
-def test_annassign_constant():
-    ir = build_ir("x: int = 10")
-    store = ir.body[0]
-    assert isinstance(store, VarStore)
-    assert store.annotation == "int"
-    assert isinstance(store.value, Constant)
-    assert store.value.value == 10
-
-
-def test_annassign_binop():
-    ir = build_ir("y: float = a + b")
-    store = ir.body[0]
-    assert isinstance(store, VarStore)
-    assert store.annotation == "float"
-    assert isinstance(store.value, BinOp)
-
-
-# endregion
-
-
-# region BINARY / UNARY / BOOL / COMPARE
-def test_binop_basic():
-    ir = build_ir("y = 2 * 3")
-    store = ir.body[0]
-    assert isinstance(store, VarStore)
-    assert isinstance(store.value, BinOp)
-    assert store.value.op is BinOpType.MUL
-
-
-def test_nested_binop():
-    ir = build_ir("z = a + b * c")
-    store = ir.body[0]
-    assert isinstance(store, VarStore)
-    outer = store.value
-    assert isinstance(outer, BinOp)
-    assert outer.op is BinOpType.ADD
-    assert isinstance(outer.right, BinOp)
-    assert outer.right.op is BinOpType.MUL
-
-
-def test_unary_not():
-    ir = build_ir("x = not y")
-    store = ir.body[0]
-    assert isinstance(store, VarStore)
-    op = store.value
-    assert isinstance(op, UnaryOp)
-    assert op.op is UnaryOpType.NOT
-
-
-def test_unary_neg():
-    ir = build_ir("x = -y")
-    store = ir.body[0]
-    assert isinstance(store, VarStore)
-    op = store.value
-    assert isinstance(op, UnaryOp)
-    assert op.op is UnaryOpType.NEG
-
-
-def test_bool_and_or():
+# BOOL / COMPARE
+def test_bool_op_precedence_and_or():
     ir = build_ir("x = a and b or c")
-    store = ir.body[0]
-    assert isinstance(store, VarStore)
-    top = store.value
-    assert isinstance(top, BoolOp)
-    assert top.op is BoolOpType.OR
+    s = ir.body[0]
+    assert isinstance(s, VarStore)
+    assert isinstance(s.value, BoolOp)
+    assert s.value.op is BoolOpType.OR
 
 
-def test_compare_eq():
-    ir = build_ir("x = a == b")
-    body = ir.body[0]
-    assert isinstance(body, VarStore)
-    cmp = body.value
-    assert isinstance(cmp, Compare)
-    assert cmp.op is BoolOpType.EQ
+@pytest.mark.parametrize(
+    "expr, expected",
+    [
+        ("a == b", BoolOpType.EQ),
+        ("a != b", BoolOpType.NE),
+        ("a < b", BoolOpType.LT),
+        ("a <= b", BoolOpType.LE),
+        ("a > b", BoolOpType.GT),
+        ("a >= b", BoolOpType.GE),
+        ("a is b", BoolOpType.IS),
+        ("a is not b", BoolOpType.IS_NOT),
+        ("a in b", BoolOpType.IN),
+        ("a not in b", BoolOpType.NOT_IN),
+    ],
+)
+def test_compare_all(expr, expected):
+    ir = build_ir(f"x = {expr}")
+    s = ir.body[0]
+    assert isinstance(s, VarStore)
+    assert isinstance(s.value, Compare)
+    assert s.value.op is expected
 
 
-def test_compare_ge():
-    ir = build_ir("x = a >= b")
-    body = ir.body[0]
-    assert isinstance(body, VarStore)
-    cmp = body.value
-    assert isinstance(cmp, Compare)
-    assert cmp.op is BoolOpType.GE
+# COLLECTIONS
+def test_list_tuple_dict_and_empty_dict():
+    ir = build_ir('a = [1,2,3]\nb = (x,y)\nc = {"foo": 42, "bar": z}\nd = {}')
+    a, b, c, d = ir.body
+    assert isinstance(a, VarStore)
+    assert isinstance(b, VarStore)
+    assert isinstance(c, VarStore)
+    assert isinstance(d, VarStore)
+    assert isinstance(a.value, ListLiteral) and all(
+        isinstance(e, Constant) for e in a.value.elements
+    )
+    assert isinstance(b.value, TupleLiteral) and all(
+        isinstance(e, VarLoad) for e in b.value.elements
+    )
+    assert (
+        isinstance(c.value, DictLiteral)
+        and len(c.value.keys) == len(c.value.values) == 2
+    )
+    assert (
+        isinstance(d.value, DictLiteral) and d.value.keys == [] and d.value.values == []
+    )
 
 
-# endregion
+# CALLS / ATTRIBUTES / SUBSCRIPT
+def test_call_positional_and_keywords():
+    ir = build_ir("res = func(1, a=2, flag=True)")
+    s = ir.body[0]
+    assert isinstance(s, VarStore)
+    assert isinstance(s.value, Call)
+    call = s.value
+    assert len(call.args) == 1 and isinstance(call.args[0], Constant)
+    assert hasattr(call, "kwargs")
+    assert "a" in call.kwargs and "flag" in call.kwargs
+    assert (
+        isinstance(call.kwargs["flag"], Constant) and call.kwargs["flag"].value is True
+    )
 
 
-# region COLLECTIONS
-def test_list_literal():
-    ir = build_ir("a = [1, 2, 3]")
-    store = ir.body[0]
-    assert isinstance(store, VarStore)
-    assert isinstance(store.value, ListLiteral)
-    assert all(isinstance(e, Constant) for e in store.value.elements)
+def test_attribute_chain_and_subscript_index():
+    ir = build_ir("x = obj.field.subfield[5]")
+    s = ir.body[0]
+    assert isinstance(s, VarStore)
+    assert isinstance(s.value, Subscript)
+    sub = s.value
+    assert isinstance(sub.index, Constant) and sub.index.value == 5
+    assert isinstance(sub.value, Attribute)
+    assert isinstance(sub.value.value, Attribute)
+    inner = sub.value.value
+    assert isinstance(inner.value, VarLoad) and inner.value.name == "obj"
 
 
-def test_tuple_literal():
-    ir = build_ir("b = (x, y)")
-    store = ir.body[0]
-    assert isinstance(store, VarStore)
-    assert isinstance(store.value, TupleLiteral)
-    assert all(isinstance(e, VarLoad) for e in store.value.elements)
-
-
-def test_dict_literal():
-    ir = build_ir('c = {"foo": 42, "bar": z}')
-    store = ir.body[0]
-    assert isinstance(store, VarStore)
-    assert isinstance(store.value, DictLiteral)
-    assert len(store.value.keys) == len(store.value.values) == 2
-
-
-# endregion
-
-
-# region CALLS / ATTRIBUTES / SUBSCRIPTS
-def test_call_simple():
-    ir = build_ir("print(x)")
-    assert len(ir.body) == 1
-    node = ir.body[0]
-    assert isinstance(node, Call)
-    func = node.func
-    assert isinstance(func, VarLoad)
-    assert func.name == "print"
-    assert len(node.args) == 1
-    arg = node.args[0]
-    assert isinstance(arg, VarLoad)
-    assert arg.name == "x"
-
-
-def test_attribute_access():
-    ir = build_ir("x = player.GetPos")
-    assert len(ir.body) == 1
-    store = ir.body[0]
-    assert isinstance(store, VarStore)
-    value = store.value
-    assert isinstance(value, Attribute)
-    val = value.value
-    assert isinstance(val, VarLoad)
-    assert val.name == "player"
-    assert value.attr == "GetPos"
-
-
-def test_subscript_access():
-    ir = build_ir("x = arr[5]")
-    assert isinstance(ir.body[0], VarStore)
-    sub = ir.body[0].value
-    assert isinstance(sub, Subscript)
-    assert isinstance(sub.index, Constant)
-    assert sub.index.value == 5
-
-
-# endregion
-
-
-# region FUNCTIONS
-def test_function_simple():
-    src = """
-def foo(a, b):
-    x = a + b
-    return x
-"""
-    ir = build_ir(src)
+# FUNCTIONS
+def test_function_args_body_decorator_and_return_none():
+    ir = build_ir("@decor\ndef f(a,b):\n    return")
     fn = ir.body[0]
     assert isinstance(fn, FunctionDef)
-    assert fn.name == "foo"
+    assert fn.decorators == ["decor"]
     assert fn.args == ["a", "b"]
+    assert isinstance(fn.body[0], Return) and fn.body[0].value is None
+
+
+def test_function_nested_ops():
+    ir = build_ir("def f():\n    x = not (a + 1 >= b or c)\n    return x")
+    fn = ir.body[0]
+    assert isinstance(fn, FunctionDef)
     assert any(isinstance(ch, Return) for ch in fn.body)
 
 
-def test_function_with_decorator():
-    src = """
-@decorator
-def greet(name):
-    return "Hello " + name
-"""
-    ir = build_ir(src)
-    fn = ir.body[0]
-    assert isinstance(fn, FunctionDef)
-    assert fn.decorators == ["decorator"]
+# CLASSES
+def test_class_simple_bases_decorators_and_method():
+    ir = build_ir("@dec\nclass A(B,C):\n    x = 1\n    def m(self):\n        return 2")
+    cls = ir.body[0]
+    assert isinstance(cls, ClassDef)
+    assert cls.decorators == ["dec"]
+    assert len(cls.bases) == 2
+    assert any(isinstance(ch, VarStore) for ch in cls.body)
+    methods = [ch for ch in cls.body if isinstance(ch, FunctionDef)]
+    assert methods and methods[0].name == "m"
 
 
-def test_return_none():
-    src = """
-def f():
-    return
-"""
-    ir = build_ir(src)
-    fn = ir.body[0]
+def test_nested_class_and_method_return_const():
+    ir = build_ir(
+        "class Outer:\n    class Inner:\n        def m(self):\n            return 1"
+    )
+    outer = ir.body[0]
+    assert isinstance(outer, ClassDef)
+    inner = outer.body[0]
+    assert isinstance(inner, ClassDef)
+    fn = inner.body[0]
     assert isinstance(fn, FunctionDef)
     assert isinstance(fn.body[0], Return)
-    assert fn.body[0].value is None
+    assert isinstance(fn.body[0].value, Constant) and fn.body[0].value.value == 1
 
 
-def test_pass_statement():
-    src = """
-def foo():
-    pass
-"""
-    ir = build_ir(src)
-    fn = ir.body[0]
-    assert isinstance(fn, FunctionDef)
-    assert isinstance(fn.body[0], Pass)
-
-
-# endregion
-
-
-# region CONTROL FLOW
-def test_if_basic():
-    src = """
-if a > b:
-    x = 1
-else:
-    x = 2
-"""
-    ir = build_ir(src)
+# CONTROL FLOW
+def test_if_elif_else_and_compare():
+    ir = build_ir("if x < 5: a=1\nelif x < 10: a=2\nelse: a=3")
     node = ir.body[0]
     assert isinstance(node, If)
     assert isinstance(node.test, Compare)
+    assert node.body and node.orelse
 
 
-def test_while_basic():
+def test_while_with_break_and_for_with_continue():
+    ir = build_ir("while True:\n    break\nfor i in range(3):\n    continue")
+    nodes = list(ir.walk())
+    assert any(isinstance(n, Break) for n in nodes)
+    assert any(isinstance(n, Continue) for n in nodes)
+
+
+def test_with_context_and_target():
+    ir = build_ir("with ctx as c:\n    x = 1")
+    w = ir.body[0]
+    assert isinstance(w, With)
+    assert isinstance(w.context, VarLoad)
+    assert isinstance(w.target, VarLoad) and w.target.name == "c"
+    assert w.body and isinstance(w.body[0], VarStore)
+
+
+def test_try_handlers_else_finally_and_multiple_handlers():
+    ir1 = build_ir(
+        "try:\n    a=1\nexcept ValueError as e:\n    a=2\nelse:\n    a=3\nfinally:\n    a=4"
+    )
+    t = ir1.body[0]
+    assert isinstance(t, Try) and len(t.handlers) == 1 and t.orelse and t.finalbody
+
+    ir2 = build_ir(
+        "try:\n    a=1\nexcept KeyError:\n    a=2\nexcept Exception as e:\n    a=3"
+    )
+    tt = ir2.body[0]
+    assert isinstance(tt, Try) and len(tt.handlers) == 2
+    assert all(isinstance(h, ExceptHandler) for h in tt.handlers)
+
+
+def test_while_basic_with_compare_and_body_structure():
     src = """
 while x < 10:
     x += 1
 """
     ir = build_ir(src)
+    assert len(ir.body) == 1
     loop = ir.body[0]
     assert isinstance(loop, While)
     assert isinstance(loop.test, Compare)
-    assert any(isinstance(ch, VarStore) for ch in loop.body)
+    assert loop.test.op is BoolOpType.LT
+    assert isinstance(loop.test.left, VarLoad)
+    assert isinstance(loop.test.right, Constant)
+    assert len(loop.body) == 1
+    stmt = loop.body[0]
+    assert isinstance(stmt, VarStore)
+    assert isinstance(stmt.value, BinOp)
+    assert stmt.value.op is BinOpType.ADD
+    assert stmt.parent is loop
+    assert loop.file is ir
 
 
-def test_for_basic():
-    src = """
-for i in range(3):
-    print(i)
-"""
+def test_while_with_else_and_nested_pass():
+    src = "while flag:\n    if ready:\n        pass\nelse:\n    result = 42\n"
     ir = build_ir(src)
-    assert len(ir.body) == 1
-    node = ir.body[0]
-    assert isinstance(node, For)
-    loop = node
-    assert isinstance(loop.target, VarLoad)
-    target = loop.target
-    assert target.name == "i"
-    assert isinstance(loop.iter, Call)
-    iter_call = loop.iter
-    assert isinstance(iter_call.func, VarLoad)
-    assert iter_call.func.name == "range"
-    assert all(isinstance(ch, Call) for ch in loop.body)
+    loop = ir.body[0]
+    assert isinstance(loop, While)
+    assert isinstance(loop.test, VarLoad)
+    inner_if = loop.body[0]
+    assert isinstance(inner_if, If)
+    assert isinstance(inner_if.body[0], Pass)
+    assert isinstance(loop.orelse[0], VarStore)
+    assert isinstance(loop.orelse[0].value, Constant)
 
 
-def test_with_basic():
+def test_pass_as_top_level_statement_and_in_class_function():
     src = """
-with ctx:
-    x = 1
-"""
-    ir = build_ir(src)
-    node = ir.body[0]
-    assert isinstance(node, With)
-    assert isinstance(node.context, VarLoad)
-    assert node.body and isinstance(node.body[0], VarStore)
+pass
 
-
-def test_with_as():
-    src = """
-with manager as m:
-    y = 2
-"""
-    ir = build_ir(src)
-    w = ir.body[0]
-    assert isinstance(w, With)
-    assert isinstance(w.target, VarLoad)
-    assert w.target.name == "m"
-
-
-def test_try_except_basic():
-    src = """
-try:
-    x = 1
-except:
-    x = 2
-"""
-    ir = build_ir(src)
-    node = ir.body[0]
-    assert isinstance(node, Try)
-    assert node.handlers and isinstance(node.handlers[0], ExceptHandler)
-    h = node.handlers[0]
-    assert h.type is None
-    assert h.name is None
-    assert any(isinstance(ch, VarStore) for ch in node.body)
-    assert any(isinstance(ch, VarStore) for ch in h.body)
-    assert node.orelse == []
-    assert node.finalbody == []
-
-
-def test_try_except_specific_with_name():
-    src = """
-try:
-    do()
-except ValueError as e:
-    handle(e)
-"""
-    ir = build_ir(src)
-    t = ir.body[0]
-    assert isinstance(t, Try)
-    assert len(t.handlers) == 1
-    h = t.handlers[0]
-    assert isinstance(h.type, VarLoad) or isinstance(h.type, Attribute)
-    assert h.name == "e"
-    assert any(isinstance(ch, Call) for ch in h.body)
-
-
-def test_try_except_multiple_else_finally():
-    src = """
-try:
-    a = 1
-except KeyError:
-    a = 2
-except Exception as exc:
-    a = 3
-else:
-    a = 4
-finally:
-    a = 5
-"""
-    ir = build_ir(src)
-    t = ir.body[0]
-    assert isinstance(t, Try)
-    assert len(t.handlers) == 2
-    assert any(isinstance(ch, VarStore) for ch in t.body)
-    assert any(isinstance(ch, VarStore) for ch in t.orelse)
-    assert any(isinstance(ch, VarStore) for ch in t.finalbody)
-
-
-def test_break():
-    src = """
-while True:
-    break
-"""
-    ir = build_ir(src)
-    assert len(ir.body) == 1
-    node = ir.body[0]
-    assert isinstance(node, While)
-    loop = node
-    assert any(isinstance(ch, Break) for ch in loop.body)
-
-
-def test_continue():
-    src = """
-while True:
-    continue
-"""
-    ir = build_ir(src)
-    assert len(ir.body) == 1
-    node = ir.body[0]
-    assert isinstance(node, While)
-    loop = node
-    assert any(isinstance(ch, Continue) for ch in loop.body)
-
-
-# endregion
-
-
-# region CLASSES
-def test_class_simple():
-    src = """
 class Foo:
     pass
-"""
-    ir = build_ir(src)
-    cls = ir.body[0]
-    assert isinstance(cls, ClassDef)
-    assert cls.name == "Foo"
-    assert len(cls.body) == 1
-    assert isinstance(cls.body[0], Pass)
 
-
-def test_class_with_base():
-    src = """
-class Bar(Base):
+def bar():
     pass
 """
     ir = build_ir(src)
-    cls = ir.body[0]
+    top = ir.body[0]
+    assert isinstance(top, Pass)
+    assert top.parent is ir
+    cls = ir.body[1]
     assert isinstance(cls, ClassDef)
-    assert len(cls.bases) == 1
-    base = cls.bases[0]
-    assert isinstance(base, VarLoad)
-    assert base.name == "Base"
-
-
-def test_class_with_method():
-    src = """
-class C:
-    def m(self):
-        return 1
-"""
-    ir = build_ir(src)
-    assert len(ir.body) == 1
-    node = ir.body[0]
-    assert isinstance(node, ClassDef)
-    cls = node
     assert len(cls.body) == 1
-    method = cls.body[0]
-    assert isinstance(method, FunctionDef)
-    fn = method
-    assert fn.name == "m"
-    assert fn.args == ["self"]
-    assert len(fn.body) == 1
-    stmt = fn.body[0]
-    assert isinstance(stmt, Return)
-    if isinstance(stmt.value, Constant):
-        assert stmt.value.value == 1
+    assert isinstance(cls.body[0], Pass)
+    fn = ir.body[2]
+    assert isinstance(fn, FunctionDef)
+    assert isinstance(fn.body[0], Pass)
+    assert fn.body[0].parent is fn
 
 
-def test_class_with_multiple_bases_and_decorator():
-    src = """
-@decor
-class Baz(A, B):
-    x = 10
-"""
+def test_for_basic_loop():
+    src = "for i in range(3):\n    x = i"
     ir = build_ir(src)
-    cls = ir.body[0]
-    assert isinstance(cls, ClassDef)
-    assert cls.decorators == ["decor"]
-    assert [b.name for b in cls.bases if isinstance(b, VarLoad)] == ["A", "B"]
-    assert isinstance(cls.body[0], VarStore)
+    node = ir.body[0]
+    assert isinstance(node, For)
+    assert isinstance(node.target, VarLoad)
+    assert node.target.name == "i"
+    assert isinstance(node.iter, Call)
+    assert isinstance(node.iter.func, VarLoad)
+    assert node.iter.func.name == "range"
+    assert isinstance(node.body[0], VarStore)
+    assert node.orelse == []
 
 
-# endregion
+def test_for_with_else_clause():
+    src = "for i in range(5):\n    do(i)\nelse:\n    finished = True\n"
+    ir = build_ir(src)
+    loop = ir.body[0]
+    assert isinstance(loop, For)
+    assert len(loop.body) == 1
+    assert len(loop.orelse) == 1
+    store = loop.orelse[0]
+    assert isinstance(store, VarStore)
+    assert store.name == "finished"
+    assert isinstance(store.value, Constant)
+    assert store.value.value is True
+
+
+def test_for_nested_loop():
+    src = "for x in range(2):\n    for y in range(3):\n        print(x, y)\n"
+    ir = build_ir(src)
+    outer = ir.body[0]
+    assert isinstance(outer, For)
+    inner = outer.body[0]
+    assert isinstance(inner, For)
+    assert isinstance(inner.iter, Call)
+    assert isinstance(inner.iter.func, VarLoad)
+    assert inner.iter.func.name == "range"
+    assert isinstance(inner.body[0], Call)
+    assert isinstance(inner.body[0].func, VarLoad)
+    assert inner.body[0].func.name == "print"
+
+
+def test_for_with_break_and_continue():
+    src = (
+        "for i in range(10):\n"
+        "    if i == 5:\n"
+        "        break\n"
+        "    if i % 2 == 0:\n"
+        "        continue\n"
+    )
+    ir = build_ir(src)
+    loop = ir.body[0]
+    assert isinstance(loop, For)
+    assert any(isinstance(ch, Break) for ch in loop.walk())
+    assert any(isinstance(ch, Continue) for ch in loop.walk())
+
+
+def test_for_with_empty_body():
+    src = "for i in []:\n    pass"
+    ir = build_ir(src)
+    loop = ir.body[0]
+    assert isinstance(loop, For)
+    assert len(loop.body) == 1
+    assert isinstance(loop.body[0], Pass)
+
+
+# WALK COVERAGE
+def test_walk_covers_nested_nodes():
+    ir = build_ir("def f():\n    a=[1,2]\n    b={'x':3}\n    return a")
+    nodes = list(ir.walk())
+    assert any(isinstance(n, ListLiteral) for n in nodes)
+    assert any(isinstance(n, DictLiteral) for n in nodes)
+    assert any(isinstance(n, Return) for n in nodes)
