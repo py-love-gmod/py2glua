@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
 
-from ..runtime import Realm
+from ..glua.realm import Realm
 
 
 # region БАЗОВЫЙ КЛАСС
