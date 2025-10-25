@@ -4,7 +4,6 @@ import sys
 
 modules = [
     "py2glua.glua",
-    "py2glua.runtime",
 ]
 output_dir = "docs"
 
