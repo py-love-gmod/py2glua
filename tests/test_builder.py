@@ -739,3 +739,13 @@ def test_async_functiondef_raises():
 def test_await_raises():
     with pytest.raises(DeliberatelyUnsupportedError):
         build_ir("async def f():\n    return await g()")
+
+
+def test_yield_raises():
+    with pytest.raises(DeliberatelyUnsupportedError):
+        build_ir("def g():\n    yield 1")
+
+
+def test_yield_from_raises():
+    with pytest.raises(DeliberatelyUnsupportedError):
+        build_ir("def g():\n    yield from x")

@@ -1251,17 +1251,21 @@ class IRBuilder:
         if guard_ir:
             assert isinstance(guard_ir, IRNode)
             guard_ir.parent = mc
+
         for stmt in c.body:
             ir = cls._build_node(stmt, file)
             if not ir:
                 continue
+
             if isinstance(ir, list):
                 for ch in ir:
                     ch.parent = mc
                 mc.body.extend(ir)
+
             else:
                 ir.parent = mc
                 mc.body.append(ir)
+
         return mc
 
     @classmethod
@@ -1280,6 +1284,27 @@ class IRBuilder:
         subj.parent = m
         for c in cases_ir:
             c.parent = m
+
         return m
+
+    @classmethod
+    def _build_Yield(cls, node: ast.Yield, file: File | None):
+        path = file.path if file else None
+        raise DeliberatelyUnsupportedError(
+            "Yield expressions are not supported",
+            file_path=path,
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+        )
+
+    @classmethod
+    def _build_YieldFrom(cls, node: ast.YieldFrom, file: File | None):
+        path = file.path if file else None
+        raise DeliberatelyUnsupportedError(
+            "Yield-from expressions are not supported",
+            file_path=path,
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+        )
 
     # endregion
