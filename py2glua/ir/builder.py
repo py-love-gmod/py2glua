@@ -12,19 +12,30 @@ from .ir_base import (
     Call,
     ClassDef,
     Compare,
+    ComprehensionFor,
     Constant,
     Continue,
     DictLiteral,
     ExceptHandler,
     File,
     For,
+    FString,
+    FStringExpr,
+    FStringText,
     FunctionDef,
     If,
     Import,
     ImportType,
     IRNode,
+    Lambda,
+    ListComp,
     ListLiteral,
+    Match,
+    MatchCase,
+    NamedExpr,
     Pass,
+    Pattern,
+    PatternKind,
     Return,
     Subscript,
     Try,
@@ -39,7 +50,6 @@ from .ir_base import (
 
 
 class IRBuilder:
-    # region Entry
     @classmethod
     def build_ir(
         cls,
@@ -69,9 +79,7 @@ class IRBuilder:
 
         return file
 
-    # endregion
-
-    # region helpers
+    # region Helpers
     @classmethod
     def _build_node(
         cls,
@@ -92,9 +100,31 @@ class IRBuilder:
         child.parent = parent
         getattr(parent, attr).append(child)
 
+    @staticmethod
+    def _op_to_str(op: ast.AST) -> BinOpType:
+        mapping = {
+            ast.Add: BinOpType.ADD,
+            ast.Sub: BinOpType.SUB,
+            ast.Mult: BinOpType.MUL,
+            ast.Div: BinOpType.DIV,
+            ast.Mod: BinOpType.MOD,
+            ast.BitOr: BinOpType.BIT_OR,
+            ast.BitAnd: BinOpType.BIT_AND,
+            ast.BitXor: BinOpType.BIT_XOR,
+            ast.LShift: BinOpType.BIT_LSHIFT,
+            ast.RShift: BinOpType.BIT_RSHIFT,
+            ast.FloorDiv: BinOpType.FLOOR_DIV,
+            ast.Pow: BinOpType.POW,
+        }
+        for k, v in mapping.items():
+            if isinstance(op, k):
+                return v
+
+        raise NotImplementedError(f"Unsupported binary operator: {type(op).__name__}")
+
     # endregion
 
-    # region Imports
+    # region Builders
     @staticmethod
     def _build_Import(node: ast.Import, file: File | None) -> Import:
         names = [alias.name for alias in node.names]
@@ -125,9 +155,6 @@ class IRBuilder:
             file=file,
         )
 
-    # endregion
-
-    # region Constants / Vars / Assignments
     @staticmethod
     def _build_Name(node: ast.Name, file: File | None) -> VarLoad:
         return VarLoad(
@@ -244,9 +271,6 @@ class IRBuilder:
         binop.parent = store
         return [store]
 
-    # endregion
-
-    # region Expressions
     @classmethod
     def _build_BinOp(cls, node: ast.BinOp, file: File | None) -> BinOp:
         left = cls._build_node(node.left, file)
@@ -428,9 +452,6 @@ class IRBuilder:
         index_ir.parent = sub_ir
         return sub_ir
 
-    # endregion
-
-    # region Container
     @classmethod
     def _build_List(cls, node: ast.List, file: File | None) -> ListLiteral:
         elements = []
@@ -498,9 +519,6 @@ class IRBuilder:
 
         return dict_ir
 
-    # endregion
-
-    # region Functions
     @classmethod
     def _build_AsyncFunctionDef(
         cls, node: ast.AsyncFunctionDef, file: File | None
@@ -562,9 +580,6 @@ class IRBuilder:
 
         return ret
 
-    # endregion
-
-    # region Classes
     @classmethod
     def _build_ClassDef(cls, node: ast.ClassDef, file: File | None):
         name = node.name
@@ -606,9 +621,6 @@ class IRBuilder:
 
         return class_ir
 
-    # endregion
-
-    # region Control Flow
     @classmethod
     def _build_If(cls, node: ast.If, file: File | None) -> If:
         test_ir = cls._build_node(node.test, file)
@@ -917,38 +929,357 @@ class IRBuilder:
             file=file,
         )
 
-    # endregion
+    @classmethod
+    def _build_Lambda(cls, node: ast.Lambda, file: File | None) -> Lambda:
+        args = [a.arg for a in node.args.args]
+        body_ir = cls._build_node(node.body, file)
+        assert isinstance(body_ir, IRNode)
+        lam = Lambda(
+            args=args,
+            body=body_ir,
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+            parent=None,
+            file=file,
+        )
+        body_ir.parent = lam
+        return lam
 
-    # region Misc
+    @classmethod
+    def _build_NamedExpr(cls, node: ast.NamedExpr, file: File | None) -> NamedExpr:
+        if not isinstance(node.target, ast.Name):
+            raise NotImplementedError(
+                "Only simple name targets are supported in walrus"
+            )
+
+        val_ir = cls._build_node(node.value, file)
+        assert isinstance(val_ir, IRNode)
+        ne = NamedExpr(
+            name=node.target.id,
+            value=val_ir,
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+            parent=None,
+            file=file,
+        )
+        val_ir.parent = ne
+        return ne
+
+    @classmethod
+    def _build_JoinedStr(cls, node: ast.JoinedStr, file: File | None) -> FString:
+        parts = []
+        for item in node.values:
+            if isinstance(item, ast.Constant) and isinstance(item.value, str):
+                parts.append(
+                    FStringText(
+                        text=item.value,
+                        lineno=item.lineno,
+                        col_offset=item.col_offset,
+                        parent=None,
+                        file=file,
+                    )
+                )
+
+            elif isinstance(item, ast.FormattedValue):
+                parts.append(cls._build_FormattedValue(item, file))
+
+            else:
+                inner = cls._build_node(item, file)
+                assert isinstance(inner, IRNode)
+                parts.append(
+                    FStringExpr(
+                        value=inner,
+                        conversion=None,
+                        format_spec=None,
+                        lineno=item.lineno,
+                        col_offset=item.col_offset,
+                        parent=None,
+                        file=file,
+                    )
+                )
+
+        fs = FString(
+            parts=parts,
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+            parent=None,
+            file=file,
+        )
+        for p in parts:
+            p.parent = fs
+
+        return fs
+
+    @classmethod
+    def _build_FormattedValue(
+        cls,
+        node: ast.FormattedValue,
+        file: File | None,
+    ) -> FStringExpr:
+        val_ir = cls._build_node(node.value, file)
+        assert isinstance(val_ir, IRNode)
+        conv_map = {115: "s", 114: "r", 97: "a"}
+        conv = conv_map.get(node.conversion, None)
+        fmt_spec_str = None
+        if node.format_spec is not None:
+            spec_ir = cls._build_node(node.format_spec, file)
+            if isinstance(spec_ir, FString):
+                buf = []
+                for part in spec_ir.parts:
+                    if isinstance(part, FStringText):
+                        buf.append(part.text)
+
+                    else:
+                        buf.append("{expr}")
+
+                fmt_spec_str = "".join(buf) if buf else None
+
+            elif isinstance(spec_ir, Constant) and isinstance(spec_ir.value, str):
+                fmt_spec_str = spec_ir.value
+
+            else:
+                fmt_spec_str = None
+
+        fe = FStringExpr(
+            value=val_ir,
+            conversion=conv,
+            format_spec=fmt_spec_str,
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+            parent=None,
+            file=file,
+        )
+        val_ir.parent = fe
+        return fe
+
+    @classmethod
+    def _build_comprehensions(
+        cls,
+        comps: list[ast.comprehension],
+        file: File | None,
+    ) -> list[ComprehensionFor]:
+        res: list[ComprehensionFor] = []
+        for c in comps:
+            lineno = getattr(c.iter, "lineno", None)
+            col = getattr(c.iter, "col_offset", None)
+
+            if c.is_async:
+                path = file.path if file else None
+                raise DeliberatelyUnsupportedError(
+                    "Asynchronous comprehensions are not supported",
+                    file_path=path,
+                    lineno=lineno,
+                    col_offset=col,
+                )
+
+            target_ir = cls._build_node(c.target, file)
+            iter_ir = cls._build_node(c.iter, file)
+            assert isinstance(target_ir, IRNode)
+            assert isinstance(iter_ir, IRNode)
+
+            ifs_ir: list[IRNode] = []
+            for cond in c.ifs:
+                cond_ir = cls._build_node(cond, file)
+                assert isinstance(cond_ir, IRNode)
+                ifs_ir.append(cond_ir)
+
+            gen = ComprehensionFor(
+                target=target_ir,
+                iter=iter_ir,
+                ifs=ifs_ir,
+                is_async=False,
+                lineno=lineno,
+                col_offset=col,
+                parent=None,
+                file=file,
+            )
+
+            target_ir.parent = gen
+            iter_ir.parent = gen
+            for ii in ifs_ir:
+                ii.parent = gen
+
+            res.append(gen)
+
+        return res
+
+    @classmethod
+    def _build_ListComp(cls, node: ast.ListComp, file: File | None) -> ListComp:
+        elt_ir = cls._build_node(node.elt, file)
+        assert isinstance(elt_ir, IRNode)
+        gens = cls._build_comprehensions(node.generators, file)
+        lc = ListComp(
+            elt=elt_ir,
+            generators=gens,
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+            parent=None,
+            file=file,
+        )
+        elt_ir.parent = lc
+        for g in gens:
+            g.parent = lc
+
+        return lc
+
     @classmethod
     def _build_Expr(cls, node: ast.Expr, file: File | None) -> IRNode:
         value_ir = cls._build_node(node.value, file)
         assert isinstance(value_ir, IRNode)
         return value_ir
 
-    # endregion
+    @classmethod
+    def _build_pattern(cls, p: ast.pattern, file: File | None) -> Pattern:
+        if isinstance(p, ast.MatchAs):
+            if p.name is None and p.pattern is None:
+                return Pattern(
+                    kind=PatternKind.WILDCARD,
+                    lineno=p.lineno,
+                    col_offset=p.col_offset,
+                    parent=None,
+                    file=file,
+                )
 
-    # region Helpers
-    @staticmethod
-    def _op_to_str(op: ast.AST) -> BinOpType:
-        mapping = {
-            ast.Add: BinOpType.ADD,
-            ast.Sub: BinOpType.SUB,
-            ast.Mult: BinOpType.MUL,
-            ast.Div: BinOpType.DIV,
-            ast.Mod: BinOpType.MOD,
-            ast.BitOr: BinOpType.BIT_OR,
-            ast.BitAnd: BinOpType.BIT_AND,
-            ast.BitXor: BinOpType.BIT_XOR,
-            ast.LShift: BinOpType.BIT_LSHIFT,
-            ast.RShift: BinOpType.BIT_RSHIFT,
-            ast.FloorDiv: BinOpType.FLOOR_DIV,
-            ast.Pow: BinOpType.POW,
-        }
-        for k, v in mapping.items():
-            if isinstance(op, k):
-                return v
+            if p.pattern is not None:
+                sub = cls._build_pattern(p.pattern, file)
+                pat = Pattern(
+                    kind=PatternKind.NAME,
+                    name=p.name,
+                    patterns=[sub],
+                    lineno=p.lineno,
+                    col_offset=p.col_offset,
+                    parent=None,
+                    file=file,
+                )
+                sub.parent = pat
+                return pat
 
-        raise NotImplementedError(f"Unsupported binary operator: {type(op).__name__}")
+            return Pattern(
+                kind=PatternKind.NAME,
+                name=p.name,
+                lineno=p.lineno,
+                col_offset=p.col_offset,
+                parent=None,
+                file=file,
+            )
+
+        if isinstance(p, ast.MatchValue):
+            val = cls._build_node(p.value, file)
+            assert isinstance(val, IRNode)
+            pat = Pattern(
+                kind=PatternKind.VALUE,
+                value=val,
+                lineno=p.lineno,
+                col_offset=p.col_offset,
+                parent=None,
+                file=file,
+            )
+            val.parent = pat
+            return pat
+
+        if isinstance(p, ast.MatchOr):
+            subs = [cls._build_pattern(sp, file) for sp in p.patterns]
+            pat = Pattern(
+                kind=PatternKind.OR,
+                patterns=subs,
+                lineno=p.lineno,
+                col_offset=p.col_offset,
+                parent=None,
+                file=file,
+            )
+            for s in subs:
+                s.parent = pat
+
+            return pat
+
+        if isinstance(p, ast.MatchSequence):
+            subs = [cls._build_pattern(sp, file) for sp in p.patterns]
+            pat = Pattern(
+                kind=PatternKind.SEQUENCE,
+                patterns=subs,
+                lineno=p.lineno,
+                col_offset=p.col_offset,
+                parent=None,
+                file=file,
+            )
+            for s in subs:
+                s.parent = pat
+
+            return pat
+
+        if isinstance(p, ast.MatchMapping):
+            keys_ir: list[IRNode] = []
+            for k in p.keys:
+                ki = cls._build_node(k, file)
+                assert isinstance(ki, IRNode)
+                keys_ir.append(ki)
+
+            vals_pat = [cls._build_pattern(v, file) for v in p.patterns]
+            pat = Pattern(
+                kind=PatternKind.MAPPING,
+                keys=keys_ir,
+                values=vals_pat,
+                lineno=p.lineno,
+                col_offset=p.col_offset,
+                parent=None,
+                file=file,
+            )
+            for k in keys_ir:
+                k.parent = pat
+
+            for v in vals_pat:
+                v.parent = pat
+
+            return pat
+
+        raise NotImplementedError(f"Unsupported pattern node: {type(p).__name__}")
+
+    @classmethod
+    def _build_match_case(cls, c: ast.match_case, file: File | None) -> MatchCase:
+        pat = cls._build_pattern(c.pattern, file)
+        guard_ir = cls._build_node(c.guard, file) if c.guard else None
+        mc = MatchCase(
+            pattern=pat,
+            guard=guard_ir,
+            lineno=c.pattern.lineno,
+            col_offset=c.pattern.col_offset,
+            parent=None,
+            file=file,
+            body=[],
+        )
+        pat.parent = mc
+        if guard_ir:
+            assert isinstance(guard_ir, IRNode)
+            guard_ir.parent = mc
+        for stmt in c.body:
+            ir = cls._build_node(stmt, file)
+            if not ir:
+                continue
+            if isinstance(ir, list):
+                for ch in ir:
+                    ch.parent = mc
+                mc.body.extend(ir)
+            else:
+                ir.parent = mc
+                mc.body.append(ir)
+        return mc
+
+    @classmethod
+    def _build_Match(cls, node: ast.Match, file: File | None) -> Match:
+        subj = cls._build_node(node.subject, file)
+        assert isinstance(subj, IRNode)
+        cases_ir = [cls._build_match_case(c, file) for c in node.cases]
+        m = Match(
+            subject=subj,
+            cases=cases_ir,
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+            parent=None,
+            file=file,
+        )
+        subj.parent = m
+        for c in cases_ir:
+            c.parent = m
+        return m
 
     # endregion

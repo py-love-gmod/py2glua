@@ -15,17 +15,28 @@ from py2glua.ir.ir_base import (
     Call,
     ClassDef,
     Compare,
+    ComprehensionFor,
     Constant,
     Continue,
     DictLiteral,
     ExceptHandler,
     File,
     For,
+    FString,
+    FStringExpr,
+    FStringText,
     FunctionDef,
     If,
     Import,
+    Lambda,
+    ListComp,
     ListLiteral,
+    Match,
+    MatchCase,
+    NamedExpr,
     Pass,
+    Pattern,
+    PatternKind,
     Return,
     Subscript,
     Try,
@@ -45,6 +56,14 @@ def build_ir(src: str) -> File:
     ir = IRBuilder.build_ir(tree)
     assert isinstance(ir, File)
     return ir
+
+
+def first(node_list, typ):
+    for n in node_list:
+        if isinstance(n, typ):
+            return n
+
+    return None
 
 
 # UNSUPPORTED / ERRORS
@@ -475,3 +494,248 @@ def test_walk_covers_nested_nodes():
     assert any(isinstance(n, ListLiteral) for n in nodes)
     assert any(isinstance(n, DictLiteral) for n in nodes)
     assert any(isinstance(n, Return) for n in nodes)
+
+
+def test_lambda_basic_assignment():
+    ir = build_ir("f = lambda x, y: x + y")
+    store = ir.body[0]
+    assert isinstance(store, VarStore)
+    lam = store.value
+    assert isinstance(lam, Lambda)
+    assert lam.args == ["x", "y"]
+    assert isinstance(lam.body, BinOp)
+    assert lam.body.op == BinOpType.ADD
+
+
+def test_lambda_parent_links():
+    ir = build_ir("fn = lambda a: a")
+    store = ir.body[0]
+    assert isinstance(store, VarStore)
+    lam = store.value
+    assert isinstance(lam, Lambda)
+    assert lam.parent is store
+    assert lam.body is not None
+    assert lam.body.parent is lam
+
+
+def test_namedexpr_basic():
+    ir = build_ir("(x := 1)")
+    expr = ir.body[0]
+    assert isinstance(expr, NamedExpr)
+    assert expr.name == "x"
+    assert isinstance(expr.value, Constant)
+    assert expr.value.value == 1
+
+
+def test_namedexpr_in_binop():
+    ir = build_ir("y = (x := foo()) + 5")
+    store = ir.body[0]
+    assert isinstance(store, VarStore)
+    top = store.value
+    assert isinstance(top, BinOp)
+    left = top.left
+    assert isinstance(left, NamedExpr)
+    assert left.name == "x"
+
+
+def test_fstring_text_and_expr():
+    ir = build_ir('msg = f"hi {name}"')
+    store = ir.body[0]
+    assert isinstance(store, VarStore)
+    fs = store.value
+    assert isinstance(fs, FString)
+    assert len(fs.parts) == 2
+    assert isinstance(fs.parts[0], FStringText)
+    assert fs.parts[0].text == "hi "
+    assert isinstance(fs.parts[1], FStringExpr)
+    assert isinstance(fs.parts[1].value, VarLoad)
+    assert fs.parts[1].conversion is None
+    assert fs.parts[1].format_spec is None
+
+
+def test_fstring_with_conversion_and_format():
+    ir = build_ir('s = f"{val!r:.2f}"')
+    assert isinstance(ir.body[0], VarStore)
+    fs = ir.body[0].value
+    assert isinstance(fs, FString)
+    assert len(fs.parts) == 1
+    part = fs.parts[0]
+    assert isinstance(part, FStringExpr)
+    assert part.conversion == "r"
+    assert part.format_spec == ".2f"
+
+
+def test_fstring_format_spec_with_expr_placeholder():
+    ir = build_ir('s = f"{val:{width}.{prec}f}"')
+    assert isinstance(ir.body[0], VarStore)
+    fs = ir.body[0].value
+    assert isinstance(fs, FString)
+    part = fs.parts[0]
+    assert isinstance(part, FStringExpr)
+    assert part.format_spec is not None
+    assert "{expr}" in part.format_spec
+
+
+def test_fstring_parent_links():
+    ir = build_ir('s = f"X={x}"')
+    store = ir.body[0]
+    assert isinstance(store, VarStore)
+    fs = store.value
+    assert isinstance(fs, FString)
+    assert fs.parent is store
+    for p in fs.parts:
+        assert p.parent is fs
+
+
+def test_listcomp_basic():
+    ir = build_ir("[x + 1 for x in arr]")
+    lc = ir.body[0]
+    assert isinstance(lc, ListComp)
+    assert isinstance(lc.elt, BinOp)
+    assert lc.elt.op == BinOpType.ADD
+    assert len(lc.generators) == 1
+    gen = lc.generators[0]
+    assert isinstance(gen, ComprehensionFor)
+    assert isinstance(gen.target, VarLoad) and gen.target.name == "x"
+    assert isinstance(gen.iter, VarLoad) and gen.iter.name == "arr"
+    assert gen.ifs == []
+
+
+def test_listcomp_with_if_chain():
+    ir = build_ir("[x for x in arr if x%2==0 if x>10]")
+    lc = ir.body[0]
+    assert isinstance(lc, ListComp)
+    gen = lc.generators[0]
+    assert len(gen.ifs) == 2
+    assert all(
+        isinstance(cond, (Compare, BinOp)) or isinstance(cond, Compare)
+        for cond in gen.ifs
+    )
+
+
+def test_listcomp_multi_generators():
+    ir = build_ir("[(x,y) for x in xs for y in ys if x!=y]")
+    lc = ir.body[0]
+    assert isinstance(lc, ListComp)
+    assert len(lc.generators) == 2
+    g1, g2 = lc.generators
+    assert isinstance(g1.target, VarLoad) and g1.target.name == "x"
+    assert isinstance(g2.target, VarLoad) and g2.target.name == "y"
+    assert len(g1.ifs) == 0
+    assert len(g2.ifs) == 1
+
+
+def test_listcomp_async_raises():
+    with pytest.raises(DeliberatelyUnsupportedError):
+        build_ir("[x async for x in it]")
+
+
+def test_listcomp_parent_links():
+    ir = build_ir("[x+1 for x in arr if x>0]")
+    lc = ir.body[0]
+    assert isinstance(lc, ListComp)
+    assert lc.elt.parent is lc
+    for g in lc.generators:
+        assert g.parent is lc
+        assert g.target.parent is g
+        assert g.iter.parent is g
+        for cond in g.ifs:
+            assert cond.parent is g
+
+
+def test_match_or_pattern():
+    src = """
+match obj:
+    case 0 | 1:
+        hit = True
+"""
+    ir = build_ir(src)
+    m = ir.body[0]
+    assert isinstance(m, Match)
+    assert isinstance(m.subject, VarLoad)
+    assert len(m.cases) == 1
+    c = m.cases[0]
+    assert isinstance(c, MatchCase)
+    pat = c.pattern
+    assert isinstance(pat, Pattern)
+    assert pat.kind == PatternKind.OR
+    assert len(pat.patterns) == 2
+    assert pat.patterns[0].kind == PatternKind.VALUE
+    assert isinstance(pat.patterns[0].value, Constant)
+
+
+def test_match_sequence_with_guard():
+    src = """
+match obj:
+    case [a, b] if a < b:
+        pass
+"""
+    ir = build_ir(src)
+    m = ir.body[0]
+    assert isinstance(m, Match)
+    c = m.cases[0]
+    assert isinstance(c.pattern, Pattern)
+    assert c.pattern.kind == PatternKind.SEQUENCE
+    assert len(c.pattern.patterns) == 2
+    assert c.guard is not None
+    assert isinstance(c.guard, Compare)
+
+
+def test_match_mapping_pattern():
+    src = """
+match data:
+    case {"x": a, "y": b}:
+        pass
+"""
+    ir = build_ir(src)
+    m = ir.body[0]
+    assert isinstance(m, Match)
+    c = m.cases[0]
+    assert isinstance(c.pattern, Pattern)
+    assert c.pattern.kind == PatternKind.MAPPING
+    assert len(c.pattern.keys) == 2
+    assert len(c.pattern.values) == 2
+    assert all(isinstance(k, Constant) for k in c.pattern.keys)
+
+
+def test_match_wildcard_default_case():
+    src = """
+match obj:
+    case _:
+        hit = False
+"""
+    ir = build_ir(src)
+    m = ir.body[0]
+    assert isinstance(m, Match)
+    c = m.cases[0]
+    assert c.pattern.kind == PatternKind.WILDCARD
+    assert isinstance(c.body[0], VarStore)
+
+
+def test_match_parent_links():
+    src = """
+match obj:
+    case 1:
+        x = 1
+    case _:
+        x = 2
+"""
+    ir = build_ir(src)
+    m = ir.body[0]
+    assert isinstance(m, Match)
+    assert m.subject.parent is m
+    for case in m.cases:
+        assert case.parent is m
+        assert case.pattern.parent is case
+        for st in case.body:
+            assert st.parent is case
+
+
+def test_async_functiondef_raises():
+    with pytest.raises(DeliberatelyUnsupportedError):
+        build_ir("async def foo():\n    return 1")
+
+
+def test_await_raises():
+    with pytest.raises(DeliberatelyUnsupportedError):
+        build_ir("async def f():\n    return await g()")

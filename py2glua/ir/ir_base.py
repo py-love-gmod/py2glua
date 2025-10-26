@@ -438,9 +438,166 @@ class DictLiteral(IRNode):
 
 # endregion
 
-# TODO:
-# lambda
-# match/case
-# comprehension ## [x+1 for x in arr]
-# walrus ## :=
-# f-строки
+
+# region LAMBDA
+@dataclass
+class Lambda(IRNode):
+    args: list[str] = field(default_factory=list)
+    body: IRNode | None = None  # expression
+
+    def walk(self) -> Iterator[IRNode]:
+        yield self
+        if self.body:
+            yield from self.body.walk()
+
+
+# endregion
+
+
+# region WALRUS (NamedExpr)
+@dataclass
+class NamedExpr(IRNode):
+    name: str
+    value: IRNode
+
+    def walk(self) -> Iterator[IRNode]:
+        yield self
+        yield from self.value.walk()
+
+
+# endregion
+
+
+# region F-STRINGS
+@dataclass
+class FStringPart(IRNode):
+    def walk(self) -> Iterator[IRNode]:
+        yield self
+
+
+@dataclass
+class FStringText(FStringPart):
+    text: str = ""
+
+    def walk(self) -> Iterator[IRNode]:
+        yield self
+
+
+@dataclass
+class FStringExpr(FStringPart):
+    value: IRNode
+    conversion: str | None = None
+    format_spec: str | None = None
+
+    def walk(self) -> Iterator[IRNode]:
+        yield self
+        yield from self.value.walk()
+
+
+@dataclass
+class FString(IRNode):
+    parts: list[FStringPart] = field(default_factory=list)
+
+    def walk(self) -> Iterator[IRNode]:
+        yield self
+        for p in self.parts:
+            yield from p.walk()
+
+
+# endregion
+
+
+# region COMPREHENSIONS
+@dataclass
+class ComprehensionFor(IRNode):
+    target: IRNode
+    iter: IRNode
+    ifs: list[IRNode] = field(default_factory=list)
+    is_async: bool = False
+
+    def walk(self) -> Iterator[IRNode]:
+        yield self
+        yield from self.target.walk()
+        yield from self.iter.walk()
+        for cond in self.ifs:
+            yield from cond.walk()
+
+
+@dataclass
+class ListComp(IRNode):
+    elt: IRNode
+    generators: list[ComprehensionFor] = field(default_factory=list)
+
+    def walk(self) -> Iterator[IRNode]:
+        yield self
+        yield from self.elt.walk()
+        for gen in self.generators:
+            yield from gen.walk()
+
+
+# endregion
+
+
+# region MATCH/CASE (PEP 634)
+class PatternKind(Enum):
+    WILDCARD = auto()  # _
+    VALUE = auto()  # literal or dotted attr
+    NAME = auto()  # capture name
+    OR = auto()  # OR of subpatterns
+    SEQUENCE = auto()  # [p1, p2, ...] or (..)
+    MAPPING = auto()  # {k1: p1, ...}
+
+
+@dataclass
+class Pattern(IRNode):
+    kind: PatternKind
+    value: IRNode | None = None
+    name: str | None = None
+    patterns: list["Pattern"] = field(default_factory=list)
+    keys: list[IRNode] = field(default_factory=list)
+    values: list["Pattern"] = field(default_factory=list)
+
+    def walk(self) -> Iterator[IRNode]:
+        yield self
+        if self.value:
+            yield from self.value.walk()
+
+        for p in self.patterns:
+            yield from p.walk()
+
+        for k in self.keys:
+            yield from k.walk()
+
+        for v in self.values:
+            yield from v.walk()
+
+
+@dataclass
+class MatchCase(IRNode):
+    pattern: Pattern
+    guard: IRNode | None = None
+    body: list[IRNode] = field(default_factory=list)
+
+    def walk(self) -> Iterator[IRNode]:
+        yield self
+        yield from self.pattern.walk()
+        if self.guard:
+            yield from self.guard.walk()
+
+        for n in self.body:
+            yield from n.walk()
+
+
+@dataclass
+class Match(IRNode):
+    subject: IRNode
+    cases: list[MatchCase] = field(default_factory=list)
+
+    def walk(self) -> Iterator[IRNode]:
+        yield self
+        yield from self.subject.walk()
+        for c in self.cases:
+            yield from c.walk()
+
+
+# endregion
