@@ -102,13 +102,22 @@ class Parser:
     def _build_raw_import(cls, token_stream: _TokenStream):
         tokens = []
 
+        balance = {"(": 0, ")": 0}
+
         while not token_stream.eof():
             tok = token_stream.advance()
             if tok is None:
                 break
 
             tokens.append(tok)
-            if tok.type in (tokenize.NEWLINE, tokenize.NL):
+
+            s = tok.string
+            if s in balance:
+                balance[s] += 1
+
+            if tok.type in (tokenize.NEWLINE, tokenize.NL) and not (
+                balance["("] > balance[")"]
+            ):
                 break
 
         return RawNode(RawNodeKind.IMPORT, tokens)
