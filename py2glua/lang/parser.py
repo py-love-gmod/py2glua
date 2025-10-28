@@ -24,19 +24,6 @@ class _TokenStream:
 
         return tok
 
-    def match(self, type_=None, value=None):
-        tok = self.peek()
-        if tok is None:
-            return False
-
-        if type_ is not None and tok.type != type_:
-            return False
-
-        if value is not None and tok.string != value:
-            return False
-
-        return True
-
     def eof(self) -> bool:
         return self.pos >= len(self.tokens)
 
@@ -47,7 +34,28 @@ class _TokenStream:
 # region RawLex
 class RawNodeKind(Enum):
     IMPORT = auto()
-    FUNCTION = auto()
+
+    FUNCTION = auto()  # TODO: def
+    CLASS = auto()  # TODO: class
+
+    IF = auto()  # TODO: if
+    ELIF = auto()  # TODO: elif
+    ELSE = auto()  # TODO: else
+
+    TRY = auto()  # TODO: try
+    EXCEPT = auto()  # TODO: except
+    FINALLY = auto()  # TODO: finally
+
+    DECORATORS = auto()  # TODO: @
+
+    DEL = auto()  # TODO: del
+
+    WHILE = auto()  # TODO: while
+    FOR = auto()  # TODO: for
+
+    WITH = auto()  # TODO: with
+    BLOCK = auto()  # TODO: block with lz check
+
     OTHER = auto()
 
 
@@ -55,7 +63,7 @@ class _BaseRawLex:
     def __init__(
         self,
         kind: RawNodeKind,
-        list_of_tokens: list[tokenize.TokenInfo],
+        list_of_tokens: list["tokenize.TokenInfo | _BaseRawLex"],
     ) -> None:
         self.kind = kind
         self.tokens = list_of_tokens
@@ -90,8 +98,17 @@ class Parser:
         nodes = []
 
         while not token_stream.eof():
+            tok = token_stream.advance()
+            assert tok is not None
+
+            # region forbitten
+            if tok.string in ["global", "nonlocal", "async", "await", "yield"]:
+                raise SyntaxError()  # TODO: Normal raise
+
+            # endregion
+
             # region import
-            if token_stream.match(value="import") or token_stream.match(value="from"):
+            if tok.string in ["import", "from"]:
                 nodes.append(cls._build_raw_import(token_stream))
                 continue
             # endregion
