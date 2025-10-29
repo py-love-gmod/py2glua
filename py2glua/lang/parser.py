@@ -127,6 +127,19 @@ class Parser:
             tok = token_stream.peek()
             assert tok is not None
             tok_string = tok.string
+            tok_type = tok.type
+
+            if tok_type in (tokenize.NL, tokenize.NEWLINE):
+                token_stream.advance()
+                continue
+
+            if tok_type == tokenize.DEDENT:
+                token_stream.advance()
+                continue
+
+            if tok_type == tokenize.ENDMARKER:
+                token_stream.advance()
+                continue
 
             if tok_string in {"global", "nonlocal", "async", "await", "yield"}:
                 raise SyntaxError(
@@ -142,11 +155,11 @@ class Parser:
                 nodes.append(func(token_stream))
                 continue
 
-            if tok.type == tokenize.INDENT:
+            if tok_type == tokenize.INDENT:
                 nodes.append(cls._build_raw_indent(token_stream))
                 continue
 
-            token_stream.advance()
+            nodes.append(cls._build_raw_other(token_stream))
 
         return nodes
 
@@ -299,6 +312,10 @@ class Parser:
     @classmethod
     def _build_raw_with(cls, token_stream: _TokenStream) -> RawNode:
         return cls._build_finish_colon(token_stream, RawNodeKind.WITH)
+
+    @classmethod
+    def _build_raw_other(cls, token_stream: _TokenStream) -> RawNode:
+        return cls._build_finish_newline(token_stream, RawNodeKind.OTHER)
 
     @classmethod
     def _build_raw_indent(cls, token_stream: _TokenStream) -> RawNode:
