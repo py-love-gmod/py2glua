@@ -77,7 +77,7 @@ class RawNode(_BaseRawLex):
 
 # endregion
 
-HEADER_KEYWORDS = {
+_HEADER_KEYWORDS = {
     "import": RawNodeKind.IMPORT,
     "from": RawNodeKind.IMPORT,
     "del": RawNodeKind.DEL,
@@ -137,7 +137,7 @@ class Parser:
                 nodes.append(cls._build_raw_decorator(token_stream))
                 continue
 
-            if tok_string in HEADER_KEYWORDS:
+            if tok_string in _HEADER_KEYWORDS:
                 func = getattr(cls, f"_build_raw_{tok_string}")
                 nodes.append(func(token_stream))
                 continue
