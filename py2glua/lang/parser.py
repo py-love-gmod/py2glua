@@ -70,9 +70,9 @@ class _BaseRawLex:
 
 
 class RawNode(_BaseRawLex):
-    def __init__(self, kind, tokens):
+    def __init__(self, kind: RawNodeKind, tokens: list):
         self.kind = kind
-        self.tokens = tokens
+        self.tokens: list = tokens
 
 
 # endregion
@@ -98,6 +98,14 @@ _HEADER_KEYWORDS = {
 class Parser:
     @classmethod
     def parse(cls, source: str) -> list[RawNode]:
+        """Преобразует исходный код в лист сырых нод для обработки
+
+        Args:
+            source (str): Исходный код
+
+        Returns:
+            list[RawNode]: Сырые ноды парсера
+        """
         stream = cls._construct_tokens(source)
         raw = cls._construct_raw_lex(stream)
         return cls._expand_blocks(raw)
@@ -143,8 +151,8 @@ class Parser:
 
             if tok_string in {"global", "nonlocal", "async", "await", "yield"}:
                 raise SyntaxError(
-                    "Forbidden construct in this dialect"
-                )  # TODO: normal raize
+                    f"global, nonlocal, async, await, yield keywords are not supported in py2glua\nLINE|OFFSET: {tok.line}|{tok.start}"
+                )
 
             if tok_string == "@":
                 nodes.append(cls._build_raw_decorator(token_stream))
