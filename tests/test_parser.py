@@ -6,6 +6,7 @@ import pytest
 from py2glua.lang.parser import Parser, RawNode, RawNodeKind
 
 
+# region Helpers
 def _treeify(nodes):
     out = []
     for n in nodes:
@@ -17,6 +18,9 @@ def _treeify(nodes):
             out.append(n.kind.name)
 
     return out
+
+
+# endregion
 
 
 def test_non_constructs_are_ignored_at_toplevel():

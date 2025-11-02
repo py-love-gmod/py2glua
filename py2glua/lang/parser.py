@@ -31,7 +31,7 @@ class _TokenStream:
 # endregion
 
 
-# region RawLex
+# region RawNonTerminal
 class RawNodeKind(Enum):
     IMPORT = auto()
 
@@ -98,14 +98,6 @@ _HEADER_KEYWORDS = {
 class Parser:
     @classmethod
     def parse(cls, source: str) -> list[RawNode]:
-        """Преобразует исходный код в лист сырых нод для обработки
-
-        Args:
-            source (str): Исходный код
-
-        Returns:
-            list[RawNode]: Сырые ноды парсера
-        """
         stream = cls._construct_tokens(source)
         raw = cls._construct_raw_lex(stream)
         return cls._expand_blocks(raw)
