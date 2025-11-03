@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import Callable, List
+from typing import Callable
 
 from .parser import Parser, RawNode, RawNodeKind
 
@@ -20,7 +20,8 @@ class PublicLogicKind(Enum):
 @dataclass
 class PublicLogicNode:
     kind: PublicLogicKind
-    children: List["PublicLogicNode"] = field(default_factory=list)
+    children: list["PublicLogicNode"] = field(default_factory=list)
+    origin: RawNode | None = None
 
 
 # endregion
@@ -39,7 +40,8 @@ class _LogicBlockKind(Enum):
 @dataclass
 class _PyLogicBlock:
     kind: _LogicBlockKind
-    body: list["RawNode | _PyLogicBlock"] = field(default_factory=list)
+    body: list["_PyLogicBlock"] = field(default_factory=list)
+    origin: RawNode | None = None
 
 
 # endregion
@@ -47,86 +49,32 @@ class _PyLogicBlock:
 
 class PyLogicBlockBuilder:
     @classmethod
-    def build(cls, path_to_file: Path) -> List[PublicLogicNode]:
-        blocks = cls._build(path_to_file)
-        return cls._export_to_public(blocks)
-
-    # region Build
-    @classmethod
-    def _export_to_public(cls, blocks: List[_PyLogicBlock]) -> List[PublicLogicNode]:
-        def map_kind(k: _LogicBlockKind) -> PublicLogicKind:
-            return {
-                _LogicBlockKind.FUNCTION: PublicLogicKind.FUNCTION,
-                _LogicBlockKind.CLASS: PublicLogicKind.CLASS,
-                _LogicBlockKind.BRANCHING_CONDITION: PublicLogicKind.BRANCH,
-                _LogicBlockKind.LOOPS: PublicLogicKind.LOOP,
-                _LogicBlockKind.TRY_EXCEPT: PublicLogicKind.TRY,
-                _LogicBlockKind.WITH_BLOCK: PublicLogicKind.WITH,
-            }.get(k, PublicLogicKind.STATEMENT)
-
-        def to_public(node) -> PublicLogicNode:
-            if isinstance(node, _PyLogicBlock):
-                children = [to_public(ch) for ch in node.body]
-                return PublicLogicNode(kind=map_kind(node.kind), children=children)
-
-            if isinstance(node, RawNode):
-                if node.kind is RawNodeKind.BLOCK:
-                    return PublicLogicNode(
-                        kind=PublicLogicKind.WITH,
-                        children=[to_public(ch) for ch in getattr(node, "tokens", [])],
-                    )
-
-                return PublicLogicNode(kind=PublicLogicKind.STATEMENT, children=[])
-
-            raise TypeError(f"Unexpected node type during export: {type(node)}")
-
-        return [to_public(b) for b in blocks]
-
-    @classmethod
-    def _build(cls, path_to_file: Path) -> list[_PyLogicBlock]:
+    def build(cls, path_to_file: Path) -> list[PublicLogicNode]:
         source = path_to_file.read_text(encoding="utf-8-sig")
         raw_nodes = Parser.parse(source)
         logic_blocks = cls._build_logic_block(raw_nodes)
-        return cls._normalize_logic_blocks(logic_blocks)
+        return cls._export_to_public(logic_blocks)
 
+    # region Export
     @classmethod
-    def _normalize_logic_blocks(
-        cls,
-        logic_blocks: list[_PyLogicBlock],
-    ) -> list[_PyLogicBlock]:
-        def convert_rawnode_to_logic(node: RawNode) -> _PyLogicBlock:
-            if node.kind is RawNodeKind.BLOCK:
-                inner_items = []
-                for r in node.tokens:
-                    if isinstance(r, _PyLogicBlock):
-                        inner_items.append(r)
+    def _export_to_public(cls, blocks: list[_PyLogicBlock]) -> list[PublicLogicNode]:
+        kind_map = {
+            _LogicBlockKind.FUNCTION: PublicLogicKind.FUNCTION,
+            _LogicBlockKind.CLASS: PublicLogicKind.CLASS,
+            _LogicBlockKind.BRANCHING_CONDITION: PublicLogicKind.BRANCH,
+            _LogicBlockKind.LOOPS: PublicLogicKind.LOOP,
+            _LogicBlockKind.TRY_EXCEPT: PublicLogicKind.TRY,
+            _LogicBlockKind.WITH_BLOCK: PublicLogicKind.WITH,
+        }
 
-                    elif isinstance(r, RawNode):
-                        inner_items.append(convert_rawnode_to_logic(r))
+        def to_public(b: _PyLogicBlock) -> PublicLogicNode:
+            return PublicLogicNode(
+                kind=kind_map[b.kind],
+                children=[to_public(ch) for ch in b.body],
+                origin=b.origin,
+            )
 
-                    else:
-                        raise TypeError(f"Unexpected token inside BLOCK: {type(r)}")
-
-                return _PyLogicBlock(_LogicBlockKind.WITH_BLOCK, inner_items)
-
-            return _PyLogicBlock(_LogicBlockKind.BRANCHING_CONDITION, [])
-
-        def recurse(block: _PyLogicBlock) -> _PyLogicBlock:
-            new_body: list[_PyLogicBlock] = []
-            for elem in block.body:
-                if isinstance(elem, _PyLogicBlock):
-                    new_body.append(recurse(elem))
-
-                elif isinstance(elem, RawNode):
-                    new_body.append(convert_rawnode_to_logic(elem))
-
-                else:
-                    raise TypeError(f"Unexpected element type in body: {type(elem)}")
-
-            block.body = new_body  # pyright: ignore[reportAttributeAccessIssue]
-            return block
-
-        return [recurse(b) for b in logic_blocks]
+        return [to_public(b) for b in blocks]
 
     # endregion
 
@@ -136,23 +84,26 @@ class PyLogicBlockBuilder:
         j = hdr_idx + 1
         if j >= len(nodes) or nodes[j].kind is not RawNodeKind.BLOCK:
             raise SyntaxError(f"Expected BLOCK after {nodes[hdr_idx].kind.name}.")
+
         block = nodes[j]
         if not getattr(block, "tokens", None):
             raise SyntaxError(f"Empty BLOCK after {nodes[hdr_idx].kind.name}.")
+
         return j
 
     @classmethod
     def _consume_header_plus_block(
-        cls, nodes: list[RawNode], hdr_idx: int, parts: list[RawNode]
-    ) -> int:
+        cls,
+        nodes: list[RawNode],
+        hdr_idx: int,
+    ) -> tuple[int, RawNode, RawNode]:
         blk_idx = cls._expect_block_after(nodes, hdr_idx)
-        parts.extend((nodes[hdr_idx], nodes[blk_idx]))
-        return blk_idx + 1
+        offset = (blk_idx + 1) - hdr_idx
+        return offset, nodes[hdr_idx], nodes[blk_idx]
 
     # endregion
 
     # region Core block builder
-
     @classmethod
     def _build_logic_block(cls, nodes: list[RawNode]) -> list[_PyLogicBlock]:
         dispatch: dict[
@@ -181,6 +132,7 @@ class PyLogicBlockBuilder:
 
         while i < n:
             node = nodes[i]
+
             if node.kind in illegal_solo:
                 raise SyntaxError(
                     f"Unexpected {node.kind.name} without matching header."
@@ -195,12 +147,6 @@ class PyLogicBlockBuilder:
             out.extend(blocks)
             i += offset
 
-        for block in out:
-            for elem in list(block.body):
-                if isinstance(elem, RawNode) and elem.kind is RawNodeKind.BLOCK:
-                    inner_logic = cls._build_logic_block(elem.tokens)
-                    elem.tokens = inner_logic
-
         return out
 
     # endregion
@@ -208,7 +154,9 @@ class PyLogicBlockBuilder:
     # region Concrete block builders
     @classmethod
     def _build_logic_maybe_decorated(
-        cls, nodes: list[RawNode], start: int
+        cls,
+        nodes: list[RawNode],
+        start: int,
     ) -> tuple[int, list[_PyLogicBlock]]:
         i = start
         n = len(nodes)
@@ -221,35 +169,61 @@ class PyLogicBlockBuilder:
                 "Decorator sequence must be followed by a function or class."
             )
 
-        header = nodes[i].kind
-        if header not in (RawNodeKind.FUNCTION, RawNodeKind.CLASS):
-            raise SyntaxError(f"Decorators cannot be applied to {header.name}.")
-
-        if i == start:
-            raise SyntaxError("Expected at least one decorator before function/class.")
+        header_kind = nodes[i].kind
+        if header_kind not in (RawNodeKind.FUNCTION, RawNodeKind.CLASS):
+            raise SyntaxError(f"Decorators cannot be applied to {header_kind.name}.")
 
         blk_idx = cls._expect_block_after(nodes, i)
-        end = blk_idx + 1
+        header = nodes[i]
+        block = nodes[blk_idx]
+
+        inner = cls._build_logic_block(block.tokens)
         kind = (
             _LogicBlockKind.FUNCTION
-            if header is RawNodeKind.FUNCTION
+            if header_kind is RawNodeKind.FUNCTION
             else _LogicBlockKind.CLASS
         )
-        return end - start, [_PyLogicBlock(kind, nodes[start:end])]  # pyright: ignore[reportArgumentType]
+        return (blk_idx + 1) - start, [_PyLogicBlock(kind, inner, origin=header)]
 
     @classmethod
-    def _build_logic_func_block(cls, nodes: list[RawNode], start: int):
-        blk_idx = cls._expect_block_after(nodes, start)
-        return blk_idx + 1 - start, [
-            _PyLogicBlock(_LogicBlockKind.FUNCTION, nodes[start : blk_idx + 1])  # pyright: ignore[reportArgumentType]
-        ]
+    def _build_logic_func_block(
+        cls,
+        nodes: list[RawNode],
+        start: int,
+    ) -> tuple[int, list[_PyLogicBlock]]:
+        off, header, block = cls._consume_header_plus_block(nodes, start)
+        inner = cls._build_logic_block(block.tokens)
+        return off, [_PyLogicBlock(_LogicBlockKind.FUNCTION, inner, origin=header)]
 
     @classmethod
-    def _build_logic_class_block(cls, nodes: list[RawNode], start: int):
-        blk_idx = cls._expect_block_after(nodes, start)
-        return blk_idx + 1 - start, [
-            _PyLogicBlock(_LogicBlockKind.CLASS, nodes[start : blk_idx + 1])  # pyright: ignore[reportArgumentType]
-        ]
+    def _build_logic_class_block(
+        cls,
+        nodes: list[RawNode],
+        start: int,
+    ) -> tuple[int, list[_PyLogicBlock]]:
+        off, header, block = cls._consume_header_plus_block(nodes, start)
+        inner = cls._build_logic_block(block.tokens)
+        return off, [_PyLogicBlock(_LogicBlockKind.CLASS, inner, origin=header)]
+
+    @classmethod
+    def _build_logic_loop_block(
+        cls,
+        nodes: list[RawNode],
+        start: int,
+    ) -> tuple[int, list[_PyLogicBlock]]:
+        off, header, block = cls._consume_header_plus_block(nodes, start)
+        inner = cls._build_logic_block(block.tokens)
+        return off, [_PyLogicBlock(_LogicBlockKind.LOOPS, inner, origin=header)]
+
+    @classmethod
+    def _build_logic_with_block(
+        cls,
+        nodes: list[RawNode],
+        start: int,
+    ) -> tuple[int, list[_PyLogicBlock]]:
+        off, header, block = cls._consume_header_plus_block(nodes, start)
+        inner = cls._build_logic_block(block.tokens)
+        return off, [_PyLogicBlock(_LogicBlockKind.WITH_BLOCK, inner, origin=header)]
 
     @classmethod
     def _build_logic_branch_chain(cls, nodes: list[RawNode], start: int):
@@ -264,17 +238,29 @@ class PyLogicBlockBuilder:
         if nodes[i].kind is not RawNodeKind.IF:
             i = start
 
-        parts: list[RawNode] = []
-        j = cls._consume_header_plus_block(nodes, i, parts)
+        parts_children: list[_PyLogicBlock] = []
+        j = i
         n = len(nodes)
 
+        # if
+        off, header, block = cls._consume_header_plus_block(nodes, j)
+        j += off
+        origin_header = header
+        parts_children.extend(cls._build_logic_block(block.tokens))
+
+        # elif / else
         while j < n and nodes[j].kind in (RawNodeKind.ELIF, RawNodeKind.ELSE):
-            j = cls._consume_header_plus_block(nodes, j, parts)
+            off2, _, block2 = cls._consume_header_plus_block(nodes, j)
+            j += off2
+            parts_children.extend(cls._build_logic_block(block2.tokens))
 
-        if not parts:
-            raise SyntaxError("Malformed branching chain.")
-
-        return j - i, [_PyLogicBlock(_LogicBlockKind.BRANCHING_CONDITION, parts)]  # pyright: ignore[reportArgumentType]
+        return j - i, [
+            _PyLogicBlock(
+                _LogicBlockKind.BRANCHING_CONDITION,
+                parts_children,
+                origin=origin_header,
+            )
+        ]
 
     @classmethod
     def _build_logic_try_chain(cls, nodes: list[RawNode], start: int):
@@ -285,51 +271,42 @@ class PyLogicBlockBuilder:
             RawNodeKind.FINALLY,
         ):
             i -= 1
+
         if nodes[i].kind is not RawNodeKind.TRY:
             i = start
 
-        parts: list[RawNode] = []
-        j = cls._consume_header_plus_block(nodes, i, parts)
+        j = i
         n = len(nodes)
+        parts_children: list[_PyLogicBlock] = []
 
-        saw_except = False
-        saw_else = False
-        saw_finally = False
+        # TRY
+        off, header, block = cls._consume_header_plus_block(nodes, j)
+        j += off
+        origin_header = header
+        parts_children.extend(cls._build_logic_block(block.tokens))
 
+        # EXCEPT*
         while j < n and nodes[j].kind is RawNodeKind.EXCEPT:
-            saw_except = True
-            j = cls._consume_header_plus_block(nodes, j, parts)
+            off2, _, blk2 = cls._consume_header_plus_block(nodes, j)
+            j += off2
+            parts_children.extend(cls._build_logic_block(blk2.tokens))
 
+        # ELSE?
         if j < n and nodes[j].kind is RawNodeKind.ELSE:
-            saw_else = True
-            j = cls._consume_header_plus_block(nodes, j, parts)
+            off3, _, blk3 = cls._consume_header_plus_block(nodes, j)
+            j += off3
+            parts_children.extend(cls._build_logic_block(blk3.tokens))
 
+        # FINALLY?
         if j < n and nodes[j].kind is RawNodeKind.FINALLY:
-            saw_finally = True
-            j = cls._consume_header_plus_block(nodes, j, parts)
+            off4, _, blk4 = cls._consume_header_plus_block(nodes, j)
+            j += off4
+            parts_children.extend(cls._build_logic_block(blk4.tokens))
 
-        if not (saw_except or saw_finally):
-            raise SyntaxError(
-                "TRY chain must contain at least one EXCEPT or FINALLY part."
+        return j - i, [
+            _PyLogicBlock(
+                _LogicBlockKind.TRY_EXCEPT, parts_children, origin=origin_header
             )
-
-        if saw_else and not saw_except:
-            raise SyntaxError("ELSE in TRY chain without EXCEPT is invalid.")
-
-        return j - i, [_PyLogicBlock(_LogicBlockKind.TRY_EXCEPT, parts)]  # pyright: ignore[reportArgumentType]
-
-    @classmethod
-    def _build_logic_loop_block(cls, nodes: list[RawNode], start: int):
-        blk_idx = cls._expect_block_after(nodes, start)
-        return blk_idx + 1 - start, [
-            _PyLogicBlock(_LogicBlockKind.LOOPS, nodes[start : blk_idx + 1])  # pyright: ignore[reportArgumentType]
-        ]
-
-    @classmethod
-    def _build_logic_with_block(cls, nodes: list[RawNode], start: int):
-        blk_idx = cls._expect_block_after(nodes, start)
-        return blk_idx + 1 - start, [
-            _PyLogicBlock(_LogicBlockKind.WITH_BLOCK, nodes[start : blk_idx + 1])  # pyright: ignore[reportArgumentType]
         ]
 
     # endregion

@@ -8,7 +8,6 @@ from pathlib import Path
 from colorama import Fore, Style, init
 
 from .config import Py2GluaConfig
-from .exceptions import CompileError
 
 init(autoreset=True)
 
@@ -178,11 +177,6 @@ def main() -> None:
             _build(args.src, args.out, args)
 
         sys.exit(0)
-
-    except CompileError as err:
-        logger.error(err)
-        logger.error("Exit code 1")
-        sys.exit(1)
 
     except KeyError as err:
         logger.error(f"Error accessing key {err}", exc_info=True)

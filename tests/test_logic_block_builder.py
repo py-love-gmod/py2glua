@@ -223,19 +223,31 @@ def test_try_combinations_valid(tmp_path: Path, src: str):
 
 
 def test_top_level_sibling_order(tmp_path: Path):
-    src = (
-        "def f():\n"
-        "    pass\n"
-        "\n"
-        "class C:\n"
-        "    pass\n"
-        "\n"
-        "if True:\n"
-        "    pass\n"
-        "\n"
-        "for i in range(1):\n"
-        "    pass\n"
-    )
+    src = """
+def f():
+    pass
+
+class C:
+    pass
+
+if True:
+    pass
+
+for i in range(1):
+    pass
+
+try:
+   pass
+
+except Exception:
+   pass
+
+finally:
+    pass
+
+with open('a') as f:
+    pass
+"""
     f = tmp_path / "siblings.py"
     f.write_text(src, encoding="utf-8-sig")
 
@@ -246,6 +258,8 @@ def test_top_level_sibling_order(tmp_path: Path):
         PublicLogicKind.CLASS,
         PublicLogicKind.BRANCH,
         PublicLogicKind.LOOP,
+        PublicLogicKind.TRY,
+        PublicLogicKind.WITH,
     ]
 
 
@@ -285,3 +299,64 @@ def test_top_level_statements_are_ignored(tmp_path: Path):
 
     res = PyLogicBlockBuilder.build(f)
     assert res == []
+
+
+def test_every_public_has_origin(tmp_path):
+    src = "def f():\n    if True:\n        pass\n"
+    f = tmp_path / "orig.py"
+    f.write_text(src, encoding="utf-8-sig")
+
+    res = PyLogicBlockBuilder.build(f)
+
+    def walk(nodes):
+        for n in nodes:
+            assert n.origin is not None, f"{n.kind} has no origin"
+            walk(n.children)
+
+    walk(res)
+
+
+def test_visual_snapshot(tmp_path):
+    src = """
+def f():
+    if x:
+        for i in y:
+            pass
+"""
+    f = tmp_path / "snap.py"
+    f.write_text(src, encoding="utf-8-sig")
+
+    result = PyLogicBlockBuilder.build(f)
+    kinds = _dump_kinds(result)
+    assert kinds == [
+        PublicLogicKind.FUNCTION,
+        PublicLogicKind.BRANCH,
+        PublicLogicKind.LOOP,
+    ]
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        # else
+        "else:\n    pass\n",
+        # elif x
+        "elif True:\n    pass\n",
+        # exept
+        "except Exception:\n    pass\n",
+        # finally
+        "finally:\n    pass\n",
+    ],
+)
+def test_illegal_headers_raise_syntaxerror(tmp_path: Path, src: str):
+    f = tmp_path / "broken.py"
+    f.write_text(src, encoding="utf-8-sig")
+    with pytest.raises(SyntaxError):
+        PyLogicBlockBuilder.build(f)
+
+
+def test_empty_block_raises(tmp_path: Path):
+    f = tmp_path / "empty_block.py"
+    f.write_text("def f():\n    ", encoding="utf-8-sig")
+    with pytest.raises(SyntaxError):
+        PyLogicBlockBuilder.build(f)
