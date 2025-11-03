@@ -360,3 +360,89 @@ def test_empty_block_raises(tmp_path: Path):
     f.write_text("def f():\n    ", encoding="utf-8-sig")
     with pytest.raises(SyntaxError):
         PyLogicBlockBuilder.build(f)
+
+
+def test_multiple_try_chains_separated(tmp_path: Path):
+    src = (
+        "try:\n    pass\nexcept Exception:\n    pass\n"
+        "try:\n    pass\nfinally:\n    pass\n"
+    )
+    f = tmp_path / "multi_try.py"
+    f.write_text(src, encoding="utf-8-sig")
+    res = PyLogicBlockBuilder.build(f)
+    kinds = _kinds_sequence(res)
+    assert kinds.count(PublicLogicKind.TRY) == 2
+
+
+def test_function_with_nested_try_and_with(tmp_path: Path):
+    src = (
+        "def f():\n"
+        "    try:\n"
+        "        with open('a'):\n"
+        "            pass\n"
+        "    except Exception:\n"
+        "        pass\n"
+    )
+    f = tmp_path / "nested_try_with.py"
+    f.write_text(src, encoding="utf-8-sig")
+    res = PyLogicBlockBuilder.build(f)
+    kinds = _dump_kinds(res)
+    assert PublicLogicKind.FUNCTION in kinds
+    assert PublicLogicKind.TRY in kinds
+    assert PublicLogicKind.WITH in kinds
+
+
+def test_try_else_without_except_raises(tmp_path: Path):
+    src = "try:\n    pass\nelse:\n    pass\n"
+    f = tmp_path / "try_bad_else.py"
+    f.write_text(src, encoding="utf-8-sig")
+    with pytest.raises(SyntaxError):
+        PyLogicBlockBuilder.build(f)
+
+
+def test_decorator_without_target_raises(tmp_path: Path):
+    src = "@dec\nx = 42\n"
+    f = tmp_path / "decorator_fail.py"
+    f.write_text(src, encoding="utf-8-sig")
+    with pytest.raises(SyntaxError):
+        PyLogicBlockBuilder.build(f)
+
+
+def test_full_complex_script_parses(tmp_path: Path):
+    src = (
+        "@outer\n"
+        "class A:\n"
+        "    def f(self):\n"
+        "        if x:\n"
+        "            try:\n"
+        "                while True:\n"
+        "                    with open('a') as f:\n"
+        "                        pass\n"
+        "            except Exception:\n"
+        "                pass\n"
+    )
+    f = tmp_path / "mega.py"
+    f.write_text(src, encoding="utf-8-sig")
+    res = PyLogicBlockBuilder.build(f)
+    path = [
+        PublicLogicKind.CLASS,
+        PublicLogicKind.FUNCTION,
+        PublicLogicKind.BRANCH,
+        PublicLogicKind.TRY,
+        PublicLogicKind.LOOP,
+        PublicLogicKind.WITH,
+    ]
+    assert _has_path(res, path)
+
+
+def test_no_internal_nodes_leak(tmp_path: Path):
+    f = tmp_path / "leak.py"
+    f.write_text("def f():\n    pass\n", encoding="utf-8-sig")
+    res = PyLogicBlockBuilder.build(f)
+
+    def walk(nodes):
+        for n in nodes:
+            assert isinstance(n, PublicLogicNode)
+            walk(n.children)
+
+    walk(res)
