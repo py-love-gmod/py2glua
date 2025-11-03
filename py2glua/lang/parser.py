@@ -77,6 +77,7 @@ class RawNode(_BaseRawLex):
 
 # endregion
 
+
 _HEADER_KEYWORDS = {
     "import": RawNodeKind.IMPORT,
     "from": RawNodeKind.IMPORT,
@@ -121,7 +122,7 @@ class Parser:
     # region lex
     @classmethod
     def _construct_raw_lex(cls, token_stream: _TokenStream):
-        nodes = []
+        nodes: list[RawNode] = []
 
         while not token_stream.eof():
             tok = token_stream.peek()
@@ -152,7 +153,13 @@ class Parser:
 
             if tok_string in _HEADER_KEYWORDS:
                 func = getattr(cls, f"_build_raw_{tok_string}")
-                nodes.append(func(token_stream))
+                res = func(token_stream)
+                if isinstance(res, tuple):
+                    nodes.extend(res)  # type: ignore[arg-type]
+
+                else:
+                    nodes.append(res)
+
                 continue
 
             if tok_type == tokenize.INDENT:
@@ -169,6 +176,12 @@ class Parser:
 
         for n in nodes:
             if n.kind == RawNodeKind.BLOCK:
+                raw_children = [t for t in n.tokens if isinstance(t, RawNode)]
+                if raw_children:
+                    n.tokens = cls._expand_blocks(raw_children)
+                    out.append(n)
+                    continue
+
                 toks = [t for t in n.tokens if isinstance(t, tokenize.TokenInfo)]
 
                 if toks and toks[0].type == tokenize.INDENT:
@@ -250,6 +263,24 @@ class Parser:
 
         return cls._build_until(token_stream, kind, stop)
 
+    @classmethod
+    def _build_header_with_optional_inline_block(
+        cls, token_stream: _TokenStream, kind: RawNodeKind
+    ):
+        header = cls._build_finish_colon(token_stream, kind)
+
+        nxt = token_stream.peek()
+        if nxt is None:
+            return header
+
+        if nxt.type in (tokenize.NEWLINE, tokenize.NL):
+            return header
+
+        inline_stmt = cls._build_finish_newline(token_stream, RawNodeKind.OTHER)
+        block = RawNode(RawNodeKind.BLOCK, [inline_stmt])
+
+        return (header, block)
+
     # endregion
 
     # region specific builders
@@ -270,48 +301,70 @@ class Parser:
         return cls._build_finish_newline(token_stream, RawNodeKind.DECORATORS)
 
     @classmethod
-    def _build_raw_def(cls, token_stream: _TokenStream) -> RawNode:
-        return cls._build_finish_colon(token_stream, RawNodeKind.FUNCTION)
+    def _build_raw_def(cls, token_stream: _TokenStream):
+        return cls._build_header_with_optional_inline_block(
+            token_stream, RawNodeKind.FUNCTION
+        )
 
     @classmethod
-    def _build_raw_class(cls, token_stream: _TokenStream) -> RawNode:
-        return cls._build_finish_colon(token_stream, RawNodeKind.CLASS)
+    def _build_raw_class(cls, token_stream: _TokenStream):
+        return cls._build_header_with_optional_inline_block(
+            token_stream, RawNodeKind.CLASS
+        )
 
     @classmethod
-    def _build_raw_if(cls, token_stream: _TokenStream) -> RawNode:
-        return cls._build_finish_colon(token_stream, RawNodeKind.IF)
+    def _build_raw_if(cls, token_stream: _TokenStream):
+        return cls._build_header_with_optional_inline_block(
+            token_stream, RawNodeKind.IF
+        )
 
     @classmethod
-    def _build_raw_elif(cls, token_stream: _TokenStream) -> RawNode:
-        return cls._build_finish_colon(token_stream, RawNodeKind.ELIF)
+    def _build_raw_elif(cls, token_stream: _TokenStream):
+        return cls._build_header_with_optional_inline_block(
+            token_stream, RawNodeKind.ELIF
+        )
 
     @classmethod
-    def _build_raw_else(cls, token_stream: _TokenStream) -> RawNode:
-        return cls._build_finish_colon(token_stream, RawNodeKind.ELSE)
+    def _build_raw_else(cls, token_stream: _TokenStream):
+        return cls._build_header_with_optional_inline_block(
+            token_stream, RawNodeKind.ELSE
+        )
 
     @classmethod
-    def _build_raw_try(cls, token_stream: _TokenStream) -> RawNode:
-        return cls._build_finish_colon(token_stream, RawNodeKind.TRY)
+    def _build_raw_try(cls, token_stream: _TokenStream):
+        return cls._build_header_with_optional_inline_block(
+            token_stream, RawNodeKind.TRY
+        )
 
     @classmethod
-    def _build_raw_except(cls, token_stream: _TokenStream) -> RawNode:
-        return cls._build_finish_colon(token_stream, RawNodeKind.EXCEPT)
+    def _build_raw_except(cls, token_stream: _TokenStream):
+        return cls._build_header_with_optional_inline_block(
+            token_stream, RawNodeKind.EXCEPT
+        )
 
     @classmethod
-    def _build_raw_finally(cls, token_stream: _TokenStream) -> RawNode:
-        return cls._build_finish_colon(token_stream, RawNodeKind.FINALLY)
+    def _build_raw_finally(cls, token_stream: _TokenStream):
+        return cls._build_header_with_optional_inline_block(
+            token_stream, RawNodeKind.FINALLY
+        )
 
     @classmethod
-    def _build_raw_while(cls, token_stream: _TokenStream) -> RawNode:
-        return cls._build_finish_colon(token_stream, RawNodeKind.WHILE)
+    def _build_raw_while(cls, token_stream: _TokenStream):
+        return cls._build_header_with_optional_inline_block(
+            token_stream, RawNodeKind.WHILE
+        )
 
     @classmethod
-    def _build_raw_for(cls, token_stream: _TokenStream) -> RawNode:
-        return cls._build_finish_colon(token_stream, RawNodeKind.FOR)
+    def _build_raw_for(cls, token_stream: _TokenStream):
+        return cls._build_header_with_optional_inline_block(
+            token_stream, RawNodeKind.FOR
+        )
 
     @classmethod
-    def _build_raw_with(cls, token_stream: _TokenStream) -> RawNode:
-        return cls._build_finish_colon(token_stream, RawNodeKind.WITH)
+    def _build_raw_with(cls, token_stream: _TokenStream):
+        return cls._build_header_with_optional_inline_block(
+            token_stream, RawNodeKind.WITH
+        )
 
     @classmethod
     def _build_raw_other(cls, token_stream: _TokenStream) -> RawNode:

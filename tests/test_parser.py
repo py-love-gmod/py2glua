@@ -600,31 +600,6 @@ def test_docstring_then_def_sequence():
     ]
 
 
-def test_inline_suite_if_single_line():
-    src = "if x: pass\n"
-    nodes = Parser.parse(src)
-    kinds = [n.kind for n in nodes]
-    assert kinds == [RawNodeKind.IF, RawNodeKind.OTHER]
-    toks = [
-        t.string
-        for t in nodes[1].tokens
-        if getattr(t, "type", None) not in (tokenize.NL, tokenize.NEWLINE)
-    ]
-    assert toks == ["pass"]
-
-
-def test_inline_suite_while_and_for_single_line():
-    src = "while ok: step()\nfor i in (1,2): use(i)\n"
-    nodes = Parser.parse(src)
-    kinds = [n.kind for n in nodes]
-    assert kinds == [
-        RawNodeKind.WHILE,
-        RawNodeKind.OTHER,
-        RawNodeKind.FOR,
-        RawNodeKind.OTHER,
-    ]
-
-
 def test_nested_dedent_after_block_no_spurious_other():
     src = textwrap.dedent(
         """
@@ -672,7 +647,9 @@ def test_from_future_import_and_aliases():
 def test_with_multi_context_inline():
     src = "with a as x, b as y: do()\n"
     nodes = Parser.parse(src)
-    assert [n.kind for n in nodes] == [RawNodeKind.WITH, RawNodeKind.OTHER]
+    assert [n.kind for n in nodes] == [RawNodeKind.WITH, RawNodeKind.BLOCK]
+    inner = [t for t in nodes[1].tokens if isinstance(t, RawNode)]
+    assert len(inner) == 1 and inner[0].kind == RawNodeKind.OTHER
 
 
 def test_parenthesized_tuple_assignment_multiline_in_block():
@@ -688,3 +665,105 @@ def test_parenthesized_tuple_assignment_multiline_in_block():
     nodes = Parser.parse(src)
     inner = [t for t in nodes[1].tokens if isinstance(t, RawNode)]
     assert len(inner) == 1 and inner[0].kind == RawNodeKind.OTHER
+
+
+def test_inline_suite_if_single_line():
+    src = "if x: pass\n"
+    nodes = Parser.parse(src)
+    assert _treeify(nodes) == ["IF", ["BLOCK", ["OTHER"]]]
+
+
+def test_inline_suite_while_and_for_single_line():
+    src = "while ok: step()\nfor i in (1,2): use(i)\n"
+    nodes = Parser.parse(src)
+    assert _treeify(nodes) == [
+        "WHILE",
+        ["BLOCK", ["OTHER"]],
+        "FOR",
+        ["BLOCK", ["OTHER"]],
+    ]
+
+
+def test_inline_def_and_class_single_line():
+    src = "def f(): return 1\nclass C: pass\n"
+    nodes = Parser.parse(src)
+    assert _treeify(nodes) == [
+        "FUNCTION",
+        ["BLOCK", ["OTHER"]],
+        "CLASS",
+        ["BLOCK", ["OTHER"]],
+    ]
+
+
+def test_inline_try_chain_single_line():
+    src = "try: risky()\nexcept ValueError: handle()\nfinally: cleanup()\n"
+    nodes = Parser.parse(src)
+    assert _treeify(nodes) == [
+        "TRY",
+        ["BLOCK", ["OTHER"]],
+        "EXCEPT",
+        ["BLOCK", ["OTHER"]],
+        "FINALLY",
+        ["BLOCK", ["OTHER"]],
+    ]
+
+
+def test_inline_if_with_multiple_simple_stmts():
+    src = "if x: a=1; b=2; c=3\n"
+    nodes = Parser.parse(src)
+    assert _treeify(nodes) == ["IF", ["BLOCK", ["OTHER"]]]
+    block = nodes[1]
+    inner_other = [t for t in block.tokens if isinstance(t, RawNode)][0]
+    toks = _other_tokens(inner_other)
+    assert toks == ["a", "=", "1", ";", "b", "=", "2", ";", "c", "=", "3"]
+
+
+def test_nested_inline_if_in_block():
+    src = textwrap.dedent(
+        """
+        def f():
+            if a: return 1
+        """
+    )
+    nodes = Parser.parse(src)
+    assert _treeify(nodes) == [
+        "FUNCTION",
+        ["BLOCK", ["IF", ["BLOCK", ["OTHER"]]]],
+    ]
+
+
+def test_header_with_parens_and_backslash_before_colon_inline_body():
+    src = textwrap.dedent(
+        """
+        if (a and (b or c)) \\
+           and d: pass
+        """
+    )
+    nodes = Parser.parse(src)
+    assert _treeify(nodes) == ["IF", ["BLOCK", ["OTHER"]]]
+
+
+def test_inline_with_multi_contexts_then_other():
+    src = "with a as x, b as y: do();\n"
+    nodes = Parser.parse(src)
+    assert _treeify(nodes) == ["WITH", ["BLOCK", ["OTHER"]]]
+    inner_other = [t for t in nodes[1].tokens if isinstance(t, RawNode)][0]
+    toks = _other_tokens(inner_other)
+    assert toks[:3] == ["do", "(", ")"]
+
+
+def test_inline_else_comes_on_next_line_is_ok():
+    src = textwrap.dedent(
+        """
+        if a: x = 1
+        else:
+            y = 2
+        """
+    )
+    nodes = Parser.parse(src)
+    assert _treeify(nodes) == [
+        "IF",
+        ["BLOCK", ["OTHER"]],
+        "ELSE",
+        ["BLOCK", ["OTHER"]],
+    ]
