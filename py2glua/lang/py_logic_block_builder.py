@@ -35,6 +35,7 @@ class _LogicBlockKind(Enum):
     LOOPS = auto()
     TRY_EXCEPT = auto()
     WITH_BLOCK = auto()
+    STATEMENT = auto()
 
 
 @dataclass
@@ -65,6 +66,7 @@ class PyLogicBlockBuilder:
             _LogicBlockKind.LOOPS: PublicLogicKind.LOOP,
             _LogicBlockKind.TRY_EXCEPT: PublicLogicKind.TRY,
             _LogicBlockKind.WITH_BLOCK: PublicLogicKind.WITH,
+            _LogicBlockKind.STATEMENT: PublicLogicKind.STATEMENT,
         }
 
         def to_public(b: _PyLogicBlock) -> PublicLogicNode:
@@ -117,6 +119,7 @@ class PyLogicBlockBuilder:
             RawNodeKind.WHILE: cls._build_logic_loop_block,
             RawNodeKind.FOR: cls._build_logic_loop_block,
             RawNodeKind.WITH: cls._build_logic_with_block,
+            RawNodeKind.OTHER: cls._build_logic_statement,
         }
 
         illegal_solo = {
@@ -152,6 +155,15 @@ class PyLogicBlockBuilder:
     # endregion
 
     # region Concrete block builders
+    @classmethod
+    def _build_logic_statement(
+        cls,
+        nodes: list[RawNode],
+        start: int,
+    ) -> tuple[int, list[_PyLogicBlock]]:
+        node = nodes[start]
+        return 1, [_PyLogicBlock(_LogicBlockKind.STATEMENT, [], origin=node)]
+
     @classmethod
     def _build_logic_maybe_decorated(
         cls,

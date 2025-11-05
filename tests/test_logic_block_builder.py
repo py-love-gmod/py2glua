@@ -292,15 +292,6 @@ def test_deep_nesting_path(tmp_path: Path):
     assert _has_path(res, path)
 
 
-def test_top_level_statements_are_ignored(tmp_path: Path):
-    src = "x = 1\ny = 2\nimport math\nx += 3\n"
-    f = tmp_path / "plain.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    res = PyLogicBlockBuilder.build(f)
-    assert res == []
-
-
 def test_every_public_has_origin(tmp_path):
     src = "def f():\n    if True:\n        pass\n"
     f = tmp_path / "orig.py"
@@ -332,6 +323,7 @@ def f():
         PublicLogicKind.FUNCTION,
         PublicLogicKind.BRANCH,
         PublicLogicKind.LOOP,
+        PublicLogicKind.STATEMENT,
     ]
 
 
