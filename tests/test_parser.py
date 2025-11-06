@@ -43,7 +43,7 @@ def test_simple_function_header_and_block():
     nodes = Parser.parse(src)
     assert _treeify(nodes) == [
         "FUNCTION",
-        ["BLOCK", ["OTHER"]],
+        ["BLOCK", ["PASS"]],
     ]
 
 
@@ -62,7 +62,7 @@ def test_nested_if_inside_function():
             "BLOCK",
             [
                 "IF",
-                ["BLOCK", ["OTHER"]],
+                ["BLOCK", ["PASS"]],
             ],
         ],
     ]
@@ -88,7 +88,7 @@ def test_class_header_and_block_with_method():
                     "BLOCK",
                     [
                         "IF",
-                        ["BLOCK", ["OTHER"]],
+                        ["BLOCK", ["PASS"]],
                     ],
                 ],
             ],
@@ -110,7 +110,7 @@ def test_decorators_before_function():
         "DECORATORS",
         "DECORATORS",
         "FUNCTION",
-        ["BLOCK", ["OTHER"]],
+        ["BLOCK", ["PASS"]],
     ]
 
 
@@ -169,11 +169,11 @@ def test_try_except_finally_structure():
     nodes = Parser.parse(src)
     assert _treeify(nodes) == [
         "TRY",
-        ["BLOCK", ["OTHER"]],
+        ["BLOCK", ["PASS"]],
         "EXCEPT",
-        ["BLOCK", ["OTHER"]],
+        ["BLOCK", ["PASS"]],
         "FINALLY",
-        ["BLOCK", ["OTHER"]],
+        ["BLOCK", ["PASS"]],
     ]
 
 
@@ -191,11 +191,11 @@ def test_if_elif_else_structure():
     nodes = Parser.parse(src)
     assert _treeify(nodes) == [
         "IF",
-        ["BLOCK", ["OTHER"]],
+        ["BLOCK", ["PASS"]],
         "ELIF",
-        ["BLOCK", ["OTHER"]],
+        ["BLOCK", ["PASS"]],
         "ELSE",
-        ["BLOCK", ["OTHER"]],
+        ["BLOCK", ["PASS"]],
     ]
 
 
@@ -211,9 +211,9 @@ def test_while_with_else():
     nodes = Parser.parse(src)
     assert _treeify(nodes) == [
         "WHILE",
-        ["BLOCK", ["OTHER"]],
+        ["BLOCK", ["PASS"]],
         "ELSE",
-        ["BLOCK", ["OTHER"]],
+        ["BLOCK", ["PASS"]],
     ]
 
 
@@ -234,11 +234,11 @@ def test_for_with_else_nested():
             "BLOCK",
             [
                 "IF",
-                ["BLOCK", ["OTHER"]],
+                ["BLOCK", ["PASS"]],
             ],
         ],
         "ELSE",
-        ["BLOCK", ["OTHER"]],
+        ["BLOCK", ["PASS"]],
     ]
 
 
@@ -255,7 +255,7 @@ def test_with_multiline_header():
     nodes = Parser.parse(src)
     assert _treeify(nodes) == [
         "WITH",
-        ["BLOCK", ["OTHER"]],
+        ["BLOCK", ["PASS"]],
     ]
 
 
@@ -284,7 +284,7 @@ def test_nested_blocks_three_levels():
                             "BLOCK",
                             [
                                 "WHILE",
-                                ["BLOCK", ["OTHER"]],
+                                ["BLOCK", ["PASS"]],
                             ],
                         ],
                     ],
@@ -378,7 +378,7 @@ def test_other_inside_function_body():
     assert _other_tokens(inner[1]) == ["print", "(", '"hi"', ")"]
 
 
-def test_pass_and_return_become_other():
+def test_pass_and_return():
     src = textwrap.dedent(
         """
         def f():
@@ -388,9 +388,7 @@ def test_pass_and_return_become_other():
     )
     nodes = Parser.parse(src)
     inner = [t for t in nodes[1].tokens if isinstance(t, RawNode)]
-    assert [n.kind for n in inner] == [RawNodeKind.OTHER, RawNodeKind.OTHER]
-    assert _other_tokens(inner[0]) == ["pass"]
-    assert _other_tokens(inner[1]) == ["return", "42"]
+    assert [n.kind for n in inner] == [RawNodeKind.PASS, RawNodeKind.RETURN]
 
 
 def test_semicolons_same_line_single_other():
@@ -558,7 +556,7 @@ def test_multiline_decorator_then_function():
     assert _only_kinds(nodes) == [
         "DECORATORS",
         "FUNCTION",
-        ["BLOCK", ["OTHER"]],
+        ["BLOCK", ["PASS"]],
     ]
 
 
@@ -586,7 +584,7 @@ def test_header_after_blank_lines_no_fake_other():
     nodes = Parser.parse(src)
     assert [n.kind for n in nodes] == [RawNodeKind.FUNCTION, RawNodeKind.BLOCK]
     assert [c.kind for c in [t for t in nodes[1].tokens if isinstance(t, RawNode)]] == [
-        RawNodeKind.OTHER
+        RawNodeKind.PASS
     ]
 
 

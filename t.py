@@ -12,6 +12,8 @@ with tempfile.TemporaryDirectory() as tmpdir:
         """
 import sys as s
 from py2glua.config import Py2GluaConfig as cfg
+del x
+return x
 """,
         encoding="utf-8",
     )

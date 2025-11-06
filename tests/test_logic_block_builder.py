@@ -323,7 +323,7 @@ def f():
         PublicLogicKind.FUNCTION,
         PublicLogicKind.BRANCH,
         PublicLogicKind.LOOP,
-        PublicLogicKind.STATEMENT,
+        PublicLogicKind.PASS,
     ]
 
 

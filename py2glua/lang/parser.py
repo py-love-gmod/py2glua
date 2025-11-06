@@ -49,6 +49,8 @@ class RawNodeKind(Enum):
     DECORATORS = auto()
 
     DEL = auto()
+    RETURN = auto()
+    PASS = auto()
 
     WHILE = auto()
     FOR = auto()
@@ -93,6 +95,8 @@ _HEADER_KEYWORDS = {
     "while": RawNodeKind.WHILE,
     "for": RawNodeKind.FOR,
     "with": RawNodeKind.WITH,
+    "return": RawNodeKind.RETURN,
+    "pass": RawNodeKind.PASS,
 }
 
 
@@ -295,6 +299,14 @@ class Parser:
     @classmethod
     def _build_raw_del(cls, token_stream: _TokenStream) -> RawNode:
         return cls._build_finish_newline(token_stream, RawNodeKind.DEL)
+
+    @classmethod
+    def _build_raw_return(cls, token_stream: _TokenStream) -> RawNode:
+        return cls._build_finish_newline(token_stream, RawNodeKind.RETURN)
+
+    @classmethod
+    def _build_raw_pass(cls, token_stream: _TokenStream) -> RawNode:
+        return cls._build_finish_newline(token_stream, RawNodeKind.PASS)
 
     @classmethod
     def _build_raw_decorator(cls, token_stream: _TokenStream) -> RawNode:

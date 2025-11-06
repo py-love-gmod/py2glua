@@ -1,6 +1,7 @@
 import importlib.util
 import sys
 import sysconfig
+import tokenize
 from dataclasses import dataclass, field
 from enum import IntEnum, auto
 from pathlib import Path
@@ -36,6 +37,73 @@ class PyIRFile(PyIRNode):
             yield node
 
 
+# region statement
+@dataclass
+class PyIRVarCreate(PyIRNode):
+    vid: int
+    is_global: bool = False
+    external: bool = False
+
+    def walk(self):
+        yield self
+
+
+@dataclass
+class PyIRVarUse(PyIRNode):
+    vid: int
+
+    def walk(self):
+        yield self
+
+
+@dataclass
+class PyIRAtt(PyIRNode):
+    name: str
+
+    def walk(self):
+        yield self
+
+
+@dataclass
+class PyIRCall(PyIRNode):
+    name: str
+    args: list[object] = field(default_factory=list)
+    kwargs: dict[str, object] = field(default_factory=dict)
+
+    def walk(self):
+        yield self
+
+
+@dataclass
+class PyIRReturn(PyIRNode):
+    value: PyIRNode
+
+    def walk(self):
+        yield self
+        yield self.value
+
+
+@dataclass
+class PyIRDel(PyIRNode):
+    value: PyIRNode
+
+    def walk(self):
+        yield self
+        yield self.value
+
+
+@dataclass
+class PyIRConstant(PyIRNode):
+    value: object
+
+    def walk(self):
+        yield self
+
+
+# endregion
+
+
+# region import
 class PyIRImportType(IntEnum):
     UNKNOWN = auto()
     LOCAL = auto()
@@ -55,6 +123,8 @@ class PyIRImport(PyIRNode):
 
 # endregion
 
+# endregion
+
 
 # region Builder
 class PyIRBuilder:
@@ -65,7 +135,11 @@ class PyIRBuilder:
             line=None,
             offset=None,
             path=path_to_file,
-            meta={"imports": [], "aliases": {}},
+            meta={
+                "imports": [],
+                "aliases": {},
+                "var_name": {},
+            },
         )
         py_ir_file.body = cls._build_ir_block(logic_blocks, py_ir_file)
         return py_ir_file
@@ -79,6 +153,7 @@ class PyIRBuilder:
     ) -> list[PyIRNode]:
         dispatch = {
             PublicLogicKind.IMPORT: cls._build_ir_import,
+            PublicLogicKind.STATEMENT: cls._build_ir_statement,
         }
 
         out: list[PyIRNode] = []
@@ -89,8 +164,9 @@ class PyIRBuilder:
             node = nodes[i]
             func = dispatch.get(node.kind)
             if func is None:
-                i += 1
-                continue
+                raise ValueError(
+                    f"PublicLogicKind type {node.kind} no func to build ir"
+                )
 
             offset, result_nodes = func(file_obj, nodes, i)
             out.extend(result_nodes)
@@ -249,6 +325,57 @@ class PyIRBuilder:
         return PyIRImportType.EXTERNAL
 
     # endregion
+
+    # region statment
+    @classmethod
+    def _build_ir_statement(
+        cls,
+        file_obj: PyIRFile,
+        node_list: list[PublicLogicNode],
+        start: int,
+    ) -> tuple[int, list[PyIRNode]]:
+        node = node_list[start]
+        origin = node.origin
+        if origin is None:
+            raise ValueError("Origin is None")
+
+        ir_nodes = ParseStatment.parse(origin.tokens, file_obj)
+        return (1, [ir_nodes])
+
+    # endregion
+
+
+# endregion
+
+
+# region ParseStatment
+class ParseStatment:
+    @classmethod
+    def parse(
+        cls,
+        tokens: list,
+        file_obj: PyIRFile,
+    ) -> PyIRNode:
+        if not tokens:
+            raise ValueError("OwO, some tokens are empty for some reason")
+
+        first: tokenize.TokenInfo = tokens[0]
+        line, offset = first.start
+
+        if first in ("return", "del"):
+            func = getattr(cls, f"_build_ir_{first}")
+            value = cls.parse(tokens[1:], file_obj)
+            return func(line, offset, value)
+
+        raise ValueError("OwO, some tokens are leaked")
+
+    @classmethod
+    def _build_ir_del(cls, line, offset, value):
+        return PyIRDel(line, offset, value)
+
+    @classmethod
+    def _build_ir_return(cls, line, offset, value):
+        return PyIRReturn(line, offset, value)
 
 
 # endregion

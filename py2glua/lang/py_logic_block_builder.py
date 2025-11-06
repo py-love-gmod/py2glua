@@ -15,6 +15,9 @@ class PublicLogicKind(Enum):
     TRY = auto()
     WITH = auto()
     IMPORT = auto()
+    DELETE = auto()
+    RETURN = auto()
+    PASS = auto()
     STATEMENT = auto()
 
 
@@ -37,6 +40,9 @@ class _LogicBlockKind(Enum):
     TRY_EXCEPT = auto()
     WITH_BLOCK = auto()
     IMPORT = auto()
+    DELETE = auto()
+    RETURN = auto()
+    PASS = auto()
     STATEMENT = auto()
 
 
@@ -69,6 +75,9 @@ class PyLogicBlockBuilder:
             _LogicBlockKind.TRY_EXCEPT: PublicLogicKind.TRY,
             _LogicBlockKind.WITH_BLOCK: PublicLogicKind.WITH,
             _LogicBlockKind.IMPORT: PublicLogicKind.IMPORT,
+            _LogicBlockKind.DELETE: PublicLogicKind.DELETE,
+            _LogicBlockKind.RETURN: PublicLogicKind.RETURN,
+            _LogicBlockKind.PASS: PublicLogicKind.PASS,
             _LogicBlockKind.STATEMENT: PublicLogicKind.STATEMENT,
         }
 
@@ -124,6 +133,9 @@ class PyLogicBlockBuilder:
             RawNodeKind.WITH: cls._build_logic_with_block,
             RawNodeKind.IMPORT: cls._build_logic_import_block,
             RawNodeKind.OTHER: cls._build_logic_statement,
+            RawNodeKind.DEL: cls._build_logic_delete,
+            RawNodeKind.PASS: cls._build_logic_pass,
+            RawNodeKind.RETURN: cls._build_logic_return,
         }
 
         illegal_solo = {
@@ -147,8 +159,7 @@ class PyLogicBlockBuilder:
 
             func = dispatch.get(node.kind)
             if func is None:
-                i += 1
-                continue
+                raise ValueError(f"RawNodeKind kind {node.kind} no func to build logic")
 
             offset, blocks = func(nodes, i)
             out.extend(blocks)
@@ -333,6 +344,33 @@ class PyLogicBlockBuilder:
     ) -> tuple[int, list[_PyLogicBlock]]:
         node = nodes[start]
         return 1, [_PyLogicBlock(_LogicBlockKind.IMPORT, [], origin=node)]
+
+    @classmethod
+    def _build_logic_delete(
+        cls,
+        nodes: list[RawNode],
+        start: int,
+    ) -> tuple[int, list[_PyLogicBlock]]:
+        node = nodes[start]
+        return 1, [_PyLogicBlock(_LogicBlockKind.DELETE, [], origin=node)]
+
+    @classmethod
+    def _build_logic_return(
+        cls,
+        nodes: list[RawNode],
+        start: int,
+    ) -> tuple[int, list[_PyLogicBlock]]:
+        node = nodes[start]
+        return 1, [_PyLogicBlock(_LogicBlockKind.RETURN, [], origin=node)]
+
+    @classmethod
+    def _build_logic_pass(
+        cls,
+        nodes: list[RawNode],
+        start: int,
+    ) -> tuple[int, list[_PyLogicBlock]]:
+        node = nodes[start]
+        return 1, [_PyLogicBlock(_LogicBlockKind.PASS, [], origin=node)]
 
 
     # endregion
