@@ -438,3 +438,12 @@ def test_no_internal_nodes_leak(tmp_path: Path):
             walk(n.children)
 
     walk(res)
+
+def test_import_statements_detected(tmp_path: Path):
+    src = "import os\nfrom sys import path as sys_path\n"
+    f = tmp_path / "imports.py"
+    f.write_text(src, encoding="utf-8-sig")
+
+    res = PyLogicBlockBuilder.build(f)
+    kinds = [n.kind for n in res]
+    assert all(k is PublicLogicKind.IMPORT for k in kinds)
