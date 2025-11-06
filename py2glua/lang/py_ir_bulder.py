@@ -362,20 +362,7 @@ class ParseStatment:
         first: tokenize.TokenInfo = tokens[0]
         line, offset = first.start
 
-        if first in ("return", "del"):
-            func = getattr(cls, f"_build_ir_{first}")
-            value = cls.parse(tokens[1:], file_obj)
-            return func(line, offset, value)
-
         raise ValueError("OwO, some tokens are leaked")
-
-    @classmethod
-    def _build_ir_del(cls, line, offset, value):
-        return PyIRDel(line, offset, value)
-
-    @classmethod
-    def _build_ir_return(cls, line, offset, value):
-        return PyIRReturn(line, offset, value)
 
 
 # endregion
