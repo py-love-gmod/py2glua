@@ -162,6 +162,7 @@ class PyIRBuilder:
             PublicLogicKind.DELETE: None,
             PublicLogicKind.RETURN: None,
             PublicLogicKind.PASS: None,
+            PublicLogicKind.COMMENT: None,
             PublicLogicKind.STATEMENT: cls._build_ir_statement,
         }
 
