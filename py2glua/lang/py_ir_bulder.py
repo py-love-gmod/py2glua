@@ -152,7 +152,16 @@ class PyIRBuilder:
         file_obj: PyIRFile,
     ) -> list[PyIRNode]:
         dispatch = {
+            PublicLogicKind.FUNCTION: None,
+            PublicLogicKind.CLASS: None,
+            PublicLogicKind.BRANCH: None,
+            PublicLogicKind.LOOP: None,
+            PublicLogicKind.TRY: None,
+            PublicLogicKind.WITH: None,
             PublicLogicKind.IMPORT: cls._build_ir_import,
+            PublicLogicKind.DELETE: None,
+            PublicLogicKind.RETURN: None,
+            PublicLogicKind.PASS: None,
             PublicLogicKind.STATEMENT: cls._build_ir_statement,
         }
 
