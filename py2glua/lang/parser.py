@@ -140,6 +140,10 @@ class Parser:
             tok_string = tok.string
             tok_type = tok.type
 
+            if tok_type == tokenize.COMMENT:
+                nodes.append(cls._build_raw_comment(token_stream))
+                continue
+
             if tok_type in (
                 tokenize.NL,
                 tokenize.NEWLINE,
@@ -147,10 +151,6 @@ class Parser:
                 tokenize.ENDMARKER,
             ):
                 token_stream.advance()
-                continue
-
-            if tok_type == tokenize.COMMENT:
-                nodes.append(cls._build_raw_comment(token_stream))
                 continue
 
             if tok_string in {"global", "nonlocal", "async", "await", "yield"}:
@@ -390,10 +390,18 @@ class Parser:
         tokens.append(first)
         depth = 1
         while not token_stream.eof():
-            tok = token_stream.advance()
-            if tok is None:
+            look = token_stream.peek()
+            if look is None:
                 break
 
+            if (
+                look.type == tokenize.COMMENT
+                and depth == 1
+                and getattr(look, "start", (0, 1))[1] == 0
+            ):
+                break
+
+            tok = token_stream.advance()
             tokens.append(tok)
 
             if tok.type == tokenize.INDENT:

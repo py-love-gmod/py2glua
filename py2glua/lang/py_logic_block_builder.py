@@ -18,6 +18,7 @@ class PublicLogicKind(Enum):
     DELETE = auto()
     RETURN = auto()
     PASS = auto()
+    COMMENT = auto()
     STATEMENT = auto()
 
 
@@ -43,6 +44,7 @@ class _LogicBlockKind(Enum):
     DELETE = auto()
     RETURN = auto()
     PASS = auto()
+    COMMENT = auto()
     STATEMENT = auto()
 
 
@@ -78,6 +80,7 @@ class PyLogicBlockBuilder:
             _LogicBlockKind.DELETE: PublicLogicKind.DELETE,
             _LogicBlockKind.RETURN: PublicLogicKind.RETURN,
             _LogicBlockKind.PASS: PublicLogicKind.PASS,
+            _LogicBlockKind.COMMENT: PublicLogicKind.COMMENT,
             _LogicBlockKind.STATEMENT: PublicLogicKind.STATEMENT,
         }
 
@@ -136,6 +139,8 @@ class PyLogicBlockBuilder:
             RawNodeKind.DEL: cls._build_logic_delete,
             RawNodeKind.PASS: cls._build_logic_pass,
             RawNodeKind.RETURN: cls._build_logic_return,
+            RawNodeKind.COMMENT: cls._build_logic_comment,
+            RawNodeKind.DOCSTRING: cls._build_logic_comment,
         }
 
         illegal_solo = {
@@ -372,5 +377,30 @@ class PyLogicBlockBuilder:
         node = nodes[start]
         return 1, [_PyLogicBlock(_LogicBlockKind.PASS, [], origin=node)]
 
+    @classmethod
+    def _build_logic_comment(
+        cls,
+        nodes: list[RawNode],
+        start: int,
+    ) -> tuple[int, list[_PyLogicBlock]]:
+        i = start
+        merged_tokens: list[RawNode] = []
+
+        while i < len(nodes) and nodes[i].kind in (
+            RawNodeKind.COMMENT,
+            RawNodeKind.DOCSTRING,
+        ):
+            merged_tokens.append(nodes[i])
+            i += 1
+
+        merged_raw = RawNode(RawNodeKind.COMMENT, merged_tokens)
+
+        combined = _PyLogicBlock(
+            _LogicBlockKind.COMMENT,
+            [],
+            origin=merged_raw,
+        )
+
+        return i - start, [combined]
 
     # endregion

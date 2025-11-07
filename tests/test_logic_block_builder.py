@@ -439,6 +439,7 @@ def test_no_internal_nodes_leak(tmp_path: Path):
 
     walk(res)
 
+
 def test_import_statements_detected(tmp_path: Path):
     src = "import os\nfrom sys import path as sys_path\n"
     f = tmp_path / "imports.py"
@@ -447,3 +448,65 @@ def test_import_statements_detected(tmp_path: Path):
     res = PyLogicBlockBuilder.build(f)
     kinds = [n.kind for n in res]
     assert all(k is PublicLogicKind.IMPORT for k in kinds)
+
+
+def test_single_comment_is_detected(tmp_path: Path):
+    src = "# hello world\nx = 1\n"
+    f = tmp_path / "comment_single.py"
+    f.write_text(src, encoding="utf-8-sig")
+
+    res = PyLogicBlockBuilder.build(f)
+    kinds = [n.kind for n in res]
+    assert kinds == [PublicLogicKind.COMMENT, PublicLogicKind.STATEMENT]
+
+
+def test_multiple_consecutive_comments_merge(tmp_path: Path):
+    src = "# a\n# b\n# c\nx = 1\n"
+    f = tmp_path / "comment_merge.py"
+    f.write_text(src, encoding="utf-8-sig")
+
+    res = PyLogicBlockBuilder.build(f)
+    kinds = [n.kind for n in res]
+    assert kinds == [PublicLogicKind.COMMENT, PublicLogicKind.STATEMENT]
+    comment_node = res[0]
+    assert comment_node.origin is not None
+    assert comment_node.origin.kind.name == "COMMENT"
+    assert len(comment_node.origin.tokens) == 3
+
+
+def test_comment_between_blocks_not_merged(tmp_path: Path):
+    src = "def f():\n    pass\n# a\n# b\nclass C:\n    pass\n"
+    f = tmp_path / "comment_between.py"
+    f.write_text(src, encoding="utf-8-sig")
+
+    res = PyLogicBlockBuilder.build(f)
+    seq = [n.kind for n in res]
+    assert seq == [
+        PublicLogicKind.FUNCTION,
+        PublicLogicKind.COMMENT,
+        PublicLogicKind.CLASS,
+    ]
+
+
+def test_docstring_promoted_to_comment(tmp_path: Path):
+    src = '"""Docstring"""\nprint(1)\n'
+    f = tmp_path / "doc_as_comment.py"
+    f.write_text(src, encoding="utf-8-sig")
+
+    res = PyLogicBlockBuilder.build(f)
+    seq = [n.kind for n in res]
+    assert seq == [PublicLogicKind.COMMENT, PublicLogicKind.STATEMENT]
+
+
+def test_docstring_and_comment_merge(tmp_path: Path):
+    src = '"""Docstring"""\n# comment\nprint(1)\n'
+    f = tmp_path / "doc_and_comment.py"
+    f.write_text(src, encoding="utf-8-sig")
+
+    res = PyLogicBlockBuilder.build(f)
+    seq = [n.kind for n in res]
+    assert seq == [PublicLogicKind.COMMENT, PublicLogicKind.STATEMENT]
+    merged_origin = res[0].origin
+    assert merged_origin is not None
+    assert merged_origin.kind.name == "COMMENT"
+    assert len(merged_origin.tokens) == 2
