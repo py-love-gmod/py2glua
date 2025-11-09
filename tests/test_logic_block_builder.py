@@ -3,9 +3,9 @@ from pathlib import Path
 import pytest
 
 from py2glua.lang.py_logic_block_builder import (
-    PublicLogicKind,
-    PublicLogicNode,
     PyLogicBlockBuilder,
+    PyLogicKind,
+    PyLogicNode,
 )
 
 
@@ -57,18 +57,18 @@ def _has_path(nodes, path):
 @pytest.mark.parametrize(
     "src,expected_kind",
     [
-        ("def f():\n    pass\n", PublicLogicKind.FUNCTION),
-        ("class C:\n    pass\n", PublicLogicKind.CLASS),
-        ("if True:\n    pass\n", PublicLogicKind.BRANCH),
-        ("while True:\n    pass\n", PublicLogicKind.LOOP),
-        ("for i in range(1):\n    pass\n", PublicLogicKind.LOOP),
-        ("try:\n    pass\nexcept Exception:\n    pass\n", PublicLogicKind.TRY),
-        ("with open('a') as f:\n    pass\n", PublicLogicKind.WITH),
+        ("def f():\n    pass\n", PyLogicKind.FUNCTION),
+        ("class C:\n    pass\n", PyLogicKind.CLASS),
+        ("if True:\n    pass\n", PyLogicKind.BRANCH),
+        ("while True:\n    pass\n", PyLogicKind.LOOP),
+        ("for i in range(1):\n    pass\n", PyLogicKind.LOOP),
+        ("try:\n    pass\nexcept Exception:\n    pass\n", PyLogicKind.TRY),
+        ("with open('a') as f:\n    pass\n", PyLogicKind.WITH),
     ],
 )
 def test_basic_block_detection(
     src: str,
-    expected_kind: PublicLogicKind,
+    expected_kind: PyLogicKind,
 ):
     result = PyLogicBlockBuilder.build(src)
     kinds = _dump_kinds(result)
@@ -80,8 +80,8 @@ def test_nested_if_in_function():
         "def f():\n    if True:\n        pass\n    else:\n        pass\n"
     )
     kinds = _dump_kinds(nodes)
-    assert PublicLogicKind.FUNCTION in kinds
-    assert PublicLogicKind.BRANCH in kinds
+    assert PyLogicKind.FUNCTION in kinds
+    assert PyLogicKind.BRANCH in kinds
 
 
 def test_try_except_finally_chain():
@@ -98,7 +98,7 @@ def test_try_except_finally_chain():
         )
     )
     kinds = _dump_kinds(result)
-    assert kinds.count(PublicLogicKind.TRY) == 1
+    assert kinds.count(PyLogicKind.TRY) == 1
 
 
 def test_nested_loops_and_with():
@@ -112,16 +112,16 @@ def test_nested_loops_and_with():
     )
     kinds = _dump_kinds(result)
 
-    assert PublicLogicKind.LOOP in kinds
-    assert PublicLogicKind.WITH in kinds
+    assert PyLogicKind.LOOP in kinds
+    assert PyLogicKind.WITH in kinds
 
 
 def test_class_with_function():
     result = PyLogicBlockBuilder.build("class X:\n    def f(self):\n        pass\n")
     kinds = _dump_kinds(result)
 
-    assert kinds.count(PublicLogicKind.CLASS) == 1
-    assert kinds.count(PublicLogicKind.FUNCTION) == 1
+    assert kinds.count(PyLogicKind.CLASS) == 1
+    assert kinds.count(PyLogicKind.FUNCTION) == 1
 
 
 def test_tree_is_pure_public_nodes(tmp_path: Path):
@@ -129,8 +129,8 @@ def test_tree_is_pure_public_nodes(tmp_path: Path):
 
     def check_pure(nodes):
         for n in nodes:
-            assert isinstance(n, PublicLogicNode)
-            assert all(isinstance(c, PublicLogicNode) for c in n.children)
+            assert isinstance(n, PyLogicNode)
+            assert all(isinstance(c, PyLogicNode) for c in n.children)
             check_pure(n.children)
 
     check_pure(result)
@@ -145,8 +145,8 @@ def test_empty_file_returns_empty_list():
 def test_single_decorator_function(tmp_path: Path):
     res = PyLogicBlockBuilder.build("@dec\ndef f():\n    pass\n")
     kinds = _flatten_kinds(res)
-    assert PublicLogicKind.FUNCTION in kinds
-    assert _kinds_sequence(res) == [PublicLogicKind.FUNCTION]
+    assert PyLogicKind.FUNCTION in kinds
+    assert _kinds_sequence(res) == [PyLogicKind.FUNCTION]
 
 
 def test_multiple_decorators_function_and_class(tmp_path: Path):
@@ -154,7 +154,7 @@ def test_multiple_decorators_function_and_class(tmp_path: Path):
         "@d1\n@d2\ndef f():\n    pass\n\n@dc\nclass C:\n    pass\n"
     )
     seq = _kinds_sequence(res)
-    assert seq == [PublicLogicKind.FUNCTION, PublicLogicKind.CLASS]
+    assert seq == [PyLogicKind.FUNCTION, PyLogicKind.CLASS]
 
 
 def test_long_if_elif_chain(tmp_path: Path):
@@ -162,7 +162,7 @@ def test_long_if_elif_chain(tmp_path: Path):
         "if a:\n    pass\nelif b:\n    pass\nelif c:\n    pass\nelse:\n    pass\n"
     )
     assert len(res) == 1
-    assert res[0].kind == PublicLogicKind.BRANCH
+    assert res[0].kind == PyLogicKind.BRANCH
 
 
 @pytest.mark.parametrize(
@@ -190,7 +190,7 @@ def test_long_if_elif_chain(tmp_path: Path):
 def test_try_combinations_valid(src: str):
     res = PyLogicBlockBuilder.build(src)
     kinds = _flatten_kinds(res)
-    assert kinds.count(PublicLogicKind.TRY) == 1
+    assert kinds.count(PyLogicKind.TRY) == 1
 
 
 def test_top_level_sibling_order():
@@ -223,12 +223,12 @@ with open('a') as f:
     res = PyLogicBlockBuilder.build(src)
     seq = _kinds_sequence(res)
     assert seq == [
-        PublicLogicKind.FUNCTION,
-        PublicLogicKind.CLASS,
-        PublicLogicKind.BRANCH,
-        PublicLogicKind.LOOP,
-        PublicLogicKind.TRY,
-        PublicLogicKind.WITH,
+        PyLogicKind.FUNCTION,
+        PyLogicKind.CLASS,
+        PyLogicKind.BRANCH,
+        PyLogicKind.LOOP,
+        PyLogicKind.TRY,
+        PyLogicKind.WITH,
     ]
 
 
@@ -248,12 +248,12 @@ def test_deep_nesting_path():
     )
 
     path = [
-        PublicLogicKind.CLASS,
-        PublicLogicKind.FUNCTION,
-        PublicLogicKind.TRY,
-        PublicLogicKind.LOOP,
-        PublicLogicKind.BRANCH,
-        PublicLogicKind.WITH,
+        PyLogicKind.CLASS,
+        PyLogicKind.FUNCTION,
+        PyLogicKind.TRY,
+        PyLogicKind.LOOP,
+        PyLogicKind.BRANCH,
+        PyLogicKind.WITH,
     ]
 
     assert _has_path(res, path)
@@ -279,10 +279,10 @@ def f():
 """)
     kinds = _dump_kinds(result)
     assert kinds == [
-        PublicLogicKind.FUNCTION,
-        PublicLogicKind.BRANCH,
-        PublicLogicKind.LOOP,
-        PublicLogicKind.PASS,
+        PyLogicKind.FUNCTION,
+        PyLogicKind.BRANCH,
+        PyLogicKind.LOOP,
+        PyLogicKind.PASS,
     ]
 
 
@@ -317,7 +317,7 @@ def test_multiple_try_chains_separated():
         )
     )
     kinds = _kinds_sequence(res)
-    assert kinds.count(PublicLogicKind.TRY) == 2
+    assert kinds.count(PyLogicKind.TRY) == 2
 
 
 def test_function_with_nested_try_and_with():
@@ -332,9 +332,9 @@ def test_function_with_nested_try_and_with():
         )
     )
     kinds = _dump_kinds(res)
-    assert PublicLogicKind.FUNCTION in kinds
-    assert PublicLogicKind.TRY in kinds
-    assert PublicLogicKind.WITH in kinds
+    assert PyLogicKind.FUNCTION in kinds
+    assert PyLogicKind.TRY in kinds
+    assert PyLogicKind.WITH in kinds
 
 
 def test_try_else_without_except_raises():
@@ -363,12 +363,12 @@ def test_full_complex_script_parses():
         )
     )
     path = [
-        PublicLogicKind.CLASS,
-        PublicLogicKind.FUNCTION,
-        PublicLogicKind.BRANCH,
-        PublicLogicKind.TRY,
-        PublicLogicKind.LOOP,
-        PublicLogicKind.WITH,
+        PyLogicKind.CLASS,
+        PyLogicKind.FUNCTION,
+        PyLogicKind.BRANCH,
+        PyLogicKind.TRY,
+        PyLogicKind.LOOP,
+        PyLogicKind.WITH,
     ]
     assert _has_path(res, path)
 
@@ -378,7 +378,7 @@ def test_no_internal_nodes_leak():
 
     def walk(nodes):
         for n in nodes:
-            assert isinstance(n, PublicLogicNode)
+            assert isinstance(n, PyLogicNode)
             walk(n.children)
 
     walk(res)
@@ -387,19 +387,19 @@ def test_no_internal_nodes_leak():
 def test_import_statements_detected():
     res = PyLogicBlockBuilder.build("import os\nfrom sys import path as sys_path\n")
     kinds = [n.kind for n in res]
-    assert all(k is PublicLogicKind.IMPORT for k in kinds)
+    assert all(k is PyLogicKind.IMPORT for k in kinds)
 
 
 def test_single_comment_is_detected():
     res = PyLogicBlockBuilder.build("# hello world\nx = 1\n")
     kinds = [n.kind for n in res]
-    assert kinds == [PublicLogicKind.COMMENT, PublicLogicKind.STATEMENT]
+    assert kinds == [PyLogicKind.COMMENT, PyLogicKind.STATEMENT]
 
 
 def test_multiple_consecutive_comments_merge():
     res = PyLogicBlockBuilder.build("# a\n# b\n# c\nx = 1\n")
     kinds = [n.kind for n in res]
-    assert kinds == [PublicLogicKind.COMMENT, PublicLogicKind.STATEMENT]
+    assert kinds == [PyLogicKind.COMMENT, PyLogicKind.STATEMENT]
     comment_node = res[0]
     assert comment_node.origin is not None
     assert comment_node.origin.kind.name == "COMMENT"
@@ -412,22 +412,22 @@ def test_comment_between_blocks_not_merged():
     )
     seq = [n.kind for n in res]
     assert seq == [
-        PublicLogicKind.FUNCTION,
-        PublicLogicKind.COMMENT,
-        PublicLogicKind.CLASS,
+        PyLogicKind.FUNCTION,
+        PyLogicKind.COMMENT,
+        PyLogicKind.CLASS,
     ]
 
 
 def test_docstring_promoted_to_comment():
     res = PyLogicBlockBuilder.build('"""Docstring"""\nprint(1)\n')
     seq = [n.kind for n in res]
-    assert seq == [PublicLogicKind.COMMENT, PublicLogicKind.STATEMENT]
+    assert seq == [PyLogicKind.COMMENT, PyLogicKind.STATEMENT]
 
 
 def test_docstring_and_comment_merge():
     res = PyLogicBlockBuilder.build('"""Docstring"""\n# comment\nprint(1)\n')
     seq = [n.kind for n in res]
-    assert seq == [PublicLogicKind.COMMENT, PublicLogicKind.STATEMENT]
+    assert seq == [PyLogicKind.COMMENT, PyLogicKind.STATEMENT]
     merged_origin = res[0].origin
     assert merged_origin is not None
     assert merged_origin.kind.name == "COMMENT"

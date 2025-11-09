@@ -3,15 +3,15 @@ import tokenize
 
 import pytest
 
-from py2glua.lang.parser import Parser, RawNode, RawNodeKind
+from py2glua.lang.py_parser import PyParser, RawNonTerminal, RawNonTerminalKind
 
 
 # region Helpers
 def _treeify(nodes):
     out = []
     for n in nodes:
-        if n.kind == RawNodeKind.BLOCK:
-            children = [t for t in n.tokens if isinstance(t, RawNode)]
+        if n.kind == RawNonTerminalKind.BLOCK:
+            children = [t for t in n.tokens if isinstance(t, RawNonTerminal)]
             out.append(["BLOCK", _treeify(children)])
 
         else:
@@ -23,8 +23,8 @@ def _treeify(nodes):
 def _only_kinds(nodes):
     out = []
     for n in nodes:
-        if n.kind == RawNodeKind.BLOCK:
-            children = [t for t in n.tokens if isinstance(t, RawNode)]
+        if n.kind == RawNonTerminalKind.BLOCK:
+            children = [t for t in n.tokens if isinstance(t, RawNonTerminal)]
             out.append(["BLOCK", _only_kinds(children)])
 
         else:
@@ -33,11 +33,11 @@ def _only_kinds(nodes):
     return out
 
 
-def _other_tokens(node: RawNode):
-    assert node.kind == RawNodeKind.OTHER
+def _other_tokens(node: RawNonTerminal):
+    assert node.kind == RawNonTerminalKind.OTHER
     toks = []
     for t in node.tokens:
-        if isinstance(t, RawNode):
+        if isinstance(t, RawNonTerminal):
             continue
 
         if t.type in (tokenize.NL, tokenize.NEWLINE):
@@ -53,26 +53,26 @@ def _other_tokens(node: RawNode):
 
 # region Basic structure
 def test_empty_file_has_no_nodes():
-    assert Parser.parse("") == []
+    assert PyParser.parse("") == []
 
 
 def test_whitespace_only_has_no_nodes():
-    assert Parser.parse("\n \n\t\n") == []
+    assert PyParser.parse("\n \n\t\n") == []
 
 
 def test_non_constructs_are_ignored_at_toplevel():
     src = "x = 1\ny = x + 2\nprint(y)\n"
-    nodes = Parser.parse(src)
+    nodes = PyParser.parse(src)
     assert [n.kind for n in nodes] == [
-        RawNodeKind.OTHER,
-        RawNodeKind.OTHER,
-        RawNodeKind.OTHER,
+        RawNonTerminalKind.OTHER,
+        RawNonTerminalKind.OTHER,
+        RawNonTerminalKind.OTHER,
     ]
 
 
 def test_toplevel_semicolons_single_other():
-    nodes = Parser.parse("a=1; b=2\n")
-    assert len(nodes) == 1 and nodes[0].kind == RawNodeKind.OTHER
+    nodes = PyParser.parse("a=1; b=2\n")
+    assert len(nodes) == 1 and nodes[0].kind == RawNonTerminalKind.OTHER
     assert _other_tokens(nodes[0]) == ["a", "=", "1", ";", "b", "=", "2"]
 
 
@@ -112,7 +112,7 @@ def test_toplevel_semicolons_single_other():
     ],
 )
 def test_import_variants(src, expected):
-    assert _treeify(Parser.parse(src)) == expected
+    assert _treeify(PyParser.parse(src)) == expected
 
 
 # endregion
@@ -126,7 +126,7 @@ def test_simple_function_header_and_block():
             pass
         """
     )
-    assert _treeify(Parser.parse(src)) == ["FUNCTION", ["BLOCK", ["PASS"]]]
+    assert _treeify(PyParser.parse(src)) == ["FUNCTION", ["BLOCK", ["PASS"]]]
 
 
 def test_class_header_and_block_with_method():
@@ -138,7 +138,7 @@ def test_class_header_and_block_with_method():
                     pass
         """
     )
-    assert _treeify(Parser.parse(src)) == [
+    assert _treeify(PyParser.parse(src)) == [
         "CLASS",
         ["BLOCK", ["FUNCTION", ["BLOCK", ["IF", ["BLOCK", ["PASS"]]]]]],
     ]
@@ -154,7 +154,7 @@ def test_nested_blocks_three_levels():
                         pass
         """
     )
-    assert _treeify(Parser.parse(src)) == [
+    assert _treeify(PyParser.parse(src)) == [
         "FUNCTION",
         [
             "BLOCK",
@@ -174,7 +174,7 @@ def test_if_elif_else_structure():
             pass
         """
     )
-    assert _treeify(Parser.parse(src)) == [
+    assert _treeify(PyParser.parse(src)) == [
         "IF",
         ["BLOCK", ["PASS"]],
         "ELIF",
@@ -195,7 +195,7 @@ def test_try_except_finally_structure():
             pass
         """
     )
-    assert _treeify(Parser.parse(src)) == [
+    assert _treeify(PyParser.parse(src)) == [
         "TRY",
         ["BLOCK", ["PASS"]],
         "EXCEPT",
@@ -214,7 +214,7 @@ def test_while_with_else():
             pass
         """
     )
-    assert _treeify(Parser.parse(src)) == [
+    assert _treeify(PyParser.parse(src)) == [
         "WHILE",
         ["BLOCK", ["PASS"]],
         "ELSE",
@@ -232,7 +232,7 @@ def test_for_with_else_nested():
             pass
         """
     )
-    assert _treeify(Parser.parse(src)) == [
+    assert _treeify(PyParser.parse(src)) == [
         "FOR",
         ["BLOCK", ["IF", ["BLOCK", ["PASS"]]]],
         "ELSE",
@@ -250,7 +250,7 @@ def test_with_multiline_header():
             pass
         """
     )
-    assert _treeify(Parser.parse(src)) == ["WITH", ["BLOCK", ["PASS"]]]
+    assert _treeify(PyParser.parse(src)) == ["WITH", ["BLOCK", ["PASS"]]]
 
 
 # endregion
@@ -268,7 +268,7 @@ def test_with_multiline_header():
     ],
 )
 def test_inline_suites(src, expected):
-    assert _treeify(Parser.parse(src)) == expected
+    assert _treeify(PyParser.parse(src)) == expected
 
 
 def test_header_with_parens_and_backslash_before_colon_inline_body():
@@ -278,7 +278,7 @@ def test_header_with_parens_and_backslash_before_colon_inline_body():
            and d: pass
         """
     )
-    assert _treeify(Parser.parse(src)) == ["IF", ["BLOCK", ["OTHER"]]]
+    assert _treeify(PyParser.parse(src)) == ["IF", ["BLOCK", ["OTHER"]]]
 
 
 def test_inline_else_comes_on_next_line_is_ok():
@@ -289,7 +289,7 @@ def test_inline_else_comes_on_next_line_is_ok():
             y = 2
         """
     )
-    assert _treeify(Parser.parse(src)) == [
+    assert _treeify(PyParser.parse(src)) == [
         "IF",
         ["BLOCK", ["OTHER"]],
         "ELSE",
@@ -304,9 +304,9 @@ def test_semicolons_same_line_single_other():
             a=1; b=2; c=3
         """
     )
-    nodes = Parser.parse(src)
-    inner = [t for t in nodes[1].tokens if isinstance(t, RawNode)]
-    assert len(inner) == 1 and inner[0].kind == RawNodeKind.OTHER
+    nodes = PyParser.parse(src)
+    inner = [t for t in nodes[1].tokens if isinstance(t, RawNonTerminal)]
+    assert len(inner) == 1 and inner[0].kind == RawNonTerminalKind.OTHER
     assert _other_tokens(inner[0]) == [
         "a",
         "=",
@@ -325,8 +325,11 @@ def test_semicolons_same_line_single_other():
 # region OTHER tokenization details
 def test_other_at_toplevel_assignment_and_call():
     src = "x = 1\nprint(x)\n"
-    nodes = Parser.parse(src)
-    assert [n.kind for n in nodes] == [RawNodeKind.OTHER, RawNodeKind.OTHER]
+    nodes = PyParser.parse(src)
+    assert [n.kind for n in nodes] == [
+        RawNonTerminalKind.OTHER,
+        RawNonTerminalKind.OTHER,
+    ]
     assert _other_tokens(nodes[0]) == ["x", "=", "1"]
     assert _other_tokens(nodes[1]) == ["print", "(", "x", ")"]
 
@@ -361,9 +364,9 @@ def test_other_at_toplevel_assignment_and_call():
     ],
 )
 def test_other_multiline_forms(src, expected_tokens):
-    nodes = Parser.parse(src)
-    inner = [t for t in nodes[1].tokens if isinstance(t, RawNode)]
-    assert len(inner) == 1 and inner[0].kind == RawNodeKind.OTHER
+    nodes = PyParser.parse(src)
+    inner = [t for t in nodes[1].tokens if isinstance(t, RawNonTerminal)]
+    assert len(inner) == 1 and inner[0].kind == RawNonTerminalKind.OTHER
     assert _other_tokens(inner[0]) == expected_tokens
 
 
@@ -377,9 +380,9 @@ def test_parenthesized_tuple_assignment_multiline_in_block():
             )
         """
     )
-    nodes = Parser.parse(src)
-    inner = [t for t in nodes[1].tokens if isinstance(t, RawNode)]
-    assert len(inner) == 1 and inner[0].kind == RawNodeKind.OTHER
+    nodes = PyParser.parse(src)
+    inner = [t for t in nodes[1].tokens if isinstance(t, RawNonTerminal)]
+    assert len(inner) == 1 and inner[0].kind == RawNonTerminalKind.OTHER
 
 
 # endregion
@@ -416,7 +419,7 @@ def test_parenthesized_tuple_assignment_multiline_in_block():
     ],
 )
 def test_decorators_then_function(src, expected):
-    assert _only_kinds(Parser.parse(src)) == expected
+    assert _only_kinds(PyParser.parse(src)) == expected
 
 
 # endregion
@@ -431,11 +434,11 @@ def test_comment_line_is_other_and_blank_lines_skipped():
         x = 1  # inline comment
         """
     )
-    nodes = Parser.parse(src)
+    nodes = PyParser.parse(src)
     assert [n.kind for n in nodes] == [
-        RawNodeKind.COMMENT,
-        RawNodeKind.OTHER,
-        RawNodeKind.COMMENT,
+        RawNonTerminalKind.COMMENT,
+        RawNonTerminalKind.OTHER,
+        RawNonTerminalKind.COMMENT,
     ]
     cmt = nodes[0]
     assert any(getattr(t, "type", None) == tokenize.COMMENT for t in cmt.tokens)
@@ -443,8 +446,8 @@ def test_comment_line_is_other_and_blank_lines_skipped():
 
 
 def test_comment_only_file_becomes_one_comment():
-    nodes = Parser.parse("# hi\n")
-    assert len(nodes) == 1 and nodes[0].kind == RawNodeKind.COMMENT
+    nodes = PyParser.parse("# hi\n")
+    assert len(nodes) == 1 and nodes[0].kind == RawNonTerminalKind.COMMENT
     assert any(getattr(t, "type", None) == tokenize.COMMENT for t in nodes[0].tokens)
 
 
@@ -454,8 +457,8 @@ x = 1
 # inner comment
 y = 2
     """
-    nodes = Parser.parse(src)
-    assert nodes[0].kind == RawNodeKind.COMMENT
+    nodes = PyParser.parse(src)
+    assert nodes[0].kind == RawNonTerminalKind.COMMENT
 
 
 # endregion
@@ -463,34 +466,34 @@ y = 2
 
 # region Docstrings
 def test_module_docstring():
-    nodes = Parser.parse('"""hello\\nworld"""\n')
-    assert len(nodes) == 1 and nodes[0].kind == RawNodeKind.DOCSTRING
+    nodes = PyParser.parse('"""hello\\nworld"""\n')
+    assert len(nodes) == 1 and nodes[0].kind == RawNonTerminalKind.DOCSTRING
     assert any(getattr(t, "type", None) == tokenize.STRING for t in nodes[0].tokens)
 
 
 def test_module_docstring_promoted_then_other():
-    nodes = Parser.parse('"""hello"""\nx = 1\n')
-    assert nodes[0].kind == RawNodeKind.DOCSTRING
-    assert any(n.kind == RawNodeKind.OTHER for n in nodes[1:])
+    nodes = PyParser.parse('"""hello"""\nx = 1\n')
+    assert nodes[0].kind == RawNonTerminalKind.DOCSTRING
+    assert any(n.kind == RawNonTerminalKind.OTHER for n in nodes[1:])
 
 
 def test_docstring_then_def_sequence():
     src = '"""mod doc"""\n\ndef f():\n    pass\n'
-    nodes = Parser.parse(src)
+    nodes = PyParser.parse(src)
     assert [n.kind for n in nodes[:3]] == [
-        RawNodeKind.DOCSTRING,
-        RawNodeKind.FUNCTION,
-        RawNodeKind.BLOCK,
+        RawNonTerminalKind.DOCSTRING,
+        RawNonTerminalKind.FUNCTION,
+        RawNonTerminalKind.BLOCK,
     ]
 
 
 def test_function_docstring_promoted():
     src = 'def f():\n    """doc"""\n    x = 1\n'
-    nodes = Parser.parse(src)
-    assert nodes[0].kind == RawNodeKind.FUNCTION
-    assert nodes[1].kind == RawNodeKind.BLOCK
+    nodes = PyParser.parse(src)
+    assert nodes[0].kind == RawNonTerminalKind.FUNCTION
+    assert nodes[1].kind == RawNonTerminalKind.BLOCK
     inner = [n for n in nodes[1].tokens if isinstance(n, type(nodes[0]))]
-    assert inner and inner[0].kind == RawNodeKind.DOCSTRING
+    assert inner and inner[0].kind == RawNonTerminalKind.DOCSTRING
 
 
 # endregion
@@ -505,11 +508,14 @@ def test_other_inside_function_body():
             print("hi")
         """
     )
-    nodes = Parser.parse(src)
-    assert nodes[0].kind == RawNodeKind.FUNCTION
-    assert nodes[1].kind == RawNodeKind.BLOCK
-    inner = [t for t in nodes[1].tokens if isinstance(t, RawNode)]
-    assert [n.kind for n in inner] == [RawNodeKind.OTHER, RawNodeKind.OTHER]
+    nodes = PyParser.parse(src)
+    assert nodes[0].kind == RawNonTerminalKind.FUNCTION
+    assert nodes[1].kind == RawNonTerminalKind.BLOCK
+    inner = [t for t in nodes[1].tokens if isinstance(t, RawNonTerminal)]
+    assert [n.kind for n in inner] == [
+        RawNonTerminalKind.OTHER,
+        RawNonTerminalKind.OTHER,
+    ]
     assert _other_tokens(inner[0]) == ["x", "=", "1"]
     assert _other_tokens(inner[1]) == ["print", "(", '"hi"', ")"]
 
@@ -521,7 +527,7 @@ def test_nested_inline_if_in_block():
             if a: return 1
         """
     )
-    assert _treeify(Parser.parse(src)) == [
+    assert _treeify(PyParser.parse(src)) == [
         "FUNCTION",
         ["BLOCK", ["IF", ["BLOCK", ["OTHER"]]]],
     ]
@@ -536,10 +542,10 @@ def test_nested_dedent_after_block_no_spurious_other():
         y = 1
         """
     )
-    nodes = Parser.parse(src)
-    assert nodes[0].kind == RawNodeKind.FUNCTION
-    assert nodes[1].kind == RawNodeKind.BLOCK
-    assert nodes[2].kind == RawNodeKind.OTHER
+    nodes = PyParser.parse(src)
+    assert nodes[0].kind == RawNonTerminalKind.FUNCTION
+    assert nodes[1].kind == RawNonTerminalKind.BLOCK
+    assert nodes[2].kind == RawNonTerminalKind.OTHER
 
 
 def test_block_with_blank_lines_inside():
@@ -551,9 +557,9 @@ def test_block_with_blank_lines_inside():
 
         """
     )
-    nodes = Parser.parse(src)
-    inner = [t for t in nodes[1].tokens if isinstance(t, RawNode)]
-    assert [n.kind for n in inner] == [RawNodeKind.OTHER]
+    nodes = PyParser.parse(src)
+    inner = [t for t in nodes[1].tokens if isinstance(t, RawNonTerminal)]
+    assert [n.kind for n in inner] == [RawNonTerminalKind.OTHER]
     assert _other_tokens(inner[0]) == ["x", "=", "1"]
 
 
@@ -565,7 +571,7 @@ def test_del_multiline_with_brackets():
         ]
         """
     )
-    assert _treeify(Parser.parse(src)) == ["DEL"]
+    assert _treeify(PyParser.parse(src)) == ["DEL"]
 
 
 def test_try_except_finally_with_other():
@@ -579,7 +585,7 @@ def test_try_except_finally_with_other():
             cleanup()
         """
     )
-    assert _only_kinds(Parser.parse(src)) == [
+    assert _only_kinds(PyParser.parse(src)) == [
         "TRY",
         ["BLOCK", ["OTHER"]],
         "EXCEPT",
@@ -598,7 +604,7 @@ def test_while_else_with_other():
             done()
         """
     )
-    assert _only_kinds(Parser.parse(src)) == [
+    assert _only_kinds(PyParser.parse(src)) == [
         "WHILE",
         ["BLOCK", ["OTHER"]],
         "ELSE",
@@ -613,7 +619,7 @@ def test_while_else_with_other():
 @pytest.mark.parametrize("kw", ["global", "nonlocal", "async", "await", "yield"])
 def test_forbidden_keywords_raise(kw):
     with pytest.raises(SyntaxError):
-        Parser.parse(f"{kw} x\n")
+        PyParser.parse(f"{kw} x\n")
 
 
 def test_async_def_is_forbidden_due_to_async_token():
@@ -624,12 +630,12 @@ def test_async_def_is_forbidden_due_to_async_token():
         """
     )
     with pytest.raises(SyntaxError):
-        Parser.parse(src)
+        PyParser.parse(src)
 
 
 def test_invalid_syntax_rejected_by_compile_exec():
     with pytest.raises(SyntaxError):
-        Parser.parse("if x\n    pass\n")
+        PyParser.parse("if x\n    pass\n")
 
 
 # endregion
