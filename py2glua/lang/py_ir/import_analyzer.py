@@ -66,12 +66,14 @@ class ImportAnalyzer:
                 if t in {",", "\n"}:
                     i += 1
                     continue
+
                 if t == "as" and i + 1 < len(names):
                     alias = names[i + 1]
                     real_name = f"{pkg}.{names[i - 1]}"
                     file_obj.meta["aliases"][alias] = real_name
                     i += 2
                     continue
+
                 modules.append(f"{pkg}.{t}")
                 i += 1
 
@@ -137,6 +139,7 @@ class ImportAnalyzer:
         if not spec or not getattr(spec, "origin", None):
             if module in sys.builtin_module_names:
                 return PyIRImportType.STD_LIB
+
             return PyIRImportType.UNKNOWN
 
         try:

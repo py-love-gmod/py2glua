@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Sequence
 
 from ..py_logic_block_builder import (
     PyLogicBlockBuilder,
@@ -6,7 +7,8 @@ from ..py_logic_block_builder import (
     PyLogicNode,
 )
 from .import_analyzer import ImportAnalyzer
-from .py_ir_dataclass import PyIRFile, PyIRNode
+from .py_ir_dataclass import PyIRDel, PyIRFile, PyIRNode, PyIRReturn
+from .statement_compiler import StatementCompiler
 
 
 class PyIRBuilder:
@@ -20,9 +22,6 @@ class PyIRBuilder:
             meta={
                 "imports": [],
                 "aliases": {},
-                "name_to_id": {},
-                "id_to_name": {},
-                "globals": {},
             },
         )
         py_ir_file.body = cls._build_ir_block(logic_blocks, py_ir_file)
@@ -41,12 +40,12 @@ class PyIRBuilder:
             PyLogicKind.LOOP: None,
             PyLogicKind.TRY: None,
             PyLogicKind.WITH: None,
-            PyLogicKind.IMPORT: lambda f, n, i: ImportAnalyzer.build(f, n, i),
-            PyLogicKind.DELETE: None,
-            PyLogicKind.RETURN: None,
+            PyLogicKind.IMPORT: ImportAnalyzer.build,
+            PyLogicKind.DELETE: cls._build_ir_delete,
+            PyLogicKind.RETURN: cls._build_ir_return,
             PyLogicKind.PASS: None,
             PyLogicKind.COMMENT: None,
-            PyLogicKind.STATEMENT: None,
+            PyLogicKind.STATEMENT: cls._build_ir_statement,
         }
         out: list[PyIRNode] = []
         i = 0
@@ -64,3 +63,63 @@ class PyIRBuilder:
             i += offset
 
         return out
+
+    @classmethod
+    def _build_ir_statement(
+        cls,
+        file_obj: PyIRFile,
+        node_list: list[PyLogicNode],
+        start: int,
+    ) -> tuple[int, Sequence[PyIRNode]]:
+        origin = node_list[start].origin
+        if origin is None:
+            raise ValueError
+
+        ir_nodes = StatementCompiler.compile(origin.tokens, file_obj)
+        return (1, ir_nodes)
+
+    @classmethod
+    def _build_ir_return(
+        cls,
+        file_obj: PyIRFile,
+        node_list: list[PyLogicNode],
+        start: int,
+    ) -> tuple[int, Sequence[PyIRNode]]:
+        origin = node_list[start].origin
+        if origin is None:
+            raise ValueError
+
+        ir = StatementCompiler.compile_expres(origin.tokens[1:], file_obj)
+        return (
+            1,
+            [
+                PyIRReturn(
+                    line=origin.tokens[0].start[0],
+                    offset=origin.tokens[0].start[1],
+                    value=ir,
+                )
+            ],
+        )
+
+    @classmethod
+    def _build_ir_delete(
+        cls,
+        file_obj: PyIRFile,
+        node_list: list[PyLogicNode],
+        start: int,
+    ) -> tuple[int, Sequence[PyIRNode]]:
+        origin = node_list[start].origin
+        if origin is None:
+            raise ValueError
+
+        ir = StatementCompiler.compile_expres(origin.tokens[1:], file_obj)
+        return (
+            1,
+            [
+                PyIRDel(
+                    line=origin.tokens[0].start[0],
+                    offset=origin.tokens[0].start[1],
+                    value=ir,
+                )
+            ],
+        )
