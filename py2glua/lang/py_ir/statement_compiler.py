@@ -6,7 +6,7 @@ from .py_ir_dataclass import PyIRFile, PyIRNode
 
 class StatementCompiler:
     @staticmethod
-    def compile(
+    def compile_line(
         tokens: list[tokenize.TokenInfo],
         file_obj: PyIRFile,
     ) -> Sequence[PyIRNode]:

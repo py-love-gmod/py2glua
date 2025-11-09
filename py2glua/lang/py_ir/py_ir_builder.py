@@ -75,7 +75,7 @@ class PyIRBuilder:
         if origin is None:
             raise ValueError
 
-        ir_nodes = StatementCompiler.compile(origin.tokens, file_obj)
+        ir_nodes = StatementCompiler.compile_line(origin.tokens, file_obj)
         return (1, ir_nodes)
 
     @classmethod
