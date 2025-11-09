@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 
 from py2glua.lang.py_ir_bulder import (
@@ -18,19 +16,9 @@ from py2glua.lang.py_ir_bulder import (
 )
 
 
-# region helpers
-def build_ir(src: str, fname: str = "test_file.py"):
-    p = Path(fname)
-    p.write_text(src, encoding="utf-8")
-    return PyIRBuilder.build(p)
-
-
-# endregion
-
-
 # region baseline
 def test_var_create_and_assign():
-    ir = build_ir("x = 1\n")
+    ir = PyIRBuilder.build("x = 1\n")
     assert isinstance(ir.body[0], PyIRVarCreate)
     assert isinstance(ir.body[1], PyIRAssign)
     assert isinstance(ir.body[1].value, PyIRConstant)
@@ -38,7 +26,7 @@ def test_var_create_and_assign():
 
 
 def test_global_var():
-    ir = build_ir("x = Global.var(10, external=True)\n")
+    ir = PyIRBuilder.build("x = Global.var(10, external=True)\n")
     create = ir.body[0]
     assign = ir.body[1]
     assert isinstance(create, PyIRVarCreate)
@@ -51,7 +39,7 @@ def test_global_var():
 
 
 def test_simple_call():
-    ir = build_ir("foo(1, 2)\n")
+    ir = PyIRBuilder.build("foo(1, 2)\n")
     node = ir.body[0]
     assert isinstance(node, PyIRCall)
     assert node.name == "foo"
@@ -59,7 +47,7 @@ def test_simple_call():
 
 
 def test_nested_call():
-    ir = build_ir("foo(bar(1))\n")
+    ir = PyIRBuilder.build("foo(bar(1))\n")
     node = ir.body[0]
     assert isinstance(node, PyIRCall)
     inner = node.args[0]
@@ -68,14 +56,14 @@ def test_nested_call():
 
 
 def test_method_call():
-    ir = build_ir("obj.method(10)\n")
+    ir = PyIRBuilder.build("obj.method(10)\n")
     node = ir.body[0]
     assert isinstance(node, PyIRMethodCall)
     assert node.method == "method"
 
 
 def test_chained_method():
-    ir = build_ir("obj.a().b(3)\n")
+    ir = PyIRBuilder.build("obj.a().b(3)\n")
     node = ir.body[0]
     assert isinstance(node, PyIRMethodCall)
     assert node.method == "b"
@@ -84,7 +72,7 @@ def test_chained_method():
 
 
 def test_simple_index():
-    ir = build_ir("arr[i]\n")
+    ir = PyIRBuilder.build("arr[i]\n")
     node = ir.body[0]
     assert isinstance(node, PyIRIndex)
     assert isinstance(node.obj, PyIRVarUse)
@@ -92,43 +80,41 @@ def test_simple_index():
 
 
 def test_index_chain():
-    ir = build_ir("a[b][c]\n")
+    ir = PyIRBuilder.build("a[b][c]\n")
     node = ir.body[0]
     assert isinstance(node, PyIRIndex)
     assert isinstance(node.obj, PyIRIndex)
 
 
 def test_addition_op():
-    ir = build_ir("x = 1 + 2\n")
+    ir = PyIRBuilder.build("x = 1 + 2\n")
     assign = ir.body[1]
     assert isinstance(assign.value, PyIRBinOp)  # type: ignore
     assert assign.value.op == "+"  # type: ignore
 
 
 def test_unary_not():
-    ir = build_ir("x = not y\n")
+    ir = PyIRBuilder.build("x = not y\n")
     assign = ir.body[1]
     assert isinstance(assign.value, PyIRUnaryOp)  # type: ignore
     assert assign.value.op == "not"  # type: ignore
 
 
 def test_complex_expression_grouping():
-    ir = build_ir("x = (a + b) * c - d / e\n")
+    ir = PyIRBuilder.build("x = (a + b) * c - d / e\n")
     assign = ir.body[1]
     assert isinstance(assign.value, PyIRBinOp)  # type: ignore
 
 
 def test_attribute_chain():
-    ir = build_ir("x = a.b.c\n")
+    ir = PyIRBuilder.build("x = a.b.c\n")
     assign = ir.body[1]
     assert isinstance(assign.value, PyIRAtt)  # type: ignore
     assert assign.value.name == "a.b.c"  # type: ignore
 
 
 def test_import_alias_and_use():
-    path = Path("test_file.py")
-    path.write_text("import math as m\nx = m.sin(1)\n", encoding="utf-8")
-    ir = PyIRBuilder.build(path)
+    ir = PyIRBuilder.build("import math as m\nx = m.sin(1)\n")
     assert isinstance(ir.body[0], PyIRImport)
     assign = [n for n in ir.body if isinstance(n, PyIRAssign)][0]
     assert isinstance(assign.value, PyIRCall)  # type: ignore
@@ -154,7 +140,7 @@ def test_import_alias_and_use():
     ],
 )
 def test_more_ops_supported(src, op):
-    ir = build_ir(src)
+    ir = PyIRBuilder.build(src)
     assign = ir.body[1]
     assert isinstance(assign.value, (PyIRBinOp, PyIRUnaryOp))  # type: ignore
 
@@ -185,7 +171,7 @@ def test_more_ops_supported(src, op):
     ],
 )
 def test_literals_supported(src, expected):
-    ir = build_ir(src)
+    ir = PyIRBuilder.build(src)
     val = ir.body[1].value  # type: ignore
     assert isinstance(val, PyIRConstant)
     assert val.value == expected
@@ -207,7 +193,7 @@ def test_literals_supported(src, expected):
 )
 def test_slices_xfail(src):
     pytest.xfail("Slices не поддержаны текущим IR")
-    build_ir(src)
+    PyIRBuilder.build(src)
 
 
 # endregion
@@ -225,7 +211,7 @@ def test_slices_xfail(src):
 )
 def test_container_literals_xfail(src):
     pytest.xfail("Коллекции (tuple/list/dict/set) не поддержаны текущим IR")
-    build_ir(src)
+    PyIRBuilder.build(src)
 
 
 # endregion
@@ -243,7 +229,7 @@ def test_container_literals_xfail(src):
 )
 def test_comprehensions_xfail(src):
     pytest.xfail("Comprehensions не поддержаны")
-    build_ir(src)
+    PyIRBuilder.build(src)
 
 
 # endregion
@@ -259,7 +245,7 @@ def test_comprehensions_xfail(src):
 )
 def test_lambda_conditional_xfail(src):
     pytest.xfail("Lambda/conditional expr не поддержаны")
-    build_ir(src)
+    PyIRBuilder.build(src)
 
 
 # endregion
@@ -280,7 +266,7 @@ def test_lambda_conditional_xfail(src):
 )
 def test_power_bitwise_xfail(src):
     pytest.xfail("Power/bitwise/tilde не поддержаны текущим IR")
-    build_ir(src)
+    PyIRBuilder.build(src)
 
 
 # endregion
@@ -298,7 +284,7 @@ def test_power_bitwise_xfail(src):
 )
 def test_fstrings_bytes_misc_xfail(src):
     pytest.xfail("F-strings/bytes/ellipsis/raw не поддержаны")
-    build_ir(src)
+    PyIRBuilder.build(src)
 
 
 # endregion
@@ -319,7 +305,7 @@ def test_fstrings_bytes_misc_xfail(src):
 )
 def test_walrus_annotations_augassign_targets_xfail(src):
     pytest.xfail("Walrus/annotation/augassign/сложные targets не поддержаны")
-    build_ir(src)
+    PyIRBuilder.build(src)
 
 
 # endregion
@@ -338,7 +324,7 @@ def test_chained_comparisons_xfail(src):
     pytest.xfail(
         "Chained comparisons — семантика Python, IR пока не имеет узла для цепочек"
     )
-    build_ir(src)
+    PyIRBuilder.build(src)
 
 
 # endregion
@@ -351,32 +337,23 @@ def test_chained_comparisons_xfail(src):
         "from m import *\n",
     ],
 )
-def test_import_wildcard_forbidden(src, tmp_path: Path):
-    p = tmp_path / "mfile.py"
-    p.write_text(src, encoding="utf-8")
+def test_import_wildcard_forbidden(src):
     with pytest.raises(SyntaxError):
-        PyIRBuilder.build(p)
+        PyIRBuilder.build(src)
 
 
 # endregion
 
 
 # region import resolution categories
-def test_import_local(tmp_path: Path):
-    p = tmp_path / "pkg" / "mod.py"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("# local module\n", encoding="utf-8")
-    main = tmp_path / "main.py"
-    main.write_text("import pkg.mod\n", encoding="utf-8")
-    ir = PyIRBuilder.build(main)
+def test_import_local():
+    ir = PyIRBuilder.build("import pkg.mod\n")
     imp = ir.body[0]
     assert isinstance(imp, PyIRImport)
 
 
-def test_import_alias_chain(tmp_path: Path):
-    p = tmp_path / "mf.py"
-    p.write_text("import math as m\nx = m.cos(0)\n", encoding="utf-8")
-    ir = PyIRBuilder.build(p)
+def test_import_alias_chain():
+    ir = PyIRBuilder.build("import math as m\nx = m.cos(0)\n")
     assigns = [n for n in ir.body if isinstance(n, PyIRAssign)]
     assert assigns, "assign not found"
     call = assigns[0].value
@@ -400,7 +377,7 @@ def test_import_alias_chain(tmp_path: Path):
 )
 def test_layout_tolerance(src):
     try:
-        ir = build_ir(src)
+        ir = PyIRBuilder.build(src)
         assert ir is not None
 
     except Exception:

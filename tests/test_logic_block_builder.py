@@ -67,69 +67,57 @@ def _has_path(nodes, path):
     ],
 )
 def test_basic_block_detection(
-    tmp_path: Path, src: str, expected_kind: PublicLogicKind
+    src: str,
+    expected_kind: PublicLogicKind,
 ):
-    f = tmp_path / "file.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    result = PyLogicBlockBuilder.build(f)
+    result = PyLogicBlockBuilder.build(src)
     kinds = _dump_kinds(result)
     assert expected_kind in kinds
 
 
-def test_nested_if_in_function(tmp_path: Path):
-    src = "def f():\n    if True:\n        pass\n    else:\n        pass\n"
-    f = tmp_path / "nested.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    nodes = PyLogicBlockBuilder.build(f)
+def test_nested_if_in_function():
+    nodes = PyLogicBlockBuilder.build(
+        "def f():\n    if True:\n        pass\n    else:\n        pass\n"
+    )
     kinds = _dump_kinds(nodes)
     assert PublicLogicKind.FUNCTION in kinds
     assert PublicLogicKind.BRANCH in kinds
 
 
-def test_try_except_finally_chain(tmp_path: Path):
-    src = (
-        "try:\n"
-        "    pass\n"
-        "except Exception:\n"
-        "    pass\n"
-        "else:\n"
-        "    pass\n"
-        "finally:\n"
-        "    pass\n"
+def test_try_except_finally_chain():
+    result = PyLogicBlockBuilder.build(
+        (
+            "try:\n"
+            "    pass\n"
+            "except Exception:\n"
+            "    pass\n"
+            "else:\n"
+            "    pass\n"
+            "finally:\n"
+            "    pass\n"
+        )
     )
-    f = tmp_path / "trychain.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    result = PyLogicBlockBuilder.build(f)
     kinds = _dump_kinds(result)
     assert kinds.count(PublicLogicKind.TRY) == 1
 
 
-def test_nested_loops_and_with(tmp_path: Path):
-    src = (
-        "for i in range(1):\n"
-        "    with open('a') as f:\n"
-        "        while True:\n"
-        "            pass\n"
+def test_nested_loops_and_with():
+    result = PyLogicBlockBuilder.build(
+        (
+            "for i in range(1):\n"
+            "    with open('a') as f:\n"
+            "        while True:\n"
+            "            pass\n"
+        )
     )
-    f = tmp_path / "loops.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    result = PyLogicBlockBuilder.build(f)
     kinds = _dump_kinds(result)
 
     assert PublicLogicKind.LOOP in kinds
     assert PublicLogicKind.WITH in kinds
 
 
-def test_class_with_function(tmp_path: Path):
-    src = "class X:\n    def f(self):\n        pass\n"
-    f = tmp_path / "cls.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    result = PyLogicBlockBuilder.build(f)
+def test_class_with_function():
+    result = PyLogicBlockBuilder.build("class X:\n    def f(self):\n        pass\n")
     kinds = _dump_kinds(result)
 
     assert kinds.count(PublicLogicKind.CLASS) == 1
@@ -137,11 +125,7 @@ def test_class_with_function(tmp_path: Path):
 
 
 def test_tree_is_pure_public_nodes(tmp_path: Path):
-    src = "def f():\n    pass\n"
-    f = tmp_path / "pure.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    result = PyLogicBlockBuilder.build(f)
+    result = PyLogicBlockBuilder.build("def f():\n    pass\n")
 
     def check_pure(nodes):
         for n in nodes:
@@ -152,41 +136,31 @@ def test_tree_is_pure_public_nodes(tmp_path: Path):
     check_pure(result)
 
 
-def test_empty_file_returns_empty_list(tmp_path: Path):
-    f = tmp_path / "empty.py"
-    f.write_text("", encoding="utf-8-sig")
-    result = PyLogicBlockBuilder.build(f)
+def test_empty_file_returns_empty_list():
+    result = PyLogicBlockBuilder.build("")
     assert isinstance(result, list)
     assert result == []
 
 
 def test_single_decorator_function(tmp_path: Path):
-    src = "@dec\ndef f():\n    pass\n"
-    f = tmp_path / "dec1.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    res = PyLogicBlockBuilder.build(f)
+    res = PyLogicBlockBuilder.build("@dec\ndef f():\n    pass\n")
     kinds = _flatten_kinds(res)
     assert PublicLogicKind.FUNCTION in kinds
     assert _kinds_sequence(res) == [PublicLogicKind.FUNCTION]
 
 
 def test_multiple_decorators_function_and_class(tmp_path: Path):
-    src = "@d1\n@d2\ndef f():\n    pass\n\n@dc\nclass C:\n    pass\n"
-    f = tmp_path / "dec_multi.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    res = PyLogicBlockBuilder.build(f)
+    res = PyLogicBlockBuilder.build(
+        "@d1\n@d2\ndef f():\n    pass\n\n@dc\nclass C:\n    pass\n"
+    )
     seq = _kinds_sequence(res)
     assert seq == [PublicLogicKind.FUNCTION, PublicLogicKind.CLASS]
 
 
 def test_long_if_elif_chain(tmp_path: Path):
-    src = "if a:\n    pass\nelif b:\n    pass\nelif c:\n    pass\nelse:\n    pass\n"
-    f = tmp_path / "elif_chain.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    res = PyLogicBlockBuilder.build(f)
+    res = PyLogicBlockBuilder.build(
+        "if a:\n    pass\nelif b:\n    pass\nelif c:\n    pass\nelse:\n    pass\n"
+    )
     assert len(res) == 1
     assert res[0].kind == PublicLogicKind.BRANCH
 
@@ -213,16 +187,13 @@ def test_long_if_elif_chain(tmp_path: Path):
         ),
     ],
 )
-def test_try_combinations_valid(tmp_path: Path, src: str):
-    f = tmp_path / "try_ok.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    res = PyLogicBlockBuilder.build(f)
+def test_try_combinations_valid(src: str):
+    res = PyLogicBlockBuilder.build(src)
     kinds = _flatten_kinds(res)
     assert kinds.count(PublicLogicKind.TRY) == 1
 
 
-def test_top_level_sibling_order(tmp_path: Path):
+def test_top_level_sibling_order():
     src = """
 def f():
     pass
@@ -248,10 +219,8 @@ finally:
 with open('a') as f:
     pass
 """
-    f = tmp_path / "siblings.py"
-    f.write_text(src, encoding="utf-8-sig")
 
-    res = PyLogicBlockBuilder.build(f)
+    res = PyLogicBlockBuilder.build(src)
     seq = _kinds_sequence(res)
     assert seq == [
         PublicLogicKind.FUNCTION,
@@ -263,22 +232,20 @@ with open('a') as f:
     ]
 
 
-def test_deep_nesting_path(tmp_path: Path):
-    src = (
-        "class Outer:\n"
-        "    def f(self):\n"
-        "        try:\n"
-        "            while True:\n"
-        "                if x:\n"
-        "                    with open('a') as f:\n"
-        "                        pass\n"
-        "        except Exception:\n"
-        "            pass\n"
+def test_deep_nesting_path():
+    res = PyLogicBlockBuilder.build(
+        (
+            "class Outer:\n"
+            "    def f(self):\n"
+            "        try:\n"
+            "            while True:\n"
+            "                if x:\n"
+            "                    with open('a') as f:\n"
+            "                        pass\n"
+            "        except Exception:\n"
+            "            pass\n"
+        )
     )
-    f = tmp_path / "deep.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    res = PyLogicBlockBuilder.build(f)
 
     path = [
         PublicLogicKind.CLASS,
@@ -293,11 +260,7 @@ def test_deep_nesting_path(tmp_path: Path):
 
 
 def test_every_public_has_origin(tmp_path):
-    src = "def f():\n    if True:\n        pass\n"
-    f = tmp_path / "orig.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    res = PyLogicBlockBuilder.build(f)
+    res = PyLogicBlockBuilder.build("def f():\n    if True:\n        pass\n")
 
     def walk(nodes):
         for n in nodes:
@@ -307,17 +270,13 @@ def test_every_public_has_origin(tmp_path):
     walk(res)
 
 
-def test_visual_snapshot(tmp_path):
-    src = """
+def test_visual_snapshot():
+    result = PyLogicBlockBuilder.build("""
 def f():
     if x:
         for i in y:
             pass
-"""
-    f = tmp_path / "snap.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    result = PyLogicBlockBuilder.build(f)
+""")
     kinds = _dump_kinds(result)
     assert kinds == [
         PublicLogicKind.FUNCTION,
@@ -340,82 +299,69 @@ def f():
         "finally:\n    pass\n",
     ],
 )
-def test_illegal_headers_raise_syntaxerror(tmp_path: Path, src: str):
-    f = tmp_path / "broken.py"
-    f.write_text(src, encoding="utf-8-sig")
+def test_illegal_headers_raise_syntaxerror(src: str):
     with pytest.raises(SyntaxError):
-        PyLogicBlockBuilder.build(f)
+        PyLogicBlockBuilder.build(src)
 
 
-def test_empty_block_raises(tmp_path: Path):
-    f = tmp_path / "empty_block.py"
-    f.write_text("def f():\n    ", encoding="utf-8-sig")
+def test_empty_block_raises():
     with pytest.raises(SyntaxError):
-        PyLogicBlockBuilder.build(f)
+        PyLogicBlockBuilder.build("def f():\n    ")
 
 
-def test_multiple_try_chains_separated(tmp_path: Path):
-    src = (
-        "try:\n    pass\nexcept Exception:\n    pass\n"
-        "try:\n    pass\nfinally:\n    pass\n"
+def test_multiple_try_chains_separated():
+    res = PyLogicBlockBuilder.build(
+        (
+            "try:\n    pass\nexcept Exception:\n    pass\n"
+            "try:\n    pass\nfinally:\n    pass\n"
+        )
     )
-    f = tmp_path / "multi_try.py"
-    f.write_text(src, encoding="utf-8-sig")
-    res = PyLogicBlockBuilder.build(f)
     kinds = _kinds_sequence(res)
     assert kinds.count(PublicLogicKind.TRY) == 2
 
 
-def test_function_with_nested_try_and_with(tmp_path: Path):
-    src = (
-        "def f():\n"
-        "    try:\n"
-        "        with open('a'):\n"
-        "            pass\n"
-        "    except Exception:\n"
-        "        pass\n"
+def test_function_with_nested_try_and_with():
+    res = PyLogicBlockBuilder.build(
+        (
+            "def f():\n"
+            "    try:\n"
+            "        with open('a'):\n"
+            "            pass\n"
+            "    except Exception:\n"
+            "        pass\n"
+        )
     )
-    f = tmp_path / "nested_try_with.py"
-    f.write_text(src, encoding="utf-8-sig")
-    res = PyLogicBlockBuilder.build(f)
     kinds = _dump_kinds(res)
     assert PublicLogicKind.FUNCTION in kinds
     assert PublicLogicKind.TRY in kinds
     assert PublicLogicKind.WITH in kinds
 
 
-def test_try_else_without_except_raises(tmp_path: Path):
-    src = "try:\n    pass\nelse:\n    pass\n"
-    f = tmp_path / "try_bad_else.py"
-    f.write_text(src, encoding="utf-8-sig")
+def test_try_else_without_except_raises():
     with pytest.raises(SyntaxError):
-        PyLogicBlockBuilder.build(f)
+        PyLogicBlockBuilder.build("try:\n    pass\nelse:\n    pass\n")
 
 
-def test_decorator_without_target_raises(tmp_path: Path):
-    src = "@dec\nx = 42\n"
-    f = tmp_path / "decorator_fail.py"
-    f.write_text(src, encoding="utf-8-sig")
+def test_decorator_without_target_raises():
     with pytest.raises(SyntaxError):
-        PyLogicBlockBuilder.build(f)
+        PyLogicBlockBuilder.build("@dec\nx = 42\n")
 
 
-def test_full_complex_script_parses(tmp_path: Path):
-    src = (
-        "@outer\n"
-        "class A:\n"
-        "    def f(self):\n"
-        "        if x:\n"
-        "            try:\n"
-        "                while True:\n"
-        "                    with open('a') as f:\n"
-        "                        pass\n"
-        "            except Exception:\n"
-        "                pass\n"
+def test_full_complex_script_parses():
+    res = PyLogicBlockBuilder.build(
+        (
+            "@outer\n"
+            "class A:\n"
+            "    def f(self):\n"
+            "        if x:\n"
+            "            try:\n"
+            "                while True:\n"
+            "                    with open('a') as f:\n"
+            "                        pass\n"
+            "            except Exception:\n"
+            "                pass\n"
+        )
     )
-    f = tmp_path / "mega.py"
-    f.write_text(src, encoding="utf-8-sig")
-    res = PyLogicBlockBuilder.build(f)
     path = [
         PublicLogicKind.CLASS,
         PublicLogicKind.FUNCTION,
@@ -427,10 +373,8 @@ def test_full_complex_script_parses(tmp_path: Path):
     assert _has_path(res, path)
 
 
-def test_no_internal_nodes_leak(tmp_path: Path):
-    f = tmp_path / "leak.py"
-    f.write_text("def f():\n    pass\n", encoding="utf-8-sig")
-    res = PyLogicBlockBuilder.build(f)
+def test_no_internal_nodes_leak():
+    res = PyLogicBlockBuilder.build("def f():\n    pass\n")
 
     def walk(nodes):
         for n in nodes:
@@ -440,32 +384,20 @@ def test_no_internal_nodes_leak(tmp_path: Path):
     walk(res)
 
 
-def test_import_statements_detected(tmp_path: Path):
-    src = "import os\nfrom sys import path as sys_path\n"
-    f = tmp_path / "imports.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    res = PyLogicBlockBuilder.build(f)
+def test_import_statements_detected():
+    res = PyLogicBlockBuilder.build("import os\nfrom sys import path as sys_path\n")
     kinds = [n.kind for n in res]
     assert all(k is PublicLogicKind.IMPORT for k in kinds)
 
 
-def test_single_comment_is_detected(tmp_path: Path):
-    src = "# hello world\nx = 1\n"
-    f = tmp_path / "comment_single.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    res = PyLogicBlockBuilder.build(f)
+def test_single_comment_is_detected():
+    res = PyLogicBlockBuilder.build("# hello world\nx = 1\n")
     kinds = [n.kind for n in res]
     assert kinds == [PublicLogicKind.COMMENT, PublicLogicKind.STATEMENT]
 
 
-def test_multiple_consecutive_comments_merge(tmp_path: Path):
-    src = "# a\n# b\n# c\nx = 1\n"
-    f = tmp_path / "comment_merge.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    res = PyLogicBlockBuilder.build(f)
+def test_multiple_consecutive_comments_merge():
+    res = PyLogicBlockBuilder.build("# a\n# b\n# c\nx = 1\n")
     kinds = [n.kind for n in res]
     assert kinds == [PublicLogicKind.COMMENT, PublicLogicKind.STATEMENT]
     comment_node = res[0]
@@ -474,12 +406,10 @@ def test_multiple_consecutive_comments_merge(tmp_path: Path):
     assert len(comment_node.origin.tokens) == 3
 
 
-def test_comment_between_blocks_not_merged(tmp_path: Path):
-    src = "def f():\n    pass\n# a\n# b\nclass C:\n    pass\n"
-    f = tmp_path / "comment_between.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    res = PyLogicBlockBuilder.build(f)
+def test_comment_between_blocks_not_merged():
+    res = PyLogicBlockBuilder.build(
+        "def f():\n    pass\n# a\n# b\nclass C:\n    pass\n"
+    )
     seq = [n.kind for n in res]
     assert seq == [
         PublicLogicKind.FUNCTION,
@@ -488,22 +418,14 @@ def test_comment_between_blocks_not_merged(tmp_path: Path):
     ]
 
 
-def test_docstring_promoted_to_comment(tmp_path: Path):
-    src = '"""Docstring"""\nprint(1)\n'
-    f = tmp_path / "doc_as_comment.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    res = PyLogicBlockBuilder.build(f)
+def test_docstring_promoted_to_comment():
+    res = PyLogicBlockBuilder.build('"""Docstring"""\nprint(1)\n')
     seq = [n.kind for n in res]
     assert seq == [PublicLogicKind.COMMENT, PublicLogicKind.STATEMENT]
 
 
-def test_docstring_and_comment_merge(tmp_path: Path):
-    src = '"""Docstring"""\n# comment\nprint(1)\n'
-    f = tmp_path / "doc_and_comment.py"
-    f.write_text(src, encoding="utf-8-sig")
-
-    res = PyLogicBlockBuilder.build(f)
+def test_docstring_and_comment_merge():
+    res = PyLogicBlockBuilder.build('"""Docstring"""\n# comment\nprint(1)\n')
     seq = [n.kind for n in res]
     assert seq == [PublicLogicKind.COMMENT, PublicLogicKind.STATEMENT]
     merged_origin = res[0].origin

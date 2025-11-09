@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from pathlib import Path
 from typing import Callable
 
 from .parser import Parser, RawNode, RawNodeKind
@@ -60,8 +59,7 @@ class _PyLogicBlock:
 
 class PyLogicBlockBuilder:
     @classmethod
-    def build(cls, path_to_file: Path) -> list[PublicLogicNode]:
-        source = path_to_file.read_text(encoding="utf-8-sig")
+    def build(cls, source: str) -> list[PublicLogicNode]:
         raw_nodes = Parser.parse(source)
         logic_blocks = cls._build_logic_block(raw_nodes)
         return cls._export_to_public(logic_blocks)

@@ -29,7 +29,7 @@ class PyIRNode:
 
 @dataclass
 class PyIRFile(PyIRNode):
-    path: Path
+    path: Path | None
     body: list["PyIRNode"] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
 
@@ -810,8 +810,7 @@ class ImportAnalyzer:
         else:
             return (1, [])
 
-        src = Py2GluaConfig.data.get("source", str(file_obj.path.parent))
-        project_root = Path(src).resolve()
+        project_root = Py2GluaConfig.data.get("source")
         stdlib_dir = Path(sysconfig.get_paths()["stdlib"]).resolve()
         ir_nodes: list[PyIRImport] = []
         for mod in modules:
@@ -882,8 +881,8 @@ class ImportAnalyzer:
 # region Builder
 class PyIRBuilder:
     @classmethod
-    def build(cls, path_to_file: Path) -> PyIRFile:
-        logic_blocks = PyLogicBlockBuilder.build(path_to_file)
+    def build(cls, source: str, path_to_file: Path | None = None) -> PyIRFile:
+        logic_blocks = PyLogicBlockBuilder.build(source)
         py_ir_file = PyIRFile(
             line=None,
             offset=None,
