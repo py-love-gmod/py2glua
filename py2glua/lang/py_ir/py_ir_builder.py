@@ -34,18 +34,18 @@ class PyIRBuilder:
         file_obj: PyIRFile,
     ) -> list[PyIRNode]:
         dispatch = {
-            PyLogicKind.FUNCTION: None,
-            PyLogicKind.CLASS: None,
-            PyLogicKind.BRANCH: None,
-            PyLogicKind.LOOP: None,
-            PyLogicKind.TRY: None,
-            PyLogicKind.WITH: None,
-            PyLogicKind.IMPORT: ImportAnalyzer.build,
-            PyLogicKind.DELETE: cls._build_ir_delete,
-            PyLogicKind.RETURN: cls._build_ir_return,
-            PyLogicKind.PASS: None,
-            PyLogicKind.COMMENT: None,
-            PyLogicKind.STATEMENT: cls._build_ir_statement,
+            PyLogicKind.FUNCTION: None,  # has dataclass: true
+            PyLogicKind.CLASS: None,  # has dataclass: true
+            PyLogicKind.BRANCH: None,  # has dataclass: false TODO
+            PyLogicKind.LOOP: None,  # has dataclass: flase TODO
+            PyLogicKind.TRY: None,  # has dataclass: false TODO
+            PyLogicKind.WITH: None,  # has dataclass: false TODO
+            PyLogicKind.IMPORT: ImportAnalyzer.build,  # has dataclass: true
+            PyLogicKind.DELETE: cls._build_ir_delete,  # has dataclass: true
+            PyLogicKind.RETURN: cls._build_ir_return,  # has dataclass: true
+            PyLogicKind.PASS: None,  # has dataclass: false TODO
+            PyLogicKind.COMMENT: None,  # has dataclass: false TODO
+            PyLogicKind.STATEMENT: cls._build_ir_statement,  # has dataclass: false TODO
         }
         out: list[PyIRNode] = []
         i = 0

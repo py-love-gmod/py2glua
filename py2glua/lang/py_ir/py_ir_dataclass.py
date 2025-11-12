@@ -95,24 +95,13 @@ class PyIRCall(PyIRNode):
         for arg_p in self.args_p:
             yield arg_p
 
-        for name, arg_kw in self.args_kw:
-            yield arg_kw, name
+        for arg_kw in self.args_kw.values():
+            yield arg_kw
 
 
 @dataclass
-class PyGmodAPIIRCall(PyIRNode):
-    name: str
-    args_p: list[PyIRNode] = field(default_factory=list)
-    args_kw: dict[str, PyIRNode] = field(default_factory=dict)
-
-    def walk(self):
-        yield self
-        for arg_p in self.args_p:
-            yield arg_p
-
-        for name, arg_kw in self.args_kw:
-            yield arg_kw, name
-
+class PyGmodAPIIRCall(PyIRCall):
+    pass
 
 
 @dataclass
