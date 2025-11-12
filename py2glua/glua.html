@@ -124,38 +124,38 @@ py2glua<wbr>.glua    </h1>
 
     </div>
     <a class="headerlink" href="#CompilerDirective"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="CompilerDirective-5"><a href="#CompilerDirective-5"><span class="linenos"> 5</span></a><span class="k">class</span><span class="w"> </span><span class="nc">CompilerDirective</span><span class="p">:</span>
-</span><span id="CompilerDirective-6"><a href="#CompilerDirective-6"><span class="linenos"> 6</span></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Класс отвечающий за дерективы компилятору&quot;&quot;&quot;</span>
-</span><span id="CompilerDirective-7"><a href="#CompilerDirective-7"><span class="linenos"> 7</span></a>
-</span><span id="CompilerDirective-8"><a href="#CompilerDirective-8"><span class="linenos"> 8</span></a>    <span class="nd">@staticmethod</span>
-</span><span id="CompilerDirective-9"><a href="#CompilerDirective-9"><span class="linenos"> 9</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">debug</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-</span><span id="CompilerDirective-10"><a href="#CompilerDirective-10"><span class="linenos">10</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Переменная отвечающая за дебаг сборку. Её можно использовать как проверку в коде&quot;&quot;&quot;</span>
-</span><span id="CompilerDirective-11"><a href="#CompilerDirective-11"><span class="linenos">11</span></a>        <span class="o">...</span>
-</span><span id="CompilerDirective-12"><a href="#CompilerDirective-12"><span class="linenos">12</span></a>
-</span><span id="CompilerDirective-13"><a href="#CompilerDirective-13"><span class="linenos">13</span></a>    <span class="nd">@staticmethod</span>
-</span><span id="CompilerDirective-14"><a href="#CompilerDirective-14"><span class="linenos">14</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">debug_only</span><span class="p">(</span><span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">):</span>
-</span><span id="CompilerDirective-15"><a href="#CompilerDirective-15"><span class="linenos">15</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Декоратор отвечающий за использование данной функции только в debug режиме&quot;&quot;&quot;</span>
-</span><span id="CompilerDirective-16"><a href="#CompilerDirective-16"><span class="linenos">16</span></a>        <span class="o">...</span>
-</span><span id="CompilerDirective-17"><a href="#CompilerDirective-17"><span class="linenos">17</span></a>
-</span><span id="CompilerDirective-18"><a href="#CompilerDirective-18"><span class="linenos">18</span></a>    <span class="nd">@staticmethod</span>
-</span><span id="CompilerDirective-19"><a href="#CompilerDirective-19"><span class="linenos">19</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">lazy_compile</span><span class="p">(</span><span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">):</span>
-</span><span id="CompilerDirective-20"><a href="#CompilerDirective-20"><span class="linenos">20</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Помечает метод как &quot;ленивый&quot; для компилятора&quot;&quot;&quot;</span>
-</span><span id="CompilerDirective-21"><a href="#CompilerDirective-21"><span class="linenos">21</span></a>        <span class="o">...</span>
-</span><span id="CompilerDirective-22"><a href="#CompilerDirective-22"><span class="linenos">22</span></a>
-</span><span id="CompilerDirective-23"><a href="#CompilerDirective-23"><span class="linenos">23</span></a>    <span class="nd">@staticmethod</span>
-</span><span id="CompilerDirective-24"><a href="#CompilerDirective-24"><span class="linenos">24</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">inline</span><span class="p">(</span><span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">):</span>
-</span><span id="CompilerDirective-25"><a href="#CompilerDirective-25"><span class="linenos">25</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Просьба компилятору вставлять тело функции в код. Просьба учитывать что возможно этой функции после не будет в исходном lua коде&quot;&quot;&quot;</span>
-</span><span id="CompilerDirective-26"><a href="#CompilerDirective-26"><span class="linenos">26</span></a>        <span class="o">...</span>
-</span><span id="CompilerDirective-27"><a href="#CompilerDirective-27"><span class="linenos">27</span></a>
-</span><span id="CompilerDirective-28"><a href="#CompilerDirective-28"><span class="linenos">28</span></a>    <span class="nd">@staticmethod</span>
-</span><span id="CompilerDirective-29"><a href="#CompilerDirective-29"><span class="linenos">29</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">raw</span><span class="p">(</span><span class="n">lua_code</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="CompilerDirective-30"><a href="#CompilerDirective-30"><span class="linenos">30</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Позволяет сказать компилятору &quot;вставь голый луа сюдa&quot;. Просьба учитывать, что это не безопасная функция, и её использование не желательно. Что либо возвращать из этого блока нельзя&quot;&quot;&quot;</span>
-</span><span id="CompilerDirective-31"><a href="#CompilerDirective-31"><span class="linenos">31</span></a>        <span class="o">...</span>
-</span><span id="CompilerDirective-32"><a href="#CompilerDirective-32"><span class="linenos">32</span></a>
-</span><span id="CompilerDirective-33"><a href="#CompilerDirective-33"><span class="linenos">33</span></a>    <span class="nd">@staticmethod</span>
-</span><span id="CompilerDirective-34"><a href="#CompilerDirective-34"><span class="linenos">34</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">gmod_api</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="CompilerDirective-35"><a href="#CompilerDirective-35"><span class="linenos">35</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Внутренняя функция для регистрации некомпилируемых апи вызовов гмода. Не рекомендуется для использования&quot;&quot;&quot;</span>
-</span><span id="CompilerDirective-36"><a href="#CompilerDirective-36"><span class="linenos">36</span></a>        <span class="o">...</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="CompilerDirective-2"><a href="#CompilerDirective-2"><span class="linenos"> 2</span></a><span class="k">class</span><span class="w"> </span><span class="nc">CompilerDirective</span><span class="p">:</span>
+</span><span id="CompilerDirective-3"><a href="#CompilerDirective-3"><span class="linenos"> 3</span></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Класс отвечающий за дерективы компилятору&quot;&quot;&quot;</span>
+</span><span id="CompilerDirective-4"><a href="#CompilerDirective-4"><span class="linenos"> 4</span></a>
+</span><span id="CompilerDirective-5"><a href="#CompilerDirective-5"><span class="linenos"> 5</span></a>    <span class="nd">@staticmethod</span>
+</span><span id="CompilerDirective-6"><a href="#CompilerDirective-6"><span class="linenos"> 6</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">debug</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+</span><span id="CompilerDirective-7"><a href="#CompilerDirective-7"><span class="linenos"> 7</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Переменная отвечающая за дебаг сборку. Её можно использовать как проверку в коде&quot;&quot;&quot;</span>
+</span><span id="CompilerDirective-8"><a href="#CompilerDirective-8"><span class="linenos"> 8</span></a>        <span class="o">...</span>
+</span><span id="CompilerDirective-9"><a href="#CompilerDirective-9"><span class="linenos"> 9</span></a>
+</span><span id="CompilerDirective-10"><a href="#CompilerDirective-10"><span class="linenos">10</span></a>    <span class="nd">@staticmethod</span>
+</span><span id="CompilerDirective-11"><a href="#CompilerDirective-11"><span class="linenos">11</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">debug_only</span><span class="p">():</span>
+</span><span id="CompilerDirective-12"><a href="#CompilerDirective-12"><span class="linenos">12</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Декоратор отвечающий за использование данной функции только в debug режиме&quot;&quot;&quot;</span>
+</span><span id="CompilerDirective-13"><a href="#CompilerDirective-13"><span class="linenos">13</span></a>        <span class="o">...</span>
+</span><span id="CompilerDirective-14"><a href="#CompilerDirective-14"><span class="linenos">14</span></a>
+</span><span id="CompilerDirective-15"><a href="#CompilerDirective-15"><span class="linenos">15</span></a>    <span class="nd">@staticmethod</span>
+</span><span id="CompilerDirective-16"><a href="#CompilerDirective-16"><span class="linenos">16</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">lazy_compile</span><span class="p">():</span>
+</span><span id="CompilerDirective-17"><a href="#CompilerDirective-17"><span class="linenos">17</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Помечает метод как &quot;ленивый&quot; для компилятора&quot;&quot;&quot;</span>
+</span><span id="CompilerDirective-18"><a href="#CompilerDirective-18"><span class="linenos">18</span></a>        <span class="o">...</span>
+</span><span id="CompilerDirective-19"><a href="#CompilerDirective-19"><span class="linenos">19</span></a>
+</span><span id="CompilerDirective-20"><a href="#CompilerDirective-20"><span class="linenos">20</span></a>    <span class="nd">@staticmethod</span>
+</span><span id="CompilerDirective-21"><a href="#CompilerDirective-21"><span class="linenos">21</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">inline</span><span class="p">():</span>
+</span><span id="CompilerDirective-22"><a href="#CompilerDirective-22"><span class="linenos">22</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Просьба компилятору вставлять тело функции в код. Просьба учитывать что возможно этой функции после не будет в исходном lua коде&quot;&quot;&quot;</span>
+</span><span id="CompilerDirective-23"><a href="#CompilerDirective-23"><span class="linenos">23</span></a>        <span class="o">...</span>
+</span><span id="CompilerDirective-24"><a href="#CompilerDirective-24"><span class="linenos">24</span></a>
+</span><span id="CompilerDirective-25"><a href="#CompilerDirective-25"><span class="linenos">25</span></a>    <span class="nd">@staticmethod</span>
+</span><span id="CompilerDirective-26"><a href="#CompilerDirective-26"><span class="linenos">26</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">raw</span><span class="p">(</span><span class="n">lua_code</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="CompilerDirective-27"><a href="#CompilerDirective-27"><span class="linenos">27</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Позволяет сказать компилятору &quot;вставь голый луа сюдa&quot;. Просьба учитывать, что это не безопасная функция, и её использование не желательно. Что либо возвращать из этого блока нельзя&quot;&quot;&quot;</span>
+</span><span id="CompilerDirective-28"><a href="#CompilerDirective-28"><span class="linenos">28</span></a>        <span class="o">...</span>
+</span><span id="CompilerDirective-29"><a href="#CompilerDirective-29"><span class="linenos">29</span></a>
+</span><span id="CompilerDirective-30"><a href="#CompilerDirective-30"><span class="linenos">30</span></a>    <span class="nd">@staticmethod</span>
+</span><span id="CompilerDirective-31"><a href="#CompilerDirective-31"><span class="linenos">31</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">gmod_api</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="CompilerDirective-32"><a href="#CompilerDirective-32"><span class="linenos">32</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Внутренняя функция для регистрации некомпилируемых апи вызовов гмода. Не рекомендуется для использования&quot;&quot;&quot;</span>
+</span><span id="CompilerDirective-33"><a href="#CompilerDirective-33"><span class="linenos">33</span></a>        <span class="o">...</span>
 </span></pre></div>
 
 
@@ -175,10 +175,10 @@ py2glua<wbr>.glua    </h1>
 
     </div>
     <a class="headerlink" href="#CompilerDirective.debug"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="CompilerDirective.debug-8"><a href="#CompilerDirective.debug-8"><span class="linenos"> 8</span></a>    <span class="nd">@staticmethod</span>
-</span><span id="CompilerDirective.debug-9"><a href="#CompilerDirective.debug-9"><span class="linenos"> 9</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">debug</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-</span><span id="CompilerDirective.debug-10"><a href="#CompilerDirective.debug-10"><span class="linenos">10</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Переменная отвечающая за дебаг сборку. Её можно использовать как проверку в коде&quot;&quot;&quot;</span>
-</span><span id="CompilerDirective.debug-11"><a href="#CompilerDirective.debug-11"><span class="linenos">11</span></a>        <span class="o">...</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="CompilerDirective.debug-5"><a href="#CompilerDirective.debug-5"><span class="linenos">5</span></a>    <span class="nd">@staticmethod</span>
+</span><span id="CompilerDirective.debug-6"><a href="#CompilerDirective.debug-6"><span class="linenos">6</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">debug</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+</span><span id="CompilerDirective.debug-7"><a href="#CompilerDirective.debug-7"><span class="linenos">7</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Переменная отвечающая за дебаг сборку. Её можно использовать как проверку в коде&quot;&quot;&quot;</span>
+</span><span id="CompilerDirective.debug-8"><a href="#CompilerDirective.debug-8"><span class="linenos">8</span></a>        <span class="o">...</span>
 </span></pre></div>
 
 
@@ -193,16 +193,16 @@ py2glua<wbr>.glua    </h1>
                     <div class="decorator decorator-staticmethod">@staticmethod</div>
 
         <span class="def">def</span>
-        <span class="name">debug_only</span><span class="signature pdoc-code condensed">(<span class="param"><span class="n">func</span><span class="p">:</span> <span class="n">Callable</span></span><span class="return-annotation">):</span></span>
+        <span class="name">debug_only</span><span class="signature pdoc-code condensed">(<span class="return-annotation">):</span></span>
 
                 <label class="view-source-button" for="CompilerDirective.debug_only-view-source"><span>View Source</span></label>
 
     </div>
     <a class="headerlink" href="#CompilerDirective.debug_only"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="CompilerDirective.debug_only-13"><a href="#CompilerDirective.debug_only-13"><span class="linenos">13</span></a>    <span class="nd">@staticmethod</span>
-</span><span id="CompilerDirective.debug_only-14"><a href="#CompilerDirective.debug_only-14"><span class="linenos">14</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">debug_only</span><span class="p">(</span><span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">):</span>
-</span><span id="CompilerDirective.debug_only-15"><a href="#CompilerDirective.debug_only-15"><span class="linenos">15</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Декоратор отвечающий за использование данной функции только в debug режиме&quot;&quot;&quot;</span>
-</span><span id="CompilerDirective.debug_only-16"><a href="#CompilerDirective.debug_only-16"><span class="linenos">16</span></a>        <span class="o">...</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="CompilerDirective.debug_only-10"><a href="#CompilerDirective.debug_only-10"><span class="linenos">10</span></a>    <span class="nd">@staticmethod</span>
+</span><span id="CompilerDirective.debug_only-11"><a href="#CompilerDirective.debug_only-11"><span class="linenos">11</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">debug_only</span><span class="p">():</span>
+</span><span id="CompilerDirective.debug_only-12"><a href="#CompilerDirective.debug_only-12"><span class="linenos">12</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Декоратор отвечающий за использование данной функции только в debug режиме&quot;&quot;&quot;</span>
+</span><span id="CompilerDirective.debug_only-13"><a href="#CompilerDirective.debug_only-13"><span class="linenos">13</span></a>        <span class="o">...</span>
 </span></pre></div>
 
 
@@ -217,16 +217,16 @@ py2glua<wbr>.glua    </h1>
                     <div class="decorator decorator-staticmethod">@staticmethod</div>
 
         <span class="def">def</span>
-        <span class="name">lazy_compile</span><span class="signature pdoc-code condensed">(<span class="param"><span class="n">func</span><span class="p">:</span> <span class="n">Callable</span></span><span class="return-annotation">):</span></span>
+        <span class="name">lazy_compile</span><span class="signature pdoc-code condensed">(<span class="return-annotation">):</span></span>
 
                 <label class="view-source-button" for="CompilerDirective.lazy_compile-view-source"><span>View Source</span></label>
 
     </div>
     <a class="headerlink" href="#CompilerDirective.lazy_compile"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="CompilerDirective.lazy_compile-18"><a href="#CompilerDirective.lazy_compile-18"><span class="linenos">18</span></a>    <span class="nd">@staticmethod</span>
-</span><span id="CompilerDirective.lazy_compile-19"><a href="#CompilerDirective.lazy_compile-19"><span class="linenos">19</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">lazy_compile</span><span class="p">(</span><span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">):</span>
-</span><span id="CompilerDirective.lazy_compile-20"><a href="#CompilerDirective.lazy_compile-20"><span class="linenos">20</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Помечает метод как &quot;ленивый&quot; для компилятора&quot;&quot;&quot;</span>
-</span><span id="CompilerDirective.lazy_compile-21"><a href="#CompilerDirective.lazy_compile-21"><span class="linenos">21</span></a>        <span class="o">...</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="CompilerDirective.lazy_compile-15"><a href="#CompilerDirective.lazy_compile-15"><span class="linenos">15</span></a>    <span class="nd">@staticmethod</span>
+</span><span id="CompilerDirective.lazy_compile-16"><a href="#CompilerDirective.lazy_compile-16"><span class="linenos">16</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">lazy_compile</span><span class="p">():</span>
+</span><span id="CompilerDirective.lazy_compile-17"><a href="#CompilerDirective.lazy_compile-17"><span class="linenos">17</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Помечает метод как &quot;ленивый&quot; для компилятора&quot;&quot;&quot;</span>
+</span><span id="CompilerDirective.lazy_compile-18"><a href="#CompilerDirective.lazy_compile-18"><span class="linenos">18</span></a>        <span class="o">...</span>
 </span></pre></div>
 
 
@@ -241,16 +241,16 @@ py2glua<wbr>.glua    </h1>
                     <div class="decorator decorator-staticmethod">@staticmethod</div>
 
         <span class="def">def</span>
-        <span class="name">inline</span><span class="signature pdoc-code condensed">(<span class="param"><span class="n">func</span><span class="p">:</span> <span class="n">Callable</span></span><span class="return-annotation">):</span></span>
+        <span class="name">inline</span><span class="signature pdoc-code condensed">(<span class="return-annotation">):</span></span>
 
                 <label class="view-source-button" for="CompilerDirective.inline-view-source"><span>View Source</span></label>
 
     </div>
     <a class="headerlink" href="#CompilerDirective.inline"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="CompilerDirective.inline-23"><a href="#CompilerDirective.inline-23"><span class="linenos">23</span></a>    <span class="nd">@staticmethod</span>
-</span><span id="CompilerDirective.inline-24"><a href="#CompilerDirective.inline-24"><span class="linenos">24</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">inline</span><span class="p">(</span><span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">):</span>
-</span><span id="CompilerDirective.inline-25"><a href="#CompilerDirective.inline-25"><span class="linenos">25</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Просьба компилятору вставлять тело функции в код. Просьба учитывать что возможно этой функции после не будет в исходном lua коде&quot;&quot;&quot;</span>
-</span><span id="CompilerDirective.inline-26"><a href="#CompilerDirective.inline-26"><span class="linenos">26</span></a>        <span class="o">...</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="CompilerDirective.inline-20"><a href="#CompilerDirective.inline-20"><span class="linenos">20</span></a>    <span class="nd">@staticmethod</span>
+</span><span id="CompilerDirective.inline-21"><a href="#CompilerDirective.inline-21"><span class="linenos">21</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">inline</span><span class="p">():</span>
+</span><span id="CompilerDirective.inline-22"><a href="#CompilerDirective.inline-22"><span class="linenos">22</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Просьба компилятору вставлять тело функции в код. Просьба учитывать что возможно этой функции после не будет в исходном lua коде&quot;&quot;&quot;</span>
+</span><span id="CompilerDirective.inline-23"><a href="#CompilerDirective.inline-23"><span class="linenos">23</span></a>        <span class="o">...</span>
 </span></pre></div>
 
 
@@ -271,10 +271,10 @@ py2glua<wbr>.glua    </h1>
 
     </div>
     <a class="headerlink" href="#CompilerDirective.raw"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="CompilerDirective.raw-28"><a href="#CompilerDirective.raw-28"><span class="linenos">28</span></a>    <span class="nd">@staticmethod</span>
-</span><span id="CompilerDirective.raw-29"><a href="#CompilerDirective.raw-29"><span class="linenos">29</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">raw</span><span class="p">(</span><span class="n">lua_code</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="CompilerDirective.raw-30"><a href="#CompilerDirective.raw-30"><span class="linenos">30</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Позволяет сказать компилятору &quot;вставь голый луа сюдa&quot;. Просьба учитывать, что это не безопасная функция, и её использование не желательно. Что либо возвращать из этого блока нельзя&quot;&quot;&quot;</span>
-</span><span id="CompilerDirective.raw-31"><a href="#CompilerDirective.raw-31"><span class="linenos">31</span></a>        <span class="o">...</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="CompilerDirective.raw-25"><a href="#CompilerDirective.raw-25"><span class="linenos">25</span></a>    <span class="nd">@staticmethod</span>
+</span><span id="CompilerDirective.raw-26"><a href="#CompilerDirective.raw-26"><span class="linenos">26</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">raw</span><span class="p">(</span><span class="n">lua_code</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="CompilerDirective.raw-27"><a href="#CompilerDirective.raw-27"><span class="linenos">27</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Позволяет сказать компилятору &quot;вставь голый луа сюдa&quot;. Просьба учитывать, что это не безопасная функция, и её использование не желательно. Что либо возвращать из этого блока нельзя&quot;&quot;&quot;</span>
+</span><span id="CompilerDirective.raw-28"><a href="#CompilerDirective.raw-28"><span class="linenos">28</span></a>        <span class="o">...</span>
 </span></pre></div>
 
 
@@ -295,10 +295,10 @@ py2glua<wbr>.glua    </h1>
 
     </div>
     <a class="headerlink" href="#CompilerDirective.gmod_api"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="CompilerDirective.gmod_api-33"><a href="#CompilerDirective.gmod_api-33"><span class="linenos">33</span></a>    <span class="nd">@staticmethod</span>
-</span><span id="CompilerDirective.gmod_api-34"><a href="#CompilerDirective.gmod_api-34"><span class="linenos">34</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">gmod_api</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="CompilerDirective.gmod_api-35"><a href="#CompilerDirective.gmod_api-35"><span class="linenos">35</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Внутренняя функция для регистрации некомпилируемых апи вызовов гмода. Не рекомендуется для использования&quot;&quot;&quot;</span>
-</span><span id="CompilerDirective.gmod_api-36"><a href="#CompilerDirective.gmod_api-36"><span class="linenos">36</span></a>        <span class="o">...</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="CompilerDirective.gmod_api-30"><a href="#CompilerDirective.gmod_api-30"><span class="linenos">30</span></a>    <span class="nd">@staticmethod</span>
+</span><span id="CompilerDirective.gmod_api-31"><a href="#CompilerDirective.gmod_api-31"><span class="linenos">31</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">gmod_api</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="CompilerDirective.gmod_api-32"><a href="#CompilerDirective.gmod_api-32"><span class="linenos">32</span></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Внутренняя функция для регистрации некомпилируемых апи вызовов гмода. Не рекомендуется для использования&quot;&quot;&quot;</span>
+</span><span id="CompilerDirective.gmod_api-33"><a href="#CompilerDirective.gmod_api-33"><span class="linenos">33</span></a>        <span class="o">...</span>
 </span></pre></div>
 
 
