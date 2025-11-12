@@ -131,6 +131,8 @@ class PyParser:
     @classmethod
     def _construct_raw_non_terminal(cls, token_stream: _TokenStream):
         nodes: list[RawNonTerminal] = []
+        awaiting_block = False
+        pending_leading: list[RawNonTerminal] = []
 
         while not token_stream.eof():
             tok = token_stream.peek()
@@ -141,7 +143,13 @@ class PyParser:
             tok_type = tok.type
 
             if tok_type == tokenize.COMMENT:
-                nodes.append(cls._build_raw_comment(token_stream))
+                comment = cls._build_raw_comment(token_stream)
+                if awaiting_block:
+                    pending_leading.append(comment)
+
+                else:
+                    nodes.append(comment)
+
                 continue
 
             if tok_type in (
@@ -166,19 +174,30 @@ class PyParser:
             if tok_string in _HEADER_KEYWORDS:
                 func = getattr(cls, f"_build_raw_{tok_string}")
                 res = func(token_stream)
-                if isinstance(res, tuple):
-                    nodes.extend(res)
 
+                if isinstance(res, tuple):
+                    header, block = res
+                    nodes.append(header)
+                    nodes.append(block)
+                    awaiting_block = False
+                    pending_leading.clear()
                 elif isinstance(res, list):
                     nodes.extend(res)
-
+                    awaiting_block = False
+                    pending_leading.clear()
                 else:
                     nodes.append(res)
-
+                    awaiting_block = True
                 continue
 
             if tok_type == tokenize.INDENT:
-                nodes.append(cls._build_raw_indent(token_stream))
+                block = cls._build_raw_indent(token_stream)
+                if awaiting_block and pending_leading:
+                    setattr(block, "_leading", pending_leading)
+
+                awaiting_block = False
+                pending_leading = []
+                nodes.append(block)
                 continue
 
             res = cls._build_raw_other(token_stream)
@@ -440,6 +459,10 @@ class PyParser:
                 if raw_children:
                     n.tokens = cls._expand_blocks(raw_children)
                     cls._promote_leading_docstring(n.tokens)
+                    lead = getattr(n, "_leading", None)
+                    if lead:
+                        n.tokens = lead + n.tokens
+
                     out.append(n)
                     continue
 
@@ -454,6 +477,10 @@ class PyParser:
                 inner_nodes = cls._construct_raw_non_terminal(inner_stream)
                 n.tokens = cls._expand_blocks(inner_nodes)
                 cls._promote_leading_docstring(n.tokens)
+                lead = getattr(n, "_leading", None)
+                if lead:
+                    n.tokens = lead + n.tokens
+
                 out.append(n)
                 continue
 
@@ -467,6 +494,7 @@ class PyParser:
                         new_tokens.append(t)
 
                 n.tokens = new_tokens
+
             out.append(n)
 
         return out

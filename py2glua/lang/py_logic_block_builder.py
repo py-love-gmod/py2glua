@@ -25,7 +25,7 @@ class PyLogicKind(Enum):
 class PyLogicNode:
     kind: PyLogicKind
     children: list["PyLogicNode"] = field(default_factory=list)
-    origin: RawNonTerminal | None = None
+    origins: list[RawNonTerminal] = field(default_factory=list)
 
 
 # endregion
@@ -51,7 +51,7 @@ class _LogicBlockKind(Enum):
 class _PyLogicBlock:
     kind: _LogicBlockKind
     body: list["_PyLogicBlock"] = field(default_factory=list)
-    origin: RawNonTerminal | None = None
+    origins: list[RawNonTerminal] = field(default_factory=list)
 
 
 # endregion
@@ -86,7 +86,7 @@ class PyLogicBlockBuilder:
             return PyLogicNode(
                 kind=kind_map[b.kind],
                 children=[to_public(ch) for ch in b.body],
-                origin=b.origin,
+                origins=list(b.origins),
             )
 
         return [to_public(b) for b in blocks]
@@ -181,7 +181,7 @@ class PyLogicBlockBuilder:
         start: int,
     ) -> tuple[int, list[_PyLogicBlock]]:
         node = nodes[start]
-        return 1, [_PyLogicBlock(_LogicBlockKind.STATEMENT, [], origin=node)]
+        return 1, [_PyLogicBlock(_LogicBlockKind.STATEMENT, [], origins=[node])]
 
     @classmethod
     def _build_logic_maybe_decorated(
@@ -192,7 +192,9 @@ class PyLogicBlockBuilder:
         i = start
         n = len(nodes)
 
+        decorators: list[RawNonTerminal] = []
         while i < n and nodes[i].kind is RawNonTerminalKind.DECORATORS:
+            decorators.append(nodes[i])
             i += 1
 
         if i >= n:
@@ -214,7 +216,9 @@ class PyLogicBlockBuilder:
             if header_kind is RawNonTerminalKind.FUNCTION
             else _LogicBlockKind.CLASS
         )
-        return (blk_idx + 1) - start, [_PyLogicBlock(kind, inner, origin=header)]
+
+        origins = [*decorators, header]
+        return (blk_idx + 1) - start, [_PyLogicBlock(kind, inner, origins=origins)]
 
     @classmethod
     def _build_logic_func_block(
@@ -224,7 +228,7 @@ class PyLogicBlockBuilder:
     ) -> tuple[int, list[_PyLogicBlock]]:
         off, header, block = cls._consume_header_plus_block(nodes, start)
         inner = cls._build_logic_block(block.tokens)
-        return off, [_PyLogicBlock(_LogicBlockKind.FUNCTION, inner, origin=header)]
+        return off, [_PyLogicBlock(_LogicBlockKind.FUNCTION, inner, origins=[header])]
 
     @classmethod
     def _build_logic_class_block(
@@ -234,7 +238,7 @@ class PyLogicBlockBuilder:
     ) -> tuple[int, list[_PyLogicBlock]]:
         off, header, block = cls._consume_header_plus_block(nodes, start)
         inner = cls._build_logic_block(block.tokens)
-        return off, [_PyLogicBlock(_LogicBlockKind.CLASS, inner, origin=header)]
+        return off, [_PyLogicBlock(_LogicBlockKind.CLASS, inner, origins=[header])]
 
     @classmethod
     def _build_logic_loop_block(
@@ -244,7 +248,7 @@ class PyLogicBlockBuilder:
     ) -> tuple[int, list[_PyLogicBlock]]:
         off, header, block = cls._consume_header_plus_block(nodes, start)
         inner = cls._build_logic_block(block.tokens)
-        return off, [_PyLogicBlock(_LogicBlockKind.LOOPS, inner, origin=header)]
+        return off, [_PyLogicBlock(_LogicBlockKind.LOOPS, inner, origins=[header])]
 
     @classmethod
     def _build_logic_with_block(
@@ -254,7 +258,7 @@ class PyLogicBlockBuilder:
     ) -> tuple[int, list[_PyLogicBlock]]:
         off, header, block = cls._consume_header_plus_block(nodes, start)
         inner = cls._build_logic_block(block.tokens)
-        return off, [_PyLogicBlock(_LogicBlockKind.WITH_BLOCK, inner, origin=header)]
+        return off, [_PyLogicBlock(_LogicBlockKind.WITH_BLOCK, inner, origins=[header])]
 
     @classmethod
     def _build_logic_branch_chain(cls, nodes: list[RawNonTerminal], start: int):
@@ -270,13 +274,14 @@ class PyLogicBlockBuilder:
             i = start
 
         parts_children: list[_PyLogicBlock] = []
+        headers: list[RawNonTerminal] = []
         j = i
         n = len(nodes)
 
         # if
         off, header, block = cls._consume_header_plus_block(nodes, j)
         j += off
-        origin_header = header
+        headers.append(header)
         parts_children.extend(cls._build_logic_block(block.tokens))
 
         # elif / else
@@ -284,15 +289,16 @@ class PyLogicBlockBuilder:
             RawNonTerminalKind.ELIF,
             RawNonTerminalKind.ELSE,
         ):
-            off2, _, block2 = cls._consume_header_plus_block(nodes, j)
+            off2, hdr2, block2 = cls._consume_header_plus_block(nodes, j)
             j += off2
+            headers.append(hdr2)
             parts_children.extend(cls._build_logic_block(block2.tokens))
 
         return j - i, [
             _PyLogicBlock(
                 _LogicBlockKind.BRANCHING_CONDITION,
                 parts_children,
-                origin=origin_header,
+                origins=headers,
             )
         ]
 
@@ -312,34 +318,40 @@ class PyLogicBlockBuilder:
         j = i
         n = len(nodes)
         parts_children: list[_PyLogicBlock] = []
+        headers: list[RawNonTerminal] = []
 
         # TRY
         off, header, block = cls._consume_header_plus_block(nodes, j)
         j += off
-        origin_header = header
+        headers.append(header)
         parts_children.extend(cls._build_logic_block(block.tokens))
 
         # EXCEPT*
         while j < n and nodes[j].kind is RawNonTerminalKind.EXCEPT:
-            off2, _, blk2 = cls._consume_header_plus_block(nodes, j)
+            off2, hdr2, blk2 = cls._consume_header_plus_block(nodes, j)
             j += off2
+            headers.append(hdr2)
             parts_children.extend(cls._build_logic_block(blk2.tokens))
 
         # ELSE?
         if j < n and nodes[j].kind is RawNonTerminalKind.ELSE:
-            off3, _, blk3 = cls._consume_header_plus_block(nodes, j)
+            off3, hdr3, blk3 = cls._consume_header_plus_block(nodes, j)
             j += off3
+            headers.append(hdr3)
             parts_children.extend(cls._build_logic_block(blk3.tokens))
 
         # FINALLY?
         if j < n and nodes[j].kind is RawNonTerminalKind.FINALLY:
-            off4, _, blk4 = cls._consume_header_plus_block(nodes, j)
+            off4, hdr4, blk4 = cls._consume_header_plus_block(nodes, j)
             j += off4
+            headers.append(hdr4)
             parts_children.extend(cls._build_logic_block(blk4.tokens))
 
         return j - i, [
             _PyLogicBlock(
-                _LogicBlockKind.TRY_EXCEPT, parts_children, origin=origin_header
+                _LogicBlockKind.TRY_EXCEPT,
+                parts_children,
+                origins=headers,
             )
         ]
 
@@ -350,7 +362,7 @@ class PyLogicBlockBuilder:
         start: int,
     ) -> tuple[int, list[_PyLogicBlock]]:
         node = nodes[start]
-        return 1, [_PyLogicBlock(_LogicBlockKind.IMPORT, [], origin=node)]
+        return 1, [_PyLogicBlock(_LogicBlockKind.IMPORT, [], origins=[node])]
 
     @classmethod
     def _build_logic_delete(
@@ -359,7 +371,7 @@ class PyLogicBlockBuilder:
         start: int,
     ) -> tuple[int, list[_PyLogicBlock]]:
         node = nodes[start]
-        return 1, [_PyLogicBlock(_LogicBlockKind.DELETE, [], origin=node)]
+        return 1, [_PyLogicBlock(_LogicBlockKind.DELETE, [], origins=[node])]
 
     @classmethod
     def _build_logic_return(
@@ -368,7 +380,7 @@ class PyLogicBlockBuilder:
         start: int,
     ) -> tuple[int, list[_PyLogicBlock]]:
         node = nodes[start]
-        return 1, [_PyLogicBlock(_LogicBlockKind.RETURN, [], origin=node)]
+        return 1, [_PyLogicBlock(_LogicBlockKind.RETURN, [], origins=[node])]
 
     @classmethod
     def _build_logic_pass(
@@ -377,7 +389,7 @@ class PyLogicBlockBuilder:
         start: int,
     ) -> tuple[int, list[_PyLogicBlock]]:
         node = nodes[start]
-        return 1, [_PyLogicBlock(_LogicBlockKind.PASS, [], origin=node)]
+        return 1, [_PyLogicBlock(_LogicBlockKind.PASS, [], origins=[node])]
 
     @classmethod
     def _build_logic_comment(
@@ -386,23 +398,20 @@ class PyLogicBlockBuilder:
         start: int,
     ) -> tuple[int, list[_PyLogicBlock]]:
         i = start
-        merged_tokens: list[RawNonTerminal] = []
+        collected: list[RawNonTerminal] = []
 
         while i < len(nodes) and nodes[i].kind in (
             RawNonTerminalKind.COMMENT,
             RawNonTerminalKind.DOCSTRING,
         ):
-            merged_tokens.append(nodes[i])
+            collected.append(nodes[i])
             i += 1
-
-        merged_raw = RawNonTerminal(RawNonTerminalKind.COMMENT, merged_tokens)
 
         combined = _PyLogicBlock(
             _LogicBlockKind.COMMENT,
             [],
-            origin=merged_raw,
+            origins=collected,
         )
-
         return i - start, [combined]
 
     # endregion
