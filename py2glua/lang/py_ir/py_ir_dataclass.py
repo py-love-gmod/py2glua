@@ -14,6 +14,10 @@ class PyIRNode:
         raise NotImplementedError()
 
 
+# endregion
+
+
+# region
 @dataclass
 class PyIRFile(PyIRNode):
     path: Path | None
@@ -24,18 +28,6 @@ class PyIRFile(PyIRNode):
         yield self
         for node in self.body:
             yield node
-
-    def get_vid(self, name: str) -> int:
-        n2i = self.meta.setdefault("name_to_id", {})
-        i2n = self.meta.setdefault("id_to_name", {})
-
-        if name in n2i:
-            return n2i[name]
-
-        vid = len(n2i)
-        n2i[name] = vid
-        i2n[vid] = name
-        return vid
 
 
 # endregion
@@ -91,7 +83,54 @@ class PyIRVarUse(PyIRNode):
 # endregion
 
 
-# region
+# region Function
+@dataclass
+class PyIRCall(PyIRNode):
+    args_p: list[str]
+    args_kw: dict[str, Any]
+
+    def walk(self):
+        yield self
+
+
+@dataclass
+class PyGmodAPIIRCall(PyIRNode):
+    gmod_name: str
+    args_p: list[str]
+    args_kw: dict[str, Any]
+
+    def walk(self):
+        yield self
+
+
+@dataclass
+class PyIRFunctionDef(PyIRNode):
+    signature: dict[str, str | int]
+    args_p: list[str]
+    args_kw: dict[str, Any]
+    body: list["PyIRNode"] = field(default_factory=list)
+    meta: dict[str, Any] = field(default_factory=dict)
+
+    def walk(self):
+        yield self
+        for node in self.body:
+            yield node
+
+
+# endregion
+
+
+# region Class
+@dataclass
+class PyIRClassDef(PyIRNode):
+    body: list["PyIRNode"] = field(default_factory=list)
+    meta: dict[str, Any] = field(default_factory=dict)
+
+    def walk(self):
+        yield self
+        for node in self.body:
+            yield node
+
 
 # endregion
 
