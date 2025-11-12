@@ -6,20 +6,22 @@ from typing import Sequence
 
 from ...config import Py2GluaConfig
 from ..py_logic_block_builder import PyLogicNode
-from .py_ir_dataclass import PyIRFile, PyIRImport, PyIRImportType, PyIRNode
+from .py_ir_dataclass import PyIRContext, PyIRImport, PyIRImportType, PyIRNode
 
 
 class ImportAnalyzer:
     @staticmethod
     def build(
-        file_obj: PyIRFile,
-        node_list: list[PyLogicNode],
-        start: int,
+        parent_obj: PyIRNode,
+        node: PyLogicNode,
     ) -> tuple[int, Sequence[PyIRNode]]:
-        node = node_list[start]
         origin = node.origin
         if origin is None:
             raise ValueError("Origin is None")
+
+        context: PyIRContext | None = getattr(parent_obj, "context", None)
+        if context is None:
+            raise ValueError("parent_obj context is missing")
 
         tokens = [t.string for t in origin.tokens if hasattr(t, "string")]
         if not tokens:
@@ -38,7 +40,7 @@ class ImportAnalyzer:
                 if t == "as" and i + 1 < len(tokens):
                     alias = tokens[i + 1]
                     real_name = modules[-1]
-                    file_obj.meta["aliases"][alias] = real_name
+                    context.meta["aliases"][alias] = real_name
                     i += 2
                     continue
 
@@ -70,7 +72,7 @@ class ImportAnalyzer:
                 if t == "as" and i + 1 < len(names):
                     alias = names[i + 1]
                     real_name = f"{pkg}.{names[i - 1]}"
-                    file_obj.meta["aliases"][alias] = real_name
+                    context.meta["aliases"][alias] = real_name
                     i += 2
                     continue
 
@@ -87,9 +89,6 @@ class ImportAnalyzer:
         )
         if isinstance(cfg_src, (str, Path)):
             project_root = Path(cfg_src).resolve()
-
-        elif isinstance(file_obj.path, Path):
-            project_root = file_obj.path.parent.resolve()
 
         else:
             project_root = Path.cwd()
@@ -112,7 +111,7 @@ class ImportAnalyzer:
                 modules=[mod],
                 i_type=i_type,
             )
-            file_obj.meta["imports"].append(mod)
+            context.meta["imports"].append(mod)
             ir_nodes.append(ir_node)
 
         return (1, ir_nodes)

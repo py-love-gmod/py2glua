@@ -1,20 +1,19 @@
 import tokenize
-from typing import Sequence
 
-from .py_ir_dataclass import PyIRFile, PyIRNode
+from .py_ir_dataclass import PyIRNode
 
 
 class StatementCompiler:
     @staticmethod
     def compile_line(
         tokens: list[tokenize.TokenInfo],
-        file_obj: PyIRFile,
-    ) -> Sequence[PyIRNode]:
+        parant_obj: PyIRNode,
+    ) -> list[PyIRNode]:
         pass
 
     @staticmethod
     def compile_expres(
         tokens: list[tokenize.TokenInfo],
-        file_obj: PyIRFile,
+        parant_obj: PyIRNode,
     ) -> PyIRNode:
         pass

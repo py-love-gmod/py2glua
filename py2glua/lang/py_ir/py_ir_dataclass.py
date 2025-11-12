@@ -14,6 +14,13 @@ class PyIRNode:
         raise NotImplementedError()
 
 
+@dataclass
+class PyIRContext:
+    parant_context: "PyIRContext|None" = None
+    meta: dict[str, Any] = field(default_factory=dict)
+    scope_name: set[str] = field(default_factory=set)
+
+
 # endregion
 
 
@@ -21,8 +28,8 @@ class PyIRNode:
 @dataclass
 class PyIRFile(PyIRNode):
     path: Path | None
+    context: PyIRContext
     body: list["PyIRNode"] = field(default_factory=list)
-    meta: dict[str, Any] = field(default_factory=dict)
 
     def walk(self):
         yield self
@@ -108,8 +115,8 @@ class PyGmodAPIIRCall(PyIRCall):
 class PyIRFunctionDef(PyIRNode):
     name: str
     signature: dict[str, str | int]
+    context: PyIRContext
     body: list["PyIRNode"] = field(default_factory=list)
-    meta: dict[str, Any] = field(default_factory=dict)
 
     def walk(self):
         yield self
@@ -124,8 +131,8 @@ class PyIRFunctionDef(PyIRNode):
 @dataclass
 class PyIRClassDef(PyIRNode):
     name: str
+    context: PyIRContext
     body: list["PyIRNode"] = field(default_factory=list)
-    meta: dict[str, Any] = field(default_factory=dict)
 
     def walk(self):
         yield self
@@ -160,3 +167,25 @@ class PyIRReturn(PyIRNode):
 
 
 # endregion
+
+
+# region Comment
+@dataclass
+class PyIRComment(PyIRNode):
+    value: str
+
+    def walk(self):
+        yield self
+
+
+# endregion
+
+
+# region Pass
+@dataclass
+class PyIRPass(PyIRNode):
+    def walk(self):
+        yield self
+
+
+# endreigon
