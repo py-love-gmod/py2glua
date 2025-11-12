@@ -65,7 +65,7 @@ class PyIRConstant(PyIRNode):
 
 @dataclass
 class PyIRVarCreate(PyIRNode):
-    vid: int
+    name: str
     is_global: bool = False
 
     def walk(self):
@@ -74,7 +74,7 @@ class PyIRVarCreate(PyIRNode):
 
 @dataclass
 class PyIRVarUse(PyIRNode):
-    vid: int
+    name: str
 
     def walk(self):
         yield self
@@ -86,28 +86,39 @@ class PyIRVarUse(PyIRNode):
 # region Function
 @dataclass
 class PyIRCall(PyIRNode):
-    args_p: list[str]
-    args_kw: dict[str, Any]
+    name: str
+    args_p: list[PyIRNode] = field(default_factory=list)
+    args_kw: dict[str, PyIRNode] = field(default_factory=dict)
 
     def walk(self):
         yield self
+        for arg_p in self.args_p:
+            yield arg_p
+
+        for name, arg_kw in self.args_kw:
+            yield arg_kw, name
 
 
 @dataclass
 class PyGmodAPIIRCall(PyIRNode):
-    gmod_name: str
-    args_p: list[str]
-    args_kw: dict[str, Any]
+    name: str
+    args_p: list[PyIRNode] = field(default_factory=list)
+    args_kw: dict[str, PyIRNode] = field(default_factory=dict)
 
     def walk(self):
         yield self
+        for arg_p in self.args_p:
+            yield arg_p
+
+        for name, arg_kw in self.args_kw:
+            yield arg_kw, name
+
 
 
 @dataclass
 class PyIRFunctionDef(PyIRNode):
+    name: str
     signature: dict[str, str | int]
-    args_p: list[str]
-    args_kw: dict[str, Any]
     body: list["PyIRNode"] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
 
@@ -123,6 +134,7 @@ class PyIRFunctionDef(PyIRNode):
 # region Class
 @dataclass
 class PyIRClassDef(PyIRNode):
+    name: str
     body: list["PyIRNode"] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
 
