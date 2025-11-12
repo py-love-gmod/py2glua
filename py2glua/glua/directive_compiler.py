@@ -1,6 +1,3 @@
-from collections.abc import Callable
-
-
 class CompilerDirective:
     """Класс отвечающий за дерективы компилятору"""
 
@@ -10,17 +7,17 @@ class CompilerDirective:
         ...
 
     @staticmethod
-    def debug_only(func: Callable):
+    def debug_only():
         """Декоратор отвечающий за использование данной функции только в debug режиме"""
         ...
 
     @staticmethod
-    def lazy_compile(func: Callable):
+    def lazy_compile():
         """Помечает метод как "ленивый" для компилятора"""
         ...
 
     @staticmethod
-    def inline(func: Callable):
+    def inline():
         """Просьба компилятору вставлять тело функции в код. Просьба учитывать что возможно этой функции после не будет в исходном lua коде"""
         ...
 
