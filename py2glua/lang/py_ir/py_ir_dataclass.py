@@ -16,7 +16,7 @@ class PyIRNode:
 
 @dataclass
 class PyIRContext:
-    parant_context: "PyIRContext|None" = None
+    parent_context: "PyIRContext|None" = None
     meta: dict[str, Any] = field(default_factory=dict)
     scope_name: set[str] = field(default_factory=set)
 

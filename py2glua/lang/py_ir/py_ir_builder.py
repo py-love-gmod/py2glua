@@ -7,6 +7,7 @@ from ..py_logic_block_builder import (
 )
 from .import_analyzer import ImportAnalyzer
 from .py_ir_dataclass import (
+    PyIRComment,
     PyIRContext,
     PyIRDel,
     PyIRFile,
@@ -47,7 +48,7 @@ class PyIRBuilder:
             PyLogicKind.DELETE: cls._build_ir_delete,
             PyLogicKind.RETURN: cls._build_ir_return,
             PyLogicKind.PASS: cls._build_ir_pass,
-            PyLogicKind.COMMENT: None,
+            PyLogicKind.COMMENT: cls._build_ir_comment,
             PyLogicKind.STATEMENT: cls._build_ir_statement,  # dataclass TODO
         }
         out: list[PyIRNode] = []
@@ -70,9 +71,6 @@ class PyIRBuilder:
         node: PyLogicNode,
     ) -> list[PyIRNode]:
         origin = node.origins[0]
-        if origin is None:
-            raise ValueError
-
         ir_nodes = StatementCompiler.compile_line(origin.tokens, parant_obj)
         return ir_nodes
 
@@ -83,14 +81,12 @@ class PyIRBuilder:
         node: PyLogicNode,
     ) -> list[PyIRNode]:
         origin = node.origins[0]
-        if origin is None:
-            raise ValueError
-
+        first_token = origin.tokens[0]
         ir = StatementCompiler.compile_expres(origin.tokens[1:], parant_obj)
         return [
             PyIRReturn(
-                line=origin.tokens[0].start[0],
-                offset=origin.tokens[0].start[1],
+                first_token.start[0],
+                first_token.start[1],
                 value=ir,
             )
         ]
@@ -102,14 +98,12 @@ class PyIRBuilder:
         node: PyLogicNode,
     ) -> list[PyIRNode]:
         origin = node.origins[0]
-        if origin is None:
-            raise ValueError
-
+        first_token = origin.tokens[0]
         ir = StatementCompiler.compile_expres(origin.tokens[1:], parant_obj)
         return [
             PyIRDel(
-                line=origin.tokens[0].start[0],
-                offset=origin.tokens[0].start[1],
+                first_token.start[0],
+                first_token.start[1],
                 value=ir,
             )
         ]
@@ -120,13 +114,31 @@ class PyIRBuilder:
         parant_obj: PyIRFile,
         node: PyLogicNode,
     ) -> list[PyIRNode]:
-        origin = node.origins[0]
-        if origin is None:
-            raise ValueError
-
+        first_token = node.origins[0].tokens[0]
         return [
             PyIRPass(
-                line=origin.tokens[0].start[0],
-                offset=origin.tokens[0].start[1],
+                first_token.start[0],
+                first_token.start[1],
+            )
+        ]
+
+    @classmethod
+    def _build_ir_comment(
+        cls,
+        parant_obj: PyIRFile,
+        node: PyLogicNode,
+    ) -> list[PyIRNode]:
+        tokens = ""
+        first_token = node.origins[0].tokens[0]
+
+        for origin in node.origins:
+            for tok in origin.tokens:
+                tokens += tok.string.removeprefix("# ")
+
+        return [
+            PyIRComment(
+                first_token.start[0],
+                first_token.start[1],
+                tokens,
             )
         ]
