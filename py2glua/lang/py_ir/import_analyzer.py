@@ -15,7 +15,7 @@ class ImportAnalyzer:
         parent_obj: PyIRNode,
         node: PyLogicNode,
     ) -> tuple[int, Sequence[PyIRNode]]:
-        origin = node.origin
+        origin = node.origins[0]
         if origin is None:
             raise ValueError("Origin is None")
 

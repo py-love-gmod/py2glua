@@ -69,7 +69,7 @@ class PyIRBuilder:
         parant_obj: PyIRFile,
         node: PyLogicNode,
     ) -> list[PyIRNode]:
-        origin = node.origin
+        origin = node.origins[0]
         if origin is None:
             raise ValueError
 
@@ -82,7 +82,7 @@ class PyIRBuilder:
         parant_obj: PyIRFile,
         node: PyLogicNode,
     ) -> list[PyIRNode]:
-        origin = node.origin
+        origin = node.origins[0]
         if origin is None:
             raise ValueError
 
@@ -101,7 +101,7 @@ class PyIRBuilder:
         parant_obj: PyIRFile,
         node: PyLogicNode,
     ) -> list[PyIRNode]:
-        origin = node.origin
+        origin = node.origins[0]
         if origin is None:
             raise ValueError
 
@@ -120,7 +120,7 @@ class PyIRBuilder:
         parant_obj: PyIRFile,
         node: PyLogicNode,
     ) -> list[PyIRNode]:
-        origin = node.origin
+        origin = node.origins[0]
         if origin is None:
             raise ValueError
 
