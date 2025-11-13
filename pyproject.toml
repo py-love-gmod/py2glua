@@ -16,7 +16,7 @@ dependencies = ["colorama"]
 py2glua = "py2glua.cli:main"
 
 [project.urls]
-homepage = "https://github.com/themanyfaceddemon/py2glua"
+homepage = "https://github.com/py-love-gmod/py2glua"
 
 [tool.setuptools.packages.find]
 where = ["."]
