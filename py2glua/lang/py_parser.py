@@ -158,13 +158,16 @@ class PyParser:
                     nodes.append(block)
                     awaiting_block = False
                     pending_leading.clear()
+
                 elif isinstance(res, list):
                     nodes.extend(res)
                     awaiting_block = False
                     pending_leading.clear()
+
                 else:
                     nodes.append(res)
                     awaiting_block = True
+
                 continue
 
             if tok_type == tokenize.INDENT:
