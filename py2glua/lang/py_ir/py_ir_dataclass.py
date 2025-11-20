@@ -110,11 +110,11 @@ class PyBinOPType(IntEnum):
     LE = auto()  # <=
     GE = auto()  # >=
 
-    IN = auto()
-    NOT_IN = auto()
+    IN = auto()  # in
+    NOT_IN = auto()  # not in
 
-    IS = auto()
-    NOT_IS = auto()
+    IS = auto()  # is
+    IS_NOT = auto()  # is not
 
     BIT_OR = auto()  # |
     BIT_XOR = auto()  # ^
