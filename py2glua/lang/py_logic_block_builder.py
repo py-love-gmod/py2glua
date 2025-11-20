@@ -25,6 +25,12 @@ class PyLogicKind(Enum):
 class PyLogicNode:
     kind: PyLogicKind
     children: list["PyLogicNode"] = field(default_factory=list)
+
+    # Мы фактически тут не должны принимать больше 1 ориджина.
+    # Если сюда пришёл больше 1 - произошло что-то странное (если это не комментарий).
+    # В принципе нигде кроме как комментариев более 1 ориджина не должно быть.
+    # В принципе это можно считать костылём, но я не знаю как сделать лучше. OwO.
+    # By: @themanyfaceddemon
     origins: list[RawNonTerminal] = field(default_factory=list)
 
 
