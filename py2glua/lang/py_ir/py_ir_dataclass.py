@@ -98,6 +98,75 @@ class PyIRVarUse(PyIRNode):
 # endregion
 
 
+# region OP
+class PyBinOPType(IntEnum):
+    OR = auto()
+    AND = auto()
+
+    EQ = auto()  # ==
+    NE = auto()  # !=
+    LT = auto()  # <
+    GT = auto()  # >
+    LE = auto()  # <=
+    GE = auto()  # >=
+
+    IN = auto()
+    NOT_IN = auto()
+
+    IS = auto()
+    NOT_IS = auto()
+
+    BIT_OR = auto()  # |
+    BIT_XOR = auto()  # ^
+    BIT_AND = auto()  # &
+    BIT_LSHIFT = auto()  # <<
+    BIT_RSHIFT = auto()  # >>
+
+    ADD = auto()  # +
+    SUB = auto()  # -
+
+    MUL = auto()  # *
+    DIV = auto()  # /
+    FLOORDIV = auto()  # //
+    MOD = auto()  # %
+
+    POW = auto()  # **
+
+
+class PyUnaryOPType(IntEnum):
+    PLUS = auto()  # +
+    MINUS = auto()  # -
+
+    NOT = auto()  # not
+
+    BIT_INV = auto()  # ~
+
+
+@dataclass
+class PyIRBinOP(PyIRNode):
+    op: PyBinOPType
+    left: PyIRNode
+    right: PyIRNode
+
+    def walk(self):
+        yield self
+        yield self.left
+        yield self.right
+
+
+@dataclass
+class PyIRUnaryOP(PyIRNode):
+    op: PyUnaryOPType
+    value: PyIRNode
+
+    def walk(self):
+        yield self
+        yield self.value
+
+
+# endregion
+
+
 # region Function
 @dataclass
 class PyIRCall(PyIRNode):
