@@ -2,30 +2,7 @@ import tokenize
 from enum import Enum, auto
 from io import BytesIO
 
-
-# region Tokens
-class _TokenStream:
-    def __init__(self, tokens: list[tokenize.TokenInfo]) -> None:
-        self.tokens = tokens
-        self.pos = 0
-
-    def peek(self, offset: int = 0) -> tokenize.TokenInfo | None:
-        idx = self.pos + offset
-        if idx < len(self.tokens):
-            return self.tokens[idx]
-        return None
-
-    def advance(self) -> tokenize.TokenInfo | None:
-        tok = self.peek(0)
-        if tok is not None:
-            self.pos += 1
-        return tok
-
-    def eof(self) -> bool:
-        return self.pos >= len(self.tokens)
-
-
-# endregion
+from .python_etc import TokenStream
 
 
 # region RawNonTerminal
@@ -107,7 +84,7 @@ class PyParser:
 
     # region tokens
     @staticmethod
-    def _construct_tokens(source: str) -> _TokenStream:
+    def _construct_tokens(source: str) -> TokenStream:
         try:
             compile(source, "<py2glua-validate>", "exec")
 
@@ -123,13 +100,13 @@ class PyParser:
 
             token_list.append(token)
 
-        return _TokenStream(token_list)
+        return TokenStream(token_list)
 
     # endregion
 
     # region Non Terminal
     @classmethod
-    def _construct_raw_non_terminal(cls, token_stream: _TokenStream):
+    def _construct_raw_non_terminal(cls, token_stream: TokenStream):
         nodes: list[RawNonTerminal] = []
         awaiting_block = False
         pending_leading: list[RawNonTerminal] = []
@@ -288,7 +265,7 @@ class PyParser:
 
     @classmethod
     def _build_header_with_optional_inline_block(
-        cls, token_stream: _TokenStream, kind: RawNonTerminalKind
+        cls, token_stream: TokenStream, kind: RawNonTerminalKind
     ):
         header = cls._build_finish_colon(token_stream, kind)
         nxt = token_stream.peek()
@@ -434,7 +411,7 @@ class PyParser:
         return RawNonTerminal(RawNonTerminalKind.BLOCK, tokens)
 
     @classmethod
-    def _build_raw_comment(cls, token_stream: _TokenStream) -> RawNonTerminal:
+    def _build_raw_comment(cls, token_stream: TokenStream) -> RawNonTerminal:
         tokens = []
         while not token_stream.eof():
             tok = token_stream.advance()
@@ -473,7 +450,7 @@ class PyParser:
                 if toks and toks[-1].type == tokenize.DEDENT:
                     toks = toks[:-1]
 
-                inner_stream = _TokenStream(toks)
+                inner_stream = TokenStream(toks)
                 inner_nodes = cls._construct_raw_non_terminal(inner_stream)
                 n.tokens = cls._expand_blocks(inner_nodes)
                 cls._promote_leading_docstring(n.tokens)

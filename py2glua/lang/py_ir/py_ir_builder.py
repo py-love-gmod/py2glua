@@ -71,8 +71,8 @@ class PyIRBuilder:
         node: PyLogicNode,
     ) -> list[PyIRNode]:
         origin = node.origins[0]
-        ir_nodes = StatementCompiler.compile_line(origin.tokens, parant_obj)
-        return ir_nodes
+        ir_node = StatementCompiler.compile_expres(origin.tokens, parant_obj)
+        return [ir_node]
 
     @classmethod
     def _build_ir_return(
