@@ -29,7 +29,7 @@ class PyIRContext:
 class PyIRFile(PyIRNode):
     path: Path | None
     context: PyIRContext
-    body: list["PyIRNode"] = field(default_factory=list)
+    body: list["PyIRNode"]
 
     def walk(self):
         yield self
@@ -104,11 +104,6 @@ class PyIRCall(PyIRNode):
 
         for arg_kw in self.args_kw.values():
             yield arg_kw
-
-
-@dataclass
-class PyGmodAPIIRCall(PyIRCall):
-    pass
 
 
 @dataclass

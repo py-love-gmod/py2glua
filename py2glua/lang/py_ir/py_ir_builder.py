@@ -20,13 +20,14 @@ from .statement_compiler import StatementCompiler
 
 class PyIRBuilder:
     @classmethod
-    def build(cls, source: str, path_to_file: Path | None = None) -> PyIRFile:
+    def build_file(cls, source: str, path_to_file: Path | None = None) -> PyIRFile:
         logic_blocks = PyLogicBlockBuilder.build(source)
         py_ir_file = PyIRFile(
             line=None,
             offset=None,
             path=path_to_file,
             context=PyIRContext(),
+            body=[],
         )
         py_ir_file.body = cls._build_ir_block(logic_blocks, py_ir_file)
         return py_ir_file
