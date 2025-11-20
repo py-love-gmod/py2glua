@@ -24,17 +24,25 @@ class PyIRContext:
 # endregion
 
 
-# region
+# region ETC
 @dataclass
 class PyIRFile(PyIRNode):
     path: Path | None
     context: PyIRContext
-    body: list["PyIRNode"]
+    body: list["PyIRNode"] = field(default_factory=list)
 
     def walk(self):
         yield self
         for node in self.body:
             yield node
+
+
+@dataclass
+class PyIRDecorator(PyIRNode):
+    name: str
+
+    def walk(self):
+        yield self
 
 
 # endregion
@@ -111,6 +119,7 @@ class PyIRFunctionDef(PyIRNode):
     name: str
     signature: dict[str, str | int]
     context: PyIRContext
+    decorators: list[PyIRDecorator] = field(default_factory=list)
     body: list["PyIRNode"] = field(default_factory=list)
 
     def walk(self):
@@ -127,6 +136,7 @@ class PyIRFunctionDef(PyIRNode):
 class PyIRClassDef(PyIRNode):
     name: str
     context: PyIRContext
+    decorators: list[PyIRDecorator] = field(default_factory=list)
     body: list["PyIRNode"] = field(default_factory=list)
 
     def walk(self):
