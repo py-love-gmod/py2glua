@@ -100,8 +100,8 @@ class PyIRVarUse(PyIRNode):
 
 # region OP
 class PyBinOPType(IntEnum):
-    OR = auto()
-    AND = auto()
+    OR = auto()  # or
+    AND = auto()  # and
 
     EQ = auto()  # ==
     NE = auto()  # !=
