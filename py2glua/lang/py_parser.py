@@ -146,6 +146,8 @@ class PyParser:
 
             if tok_string == "@":
                 nodes.extend(cls._build_raw_decorator(token_stream))
+                awaiting_block = False
+                pending_leading.clear()
                 continue
 
             if tok_string in _HEADER_KEYWORDS:
@@ -275,11 +277,64 @@ class PyParser:
         if nxt is None or nxt.type in (tokenize.NEWLINE, tokenize.NL):
             return header
 
-        inline_stmt = cls._build_finish_newline(token_stream, RawNonTerminalKind.OTHER)
-        block = RawNonTerminal(
-            RawNonTerminalKind.BLOCK,
-            [inline_stmt] if not isinstance(inline_stmt, list) else inline_stmt,
-        )
+        inline_tokens = []
+        balance = {"(": 0, ")": 0, "[": 0, "]": 0, "{": 0, "}": 0}
+
+        def paren_open() -> bool:
+            return (
+                balance["("] > balance[")"]
+                or balance["["] > balance["]"]
+                or balance["{"] > balance["}"]
+            )
+
+        while not token_stream.eof():
+            tok = token_stream.peek()
+            if tok is None:
+                break
+
+            if tok.string in balance:
+                balance[tok.string] += 1
+
+            inline_tokens.append(token_stream.advance())
+
+            if tok.type in (tokenize.NEWLINE, tokenize.NL) and not paren_open():
+                break
+
+        first_real = None
+        for t in inline_tokens:
+            if t.type not in (
+                tokenize.NL,
+                tokenize.NEWLINE,
+                tokenize.INDENT,
+                tokenize.DEDENT,
+            ):
+                first_real = t
+                break
+
+        if first_real is None:
+            block = RawNonTerminal(
+                RawNonTerminalKind.BLOCK,
+                [RawNonTerminal(RawNonTerminalKind.OTHER, inline_tokens)],
+            )
+            return (header, block)
+
+        kw = first_real.string
+
+        if kw in _HEADER_KEYWORDS:
+            build_func = getattr(cls, f"_build_raw_{kw}")
+            res = build_func(TokenStream(inline_tokens))
+
+            if isinstance(res, list):
+                node = res[0]
+
+            else:
+                node = res
+
+            block = RawNonTerminal(RawNonTerminalKind.BLOCK, [node])
+            return (header, block)
+
+        node = RawNonTerminal(RawNonTerminalKind.OTHER, inline_tokens)
+        block = RawNonTerminal(RawNonTerminalKind.BLOCK, [node])
         return (header, block)
 
     # endregion

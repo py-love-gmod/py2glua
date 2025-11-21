@@ -14,7 +14,7 @@ class ImportAnalyzer:
     def build(
         parent_obj: PyIRNode,
         node: PyLogicNode,
-    ) -> tuple[int, Sequence[PyIRNode]]:
+    ) -> Sequence[PyIRNode]:
         origin = node.origins[0]
         if origin is None:
             raise ValueError("Origin is None")
@@ -25,7 +25,7 @@ class ImportAnalyzer:
 
         tokens = [t.string for t in origin.tokens if hasattr(t, "string")]
         if not tokens:
-            return (1, [])
+            return []
 
         modules: list[str] = []
 
@@ -80,7 +80,7 @@ class ImportAnalyzer:
                 i += 1
 
         else:
-            return (1, [])
+            return []
 
         project_root = Py2GluaConfig.source.resolve()
         std_paths = sysconfig.get_paths()
@@ -104,7 +104,7 @@ class ImportAnalyzer:
             context.meta["imports"].append(mod)
             ir_nodes.append(ir_node)
 
-        return (1, ir_nodes)
+        return ir_nodes
 
     @staticmethod
     def resolve_type(

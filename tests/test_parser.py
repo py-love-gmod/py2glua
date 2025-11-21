@@ -260,11 +260,12 @@ def test_with_multiline_header():
 @pytest.mark.parametrize(
     "src, expected",
     [
-        ("if x: pass\n", ["IF", ["BLOCK", ["OTHER"]]]),
+        ("if x: pass\n", ["IF", ["BLOCK", ["PASS"]]]),
         ("while ok: step()\n", ["WHILE", ["BLOCK", ["OTHER"]]]),
         ("for i in (1,2): use(i)\n", ["FOR", ["BLOCK", ["OTHER"]]]),
-        ("def f(): return 1\n", ["FUNCTION", ["BLOCK", ["OTHER"]]]),
-        ("class C: pass\n", ["CLASS", ["BLOCK", ["OTHER"]]]),
+        ("def f(): return 1\n", ["FUNCTION", ["BLOCK", ["RETURN"]]]),
+        ("class C: pass\n", ["CLASS", ["BLOCK", ["PASS"]]]),
+        ("def g(): pass\n", ["FUNCTION", ["BLOCK", ["PASS"]]]),
     ],
 )
 def test_inline_suites(src, expected):
@@ -278,7 +279,7 @@ def test_header_with_parens_and_backslash_before_colon_inline_body():
            and d: pass
         """
     )
-    assert _treeify(PyParser.parse(src)) == ["IF", ["BLOCK", ["OTHER"]]]
+    assert _treeify(PyParser.parse(src)) == ["IF", ["BLOCK", ["PASS"]]]
 
 
 def test_inline_else_comes_on_next_line_is_ok():
@@ -529,7 +530,7 @@ def test_nested_inline_if_in_block():
     )
     assert _treeify(PyParser.parse(src)) == [
         "FUNCTION",
-        ["BLOCK", ["IF", ["BLOCK", ["OTHER"]]]],
+        ["BLOCK", ["IF", ["BLOCK", ["RETURN"]]]],
     ]
 
 
