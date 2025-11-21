@@ -82,17 +82,7 @@ class ImportAnalyzer:
         else:
             return (1, [])
 
-        cfg_src = (
-            Py2GluaConfig.data.get("source", None)
-            if hasattr(Py2GluaConfig, "data")
-            else None
-        )
-        if isinstance(cfg_src, (str, Path)):
-            project_root = Path(cfg_src).resolve()
-
-        else:
-            project_root = Path.cwd()
-
+        project_root = Py2GluaConfig.source.resolve()
         std_paths = sysconfig.get_paths()
         std_base = std_paths.get("stdlib") or sys.base_prefix
         stdlib_dir = Path(std_base).resolve()

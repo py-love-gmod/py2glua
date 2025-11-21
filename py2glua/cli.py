@@ -7,8 +7,6 @@ from pathlib import Path
 
 from colorama import Fore, Style, init
 
-from .config import Py2GluaConfig
-
 init(autoreset=True)
 
 
@@ -129,39 +127,8 @@ def _clean_build(src: Path | None) -> None:
         shutil.rmtree(src)
 
 
-def _build_config(src: Path, out: Path, args) -> None:
-    try:
-        Py2GluaConfig.load(Path.cwd() / "py2glua.toml")
-
-    except RuntimeError:
-        logger.warning(
-            "The py2glua.toml is empty or does not exist in the startup path\nDefault settings are used"
-        )
-        Py2GluaConfig.default()
-
-    if src is not None:
-        Py2GluaConfig.data["build"]["source"] = Path(src)
-
-    if out is not None:
-        Py2GluaConfig.data["build"]["output"] = Path(out)
-
-    if args.build_debug is not None:
-        Py2GluaConfig.data["build"]["debug"] = bool(args.build_debug)
-
-    if args.clean_build is not None:
-        Py2GluaConfig.data["build"]["clean_build"] = bool(args.clean_build)
-
-    if args.optimization is not None:
-        Py2GluaConfig.data["build"]["optimization"] = int(args.optimization)
-
-
 def _build(src: Path, out: Path, args) -> None:
-    _build_config(src, out, args)
-
-    if Py2GluaConfig.data["build"]["clean_build"]:
-        _clean_build(Py2GluaConfig.data["build"]["output"])
-
-    # TODO:
+    pass
 
 
 def main() -> None:
