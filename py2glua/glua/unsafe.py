@@ -17,6 +17,3 @@ class Unsafe:
     def AddCSLuaFile(file_path: Path) -> None:
         """Метод используемый чтобы скзаать, что клиенту нужно загрузить файл который указан по указанной дерриктории."""
         ...
-
-
-Unsafe.AddCSLuaFile(Path())
