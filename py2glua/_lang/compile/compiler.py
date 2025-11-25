@@ -12,6 +12,7 @@ class Compiler:
         self,
         version: str,
         project_root: Path,
+        config: dict,
         file_passes: Sequence,
         project_passes: Sequence,
     ):
@@ -21,6 +22,8 @@ class Compiler:
         self.modules: Dict[str, PyIRFile] = {}
 
         self.path_to_name: Dict[Path, str] = {}
+
+        self.config = config
 
         self.file_passes = list(file_passes)
         self.project_passes = list(project_passes)

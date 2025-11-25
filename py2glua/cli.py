@@ -9,12 +9,18 @@ from colorama import Fore, Style, init
 
 from ._lang.compile import CompileError, Compiler
 from ._lang.compile.file_pass import (
+    ClassCtorCallPass,
+    ClassMethodRenamePass,
     DirectivePass,
     GlobalDirectivePass,
     RealmPass,
     UnknownSymbolPass,
 )
-from ._lang.compile.project_pass import BuildEntryFilePass, GlobalUsagePass
+from ._lang.compile.project_pass import (
+    BuildEntryFilePass,
+    GlobalUsagePass,
+    ResolveKwargsProjectPass,
+)
 from ._lang.convert.py_to_glua_ir import PyToGluaIR
 from ._lang.glua.glua_emitter import GluaEmitter
 
@@ -98,6 +104,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     b.add_argument(
+        "-a",
+        "--author",
+        type=str,
+        help="Автор проекта",
+    )
+
+    b.add_argument(
+        "-p",
+        "--project",
+        type=str,
+        help="Имя проекта",
+    )
+
+    b.add_argument(
         "out",
         type=Path,
         nargs="?",
@@ -131,6 +151,9 @@ def _build(src: Path, out: Path, args) -> None:
     src = src.resolve()
     out = out.resolve()
 
+    project_name = args.project
+    author_name = args.author
+
     if not src.exists():
         raise FileNotFoundError(f"Исходная папка не найдена: {src}")
 
@@ -144,15 +167,21 @@ def _build(src: Path, out: Path, args) -> None:
     compiler = Compiler(
         version=_verison(),
         project_root=src,
+        config={
+            "method_renames": {"__init__": "new"},
+        },
         file_passes=[
             UnknownSymbolPass,
-            GlobalDirectivePass,
             RealmPass,
+            GlobalDirectivePass,
             DirectivePass,
+            ClassMethodRenamePass,
+            ClassCtorCallPass,
         ],
         project_passes=[
-            BuildEntryFilePass(project_name="test", author_name="test"),
+            ResolveKwargsProjectPass,
             GlobalUsagePass,
+            BuildEntryFilePass(project_name=project_name, author_name=author_name),
         ],
     )
 
@@ -164,7 +193,9 @@ def _build(src: Path, out: Path, args) -> None:
     for ir_file in project_ir:
         logger.debug(f"Трансляция файла: {ir_file.path}")
 
-        glua_ir = PyToGluaIR.build_file(ir_file)
+        glua_ir = PyToGluaIR.build_file(
+            ir_file, namespace=f"{project_name}_{author_name}"
+        )
         emitter = GluaEmitter()
         lua_code = emitter.emit(glua_ir)
 
