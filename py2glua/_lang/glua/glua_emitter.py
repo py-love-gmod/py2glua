@@ -114,9 +114,11 @@ class GluaEmitter:
         for f in node.fields:
             if f.key is None:
                 parts.append(self.expr(f.value))
+
             else:
                 key = self.expr(f.key)
                 parts.append(f"[{key}] = {self.expr(f.value)}")
+
         return "{ " + ", ".join(parts) + " }"
 
     # endregion
@@ -195,13 +197,13 @@ class GluaEmitter:
             self.writeln("else")
             self.emit_block(node.orelse)
 
-        self.writeln("end")
+        self.writeln("end\n")
 
     # region While
     def emit_GluaWhile(self, node: GluaWhile):
         self.writeln(f"while {self.expr(node.test)} do")
         self.emit_block(node.body)
-        self.writeln("end")
+        self.writeln("end\n")
 
     # endregion
 
@@ -218,7 +220,7 @@ class GluaEmitter:
             self.writeln(f"for {var} = {start}, {stop}, {step} do")
 
         self.emit_block(node.body)
-        self.writeln("end")
+        self.writeln("end\n")
 
     # endregion
 
@@ -228,7 +230,7 @@ class GluaEmitter:
         iterator = self.expr(node.iter_expr)
         self.writeln(f"for {targets} in {iterator} do")
         self.emit_block(node.body)
-        self.writeln("end")
+        self.writeln("end\n")
 
     # endregion
 
@@ -242,10 +244,10 @@ class GluaEmitter:
 
     # region Break / Continue
     def emit_GluaBreak(self, node: GluaBreak):
-        self.writeln("break")
+        self.writeln("break\n")
 
     def emit_GluaContinue(self, node: GluaContinue):
-        self.writeln("continue")
+        self.writeln("continue\n")
 
     # endregion
 
@@ -268,7 +270,7 @@ class GluaEmitter:
             self.writeln(f"{prefix}function {node.name}({plist})")
 
         self.emit_block(node.body)
-        self.writeln("end")
+        self.writeln("end\n")
 
     # endregion
 
@@ -276,7 +278,7 @@ class GluaEmitter:
     def emit_GluaDoBlock(self, node: GluaDoBlock):
         self.writeln("do")
         self.emit_block(node.body)
-        self.writeln("end")
+        self.writeln("end\n")
 
     def emit_GluaComment(self, node: GluaComment):
         self.writeln(f"-- {node.text}")

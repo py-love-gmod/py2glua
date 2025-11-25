@@ -10,10 +10,12 @@ from ..py.py_ir_dataclass import PyIRFile
 class Compiler:
     def __init__(
         self,
+        version: str,
         project_root: Path,
         file_passes: Sequence,
         project_passes: Sequence,
     ):
+        self.version: str = version
         self.project_root = project_root.resolve()
 
         self.modules: Dict[str, PyIRFile] = {}
@@ -27,9 +29,10 @@ class Compiler:
         for ep in entry_points:
             self.load_file(ep)
 
-        self._run_project_passes()
+        project = list(self.modules.values())
+        project = self._run_project_passes(project)
 
-        return list(self.modules.values())
+        return project
 
     def load_file(self, path: Path) -> PyIRFile:
         path = path.resolve()
@@ -63,10 +66,13 @@ class Compiler:
         for p in self.file_passes:
             p.run(ir, self)
 
-    def _run_project_passes(self):
-        all_files = list(self.modules.values())
+    def _run_project_passes(self, project: List[PyIRFile]) -> List[PyIRFile]:
         for p in self.project_passes:
-            p.run(all_files, self)
+            result = p.run(project, self)
+            if result is not None:
+                project = result
+
+        return project
 
     def _module_name_from_path(self, path: Path) -> str:
         relative = path.relative_to(self.project_root)

@@ -40,6 +40,9 @@ class PyIRFile(PyIRNode):
         for node in self.body:
             yield from node.walk()
 
+    def __hash__(self) -> int:
+        return hash(str(self.path))
+
 
 @dataclass
 class PyIRDecorator(PyIRNode):
@@ -317,7 +320,7 @@ class PyIRCall(PyIRNode):
 @dataclass
 class PyIRFunctionDef(PyIRNode):
     name: str
-    signature: dict[str, str | int]
+    signature: dict[str, tuple[str | None, str | None]]
     context: PyIRContext
     decorators: list[PyIRDecorator] = field(default_factory=list)
     body: list["PyIRNode"] = field(default_factory=list)

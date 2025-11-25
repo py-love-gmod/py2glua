@@ -64,10 +64,18 @@ from ..py.py_ir_dataclass import (
 
 
 class PyToGluaIR:
+    def __init__(self) -> None:
+        self._class_names: set[str] = set()
+
     # region Public API
     @classmethod
     def build_file(cls, py_file: PyIRFile) -> GluaFile:
         self = cls()
+
+        self._class_names = {
+            node.name for node in py_file.body if isinstance(node, PyIRClassDef)
+        }
+
         return self._build_file(py_file)
 
     # endregion
@@ -80,16 +88,6 @@ class PyToGluaIR:
             path=py_file.path,
             body=[],
         )
-
-        realm = py_file.context.meta.get("realm") if py_file.context else None
-        if realm is not None:
-            glua_file.body.append(
-                GluaComment(
-                    line=py_file.line,
-                    offset=py_file.offset,
-                    text=f"Realm: {realm}",
-                )
-            )
 
         for node in py_file.body:
             self._emit_stmt(node, glua_file.body)
@@ -155,7 +153,6 @@ class PyToGluaIR:
             return
 
         if isinstance(node, PyIRPass):
-            # Просто коммент, чтобы не терять строку.
             out.append(
                 GluaComment(
                     line=node.line,
@@ -166,15 +163,6 @@ class PyToGluaIR:
             return
 
         if isinstance(node, PyIRImport):
-            # Пока просто коммент — импорты будут разруливаться выше уровнем.
-            mods = ", ".join(node.modules)
-            out.append(
-                GluaComment(
-                    line=node.line,
-                    offset=node.offset,
-                    text=f"import {mods}",
-                )
-            )
             return
 
         if isinstance(node, PyIRTry):
@@ -186,16 +174,19 @@ class PyToGluaIR:
             return
 
         if isinstance(node, PyIRDel):
+            target = self._emit_expr(node.value)
+
             out.append(
-                GluaComment(
+                GluaAssign(
                     line=node.line,
                     offset=node.offset,
-                    text="del (ignored in GLua)",
+                    targets=[target],
+                    values=[GluaConstant(node.line, node.offset, None)],
+                    is_local=False,
                 )
             )
             return
 
-        # Выражение как стейтмент (например, PyIRConstant / PyIRVarUse)
         expr = self._emit_expr(node)
         if isinstance(expr, GluaCall):
             out.append(expr)
@@ -211,7 +202,6 @@ class PyToGluaIR:
     # endregion
 
     # region Expressions
-
     def _emit_expr(self, node: PyIRNode) -> GluaNode:
         if isinstance(node, PyIRConstant):
             return GluaConstant(line=node.line, offset=node.offset, value=node.value)
@@ -236,7 +226,6 @@ class PyToGluaIR:
             )
 
         if isinstance(node, (PyIRList, PyIRTuple, PyIRSet)):
-            # Все в табличный литерал { ... }
             fields: List[GluaTableField] = []
             elements = getattr(node, "elements", [])
             for el in elements:
@@ -285,7 +274,6 @@ class PyToGluaIR:
         if isinstance(node, PyIRCall):
             return self._emit_call_expr(node)
 
-        # Всё остальное пока не поддержано как expression
         raise NotImplementedError(
             f"Expression lowering not implemented for: {type(node).__name__}"
         )
@@ -321,12 +309,13 @@ class PyToGluaIR:
             right=self._emit_expr(node.right),
         )
 
-    def _emit_unaryop(self, node: PyIRUnaryOP) -> GluaUnaryOp:
+    def _emit_unaryop(self, node: PyIRUnaryOP) -> GluaUnaryOp | GluaNode:
+        if node.op == PyUnaryOPType.PLUS:
+            return self._emit_expr(node.value)
+
         mapping = {
-            PyUnaryOPType.PLUS: GluaUnaryOpType.MINUS,  # унарный + игнорируем, оставляем value, но формально можно так
             PyUnaryOPType.MINUS: GluaUnaryOpType.MINUS,
             PyUnaryOPType.NOT: GluaUnaryOpType.NOT,
-            # BIT_INV (~) пока не трогаем
         }
 
         if node.op not in mapping:
@@ -352,8 +341,13 @@ class PyToGluaIR:
                 "Only simple function calls by name are supported"
             )
 
-        func = GluaName(line=node.line, offset=node.offset, name=node.name)
+        func_name = node.name
+        if func_name in self._class_names and "." not in func_name:
+            func_name = f"{func_name}.new"
+
+        func = GluaName(line=node.line, offset=node.offset, name=func_name)
         args = [self._emit_expr(a) for a in node.args_p]
+
         return GluaCall(
             line=node.line,
             offset=node.offset,
@@ -372,6 +366,7 @@ class PyToGluaIR:
         for t in targets:
             if isinstance(t, PyIRTuple):
                 flat.extend(t.elements)
+
             else:
                 flat.append(t)
 
@@ -510,7 +505,6 @@ class PyToGluaIR:
         if value is not None:
             if isinstance(node.value, PyIRTuple):
                 values = [self._emit_expr(el) for el in node.value.elements]
-
             else:
                 values = [value]
 
@@ -526,6 +520,15 @@ class PyToGluaIR:
     def _emit_funcdef(self, node: PyIRFunctionDef) -> GluaFunctionDef:
         params: List[GluaFuncParam] = []
 
+        for name in node.signature.keys():
+            params.append(
+                GluaFuncParam(
+                    line=node.line,
+                    offset=node.offset,
+                    name=name,
+                )
+            )
+
         return GluaFunctionDef(
             line=node.line,
             offset=node.offset,
@@ -537,11 +540,56 @@ class PyToGluaIR:
 
     def _emit_classdef(self, node: PyIRClassDef) -> List[GluaNode]:
         out: List[GluaNode] = []
+
         out.append(
             GluaComment(
                 line=node.line,
                 offset=node.offset,
-                text=f"class {node.name} (lowered to table placeholder)",
+                text=f"class {node.name} (lowered)",
+            )
+        )
+
+        fields: List[GluaTableField] = []
+        methods: List[GluaFunctionDef] = []
+        ctor_def: PyIRFunctionDef | None = None
+
+        for stmt in node.body:
+            if isinstance(stmt, PyIRAssign):
+                for t in stmt.targets:
+                    if isinstance(t, PyIRVarUse):
+                        key = GluaConstant(stmt.line, stmt.offset, t.name)
+                        val = self._emit_expr(stmt.value)
+
+                        fields.append(
+                            GluaTableField(
+                                line=stmt.line,
+                                offset=stmt.offset,
+                                key=key,
+                                value=val,
+                            )
+                        )
+
+            elif isinstance(stmt, PyIRFunctionDef):
+                if stmt.name == "__init__":
+                    ctor_def = stmt
+                else:
+                    fn = self._emit_funcdef(stmt)
+                    fn.name = f"{node.name}.{stmt.name}"
+                    methods.append(fn)
+
+        out.append(
+            GluaAssign(
+                line=node.line,
+                offset=node.offset,
+                targets=[GluaName(node.line, node.offset, node.name)],
+                values=[
+                    GluaTable(
+                        line=node.line,
+                        offset=node.offset,
+                        fields=fields,
+                    )
+                ],
+                is_local=False,
             )
         )
 
@@ -549,24 +597,99 @@ class PyToGluaIR:
             GluaAssign(
                 line=node.line,
                 offset=node.offset,
-                targets=[GluaName(line=node.line, offset=node.offset, name=node.name)],
-                values=[
-                    GluaTable(
+                targets=[
+                    GluaAttribute(
                         line=node.line,
                         offset=node.offset,
-                        fields=[],
+                        value=GluaName(node.line, node.offset, node.name),
+                        attr="__index",
                     )
                 ],
+                values=[GluaName(node.line, node.offset, node.name)],
                 is_local=False,
             )
         )
 
+        if ctor_def is not None:
+            param_names = list(ctor_def.signature.keys())
+            if param_names and param_names[0] == "self":
+                param_names = param_names[1:]
+
+            ctor_params: List[GluaFuncParam] = [
+                GluaFuncParam(
+                    line=ctor_def.line,
+                    offset=ctor_def.offset,
+                    name=p,
+                )
+                for p in param_names
+            ]
+
+            body_nodes: List[GluaNode] = []
+
+            setmeta_call = GluaCall(
+                line=ctor_def.line,
+                offset=ctor_def.offset,
+                func=GluaName(ctor_def.line, ctor_def.offset, "setmetatable"),
+                args=[
+                    GluaTable(
+                        line=ctor_def.line,
+                        offset=ctor_def.offset,
+                        fields=[],
+                    ),
+                    GluaName(ctor_def.line, ctor_def.offset, node.name),
+                ],
+            )
+
+            body_nodes.append(
+                GluaAssign(
+                    line=ctor_def.line,
+                    offset=ctor_def.offset,
+                    targets=[
+                        GluaName(
+                            line=ctor_def.line,
+                            offset=ctor_def.offset,
+                            name="self",
+                        )
+                    ],
+                    values=[setmeta_call],
+                    is_local=True,
+                )
+            )
+
+            body_nodes.extend(self._emit_block(ctor_def.body))
+
+            body_nodes.append(
+                GluaReturn(
+                    line=ctor_def.line,
+                    offset=ctor_def.offset,
+                    values=[
+                        GluaName(
+                            line=ctor_def.line,
+                            offset=ctor_def.offset,
+                            name="self",
+                        )
+                    ],
+                )
+            )
+
+            ctor_fn = GluaFunctionDef(
+                line=ctor_def.line,
+                offset=ctor_def.offset,
+                name=f"{node.name}.new",
+                params=ctor_params,
+                body=body_nodes,
+                is_local=False,
+            )
+            methods.append(ctor_fn)
+
+        out.extend(methods)
         return out
 
     def _emit_block(self, body: List[PyIRNode]) -> List[GluaNode]:
         result: List[GluaNode] = []
         for stmt in body:
             self._emit_stmt(stmt, result)
+
         return result
 
     def _emit_try(self, node: PyIRTry) -> List[GluaNode]:
@@ -603,10 +726,8 @@ class PyToGluaIR:
 
     def _emit_with(self, node: PyIRWith) -> List[GluaNode]:
         out: List[GluaNode] = []
-        header_desc: List[str] = []
         for item in node.items:
-            ctx = self._emit_expr(item.context_expr)
-            header_desc.append(f"(with {type(ctx).__name__})")
+            _ = self._emit_expr(item.context_expr)
 
         out.append(
             GluaComment(

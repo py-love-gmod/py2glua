@@ -42,10 +42,23 @@ class UnknownSymbolPass:
                         defined.add(name)
 
             elif isinstance(node, PyIRFunctionDef):
-                defined.add(node.name)
+                for param in node.signature.keys():
+                    defined.add(param)
 
             elif isinstance(node, PyIRClassDef):
                 defined.add(node.name)
+
+                for stmt in node.body:
+                    if isinstance(stmt, PyIRAssign):
+                        for t in stmt.targets:
+                            name = getattr(t, "name", None)
+                            if name:
+                                defined.add(name)
+
+                    elif isinstance(stmt, PyIRFunctionDef):
+                        defined.add(stmt.name)
+                        for param in stmt.signature.keys():
+                            defined.add(param)
 
         for node in file.walk():
             if isinstance(node, PyIRVarUse):

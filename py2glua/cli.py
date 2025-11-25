@@ -8,7 +8,13 @@ from pathlib import Path
 from colorama import Fore, Style, init
 
 from ._lang.compile import CompileError, Compiler
-from ._lang.compile.file_pass import DirectivePass, RealmPass, UnknownSymbolPass
+from ._lang.compile.file_pass import (
+    DirectivePass,
+    GlobalDirectivePass,
+    RealmPass,
+    UnknownSymbolPass,
+)
+from ._lang.compile.project_pass import BuildEntryFilePass, GlobalUsagePass
 from ._lang.convert.py_to_glua_ir import PyToGluaIR
 from ._lang.glua.glua_emitter import GluaEmitter
 
@@ -136,13 +142,18 @@ def _build(src: Path, out: Path, args) -> None:
     logger.info(f"Найдено файлов: {len(py_files)}")
 
     compiler = Compiler(
+        version=_verison(),
         project_root=src,
         file_passes=[
             UnknownSymbolPass,
+            GlobalDirectivePass,
             RealmPass,
             DirectivePass,
         ],
-        project_passes=[],
+        project_passes=[
+            BuildEntryFilePass(project_name="test", author_name="test"),
+            GlobalUsagePass,
+        ],
     )
 
     project_ir = compiler.build(py_files)
@@ -154,12 +165,18 @@ def _build(src: Path, out: Path, args) -> None:
         logger.debug(f"Трансляция файла: {ir_file.path}")
 
         glua_ir = PyToGluaIR.build_file(ir_file)
-
         emitter = GluaEmitter()
         lua_code = emitter.emit(glua_ir)
 
-        out_name = ir_file.path.stem + ".lua"  # pyright: ignore[reportOptionalMemberAccess]
-        out_path = out / out_name
+        try:
+            rel = ir_file.path.relative_to(src)  # pyright: ignore[reportOptionalMemberAccess]
+            out_rel = Path("lua") / rel.with_suffix(".lua")
+
+        except ValueError:
+            out_rel = ir_file.path.with_suffix(".lua")  # pyright: ignore[reportOptionalMemberAccess]
+
+        out_path = out / out_rel
+        out_path.parent.mkdir(parents=True, exist_ok=True)
 
         out_path.write_text(lua_code, encoding="utf8")
 

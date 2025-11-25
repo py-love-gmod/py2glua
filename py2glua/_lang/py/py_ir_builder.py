@@ -408,6 +408,95 @@ class PyIRBuilder:
     # endregion
 
     # region FUNCTION / CLASS
+    @staticmethod
+    def _extract_signature_tokens(header_origin) -> list[tokenize.TokenInfo]:
+        tokens = [t for t in header_origin.tokens if isinstance(t, tokenize.TokenInfo)]
+        if not tokens:
+            return []
+
+        try:
+            left = next(i for i, t in enumerate(tokens) if t.string == "(")
+            right = next(i for i, t in enumerate(tokens) if t.string == ")")
+
+        except StopIteration:
+            return []
+
+        return tokens[left + 1 : right]
+
+    @staticmethod
+    def _parse_param(tokens: list[tokenize.TokenInfo]):
+        name = None
+        annotation = None
+        default = None
+
+        mode = "name"
+
+        i = 0
+        while i < len(tokens):
+            tok = tokens[i]
+
+            if mode == "name":
+                if tok.type == tokenize.NAME:
+                    name = tok.string
+                    mode = "after_name"
+
+                i += 1
+                continue
+
+            if mode == "after_name":
+                if tok.string == ":":
+                    j = i + 1
+                    ann_parts = []
+                    while j < len(tokens) and tokens[j].string not in ("=", ","):
+                        ann_parts.append(tokens[j].string)
+                        j += 1
+
+                    annotation = "".join(ann_parts).strip()
+                    i = j
+                    continue
+
+                if tok.string == "=":
+                    j = i + 1
+                    def_parts = []
+                    while j < len(tokens) and tokens[j].string not in (",",):
+                        def_parts.append(tokens[j].string)
+                        j += 1
+
+                    default = "".join(def_parts).strip()
+                    i = j
+                    continue
+
+                i += 1
+                continue
+
+            i += 1
+
+        return name, annotation, default
+
+    @classmethod
+    def _parse_signature(cls, tokens: list[tokenize.TokenInfo]):
+        params = {}
+
+        current = []
+        for tok in tokens:
+            if tok.string == ",":
+                if current:
+                    name, ann, default = cls._parse_param(current)
+                    if name:
+                        params[name] = (ann, default)
+
+                    current = []
+
+            else:
+                current.append(tok)
+
+        if current:
+            name, ann, default = cls._parse_param(current)
+            if name:
+                params[name] = (ann, default)
+
+        return params
+
     @classmethod
     def _build_ir_function(
         cls,
@@ -435,12 +524,13 @@ class PyIRBuilder:
         )
 
         decorators = cls._build_ir_decorators(parent_obj, decorator_origins)
-
+        sig_tokens = cls._extract_signature_tokens(header_origin)
+        signature = cls._parse_signature(sig_tokens)
         ir_func = PyIRFunctionDef(
             line=line,
             offset=offset,
             name=func_name,
-            signature={},  # TODO: нормальный парсинг сигнатуры
+            signature=signature,
             context=func_ctx,
             decorators=decorators,
             body=[],
