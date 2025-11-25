@@ -39,7 +39,7 @@ class GluaEmitter:
     def writeln(self, text: str = ""):
         self.lines.append(f"{self.indent * self.level}{text}")
 
-    def emit(self, node: GluaNode) -> str:
+    def emit(self, node: GluaNode | GluaFile) -> str:
         self.lines = []
         self.level = 0
         self.visit(node)
@@ -50,6 +50,7 @@ class GluaEmitter:
         method = getattr(self, f"emit_{name}", None)
         if method is None:
             raise NotImplementedError(f"No emitter for node type: {name}")
+
         return method(node)
 
     def emit_block(self, body: list[GluaNode]):
@@ -81,7 +82,7 @@ class GluaEmitter:
         v = node.value
         if v is None:
             return "{}"
-        
+
         if isinstance(v, bool):
             return "true" if v else "false"
 

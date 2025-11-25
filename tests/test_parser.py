@@ -3,7 +3,7 @@ import tokenize
 
 import pytest
 
-from py2glua.lang.parse.py_parser import PyParser, RawNonTerminal, RawNonTerminalKind
+from py2glua._lang.parse.py_parser import PyParser, RawNonTerminal, RawNonTerminalKind
 
 
 # region Helpers

@@ -341,10 +341,7 @@ class PyLogicBlockBuilder:
 
         # ELSE?
         if j < n and nodes[j].kind is RawNonTerminalKind.ELSE:
-            off3, hdr3, blk3 = cls._consume_header_plus_block(nodes, j)
-            j += off3
-            headers.append(hdr3)
-            parts_children.extend(cls._build_logic_block(blk3.tokens))
+            raise SyntaxError("else after try is not supported in py2glua")
 
         # FINALLY?
         if j < n and nodes[j].kind is RawNonTerminalKind.FINALLY:

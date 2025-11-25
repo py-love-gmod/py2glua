@@ -7,6 +7,12 @@ from pathlib import Path
 
 from colorama import Fore, Style, init
 
+from ._lang.compile import CompileError, Compiler
+from ._lang.compile.file_pass import DirectivePass, RealmPass, UnknownSymbolPass
+from ._lang.convert.py_to_glua_ir import PyToGluaIR
+from ._lang.glua.glua_emitter import GluaEmitter
+from ._lang.py.py_ir_builder import PyIRBuilder
+
 init(autoreset=True)
 
 
@@ -61,7 +67,7 @@ def _verison() -> str:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="py2glua",
-        description="Python -> GLua транслитор",
+        description="Python -> GLua компилятор",
     )
 
     # region Main args
@@ -73,34 +79,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     # endregion
 
-    # region Build cmd
     sub = parser.add_subparsers(dest="cmd", required=True)
+    # region Build cmd
     b = sub.add_parser("build", help="Собирает python код в glua код")
-    b.add_argument(
-        "-d",
-        "--debug",
-        action="store_true",
-        default=None,
-        dest="build_debug",
-        help="Переключает режим билда с релизного на дебаг",
-    )
-
-    b.add_argument(
-        "-c",
-        "--clean_build",
-        action="store_true",
-        default=None,
-        help="Очищать ли папку out перед сборкой",
-    )
-
-    b.add_argument(
-        "-o",
-        "--optimization",
-        type=int,
-        choices=[0, 1, 2, 3],
-        default=None,
-        help="Уровень оптимизации при трансляции",
-    )
 
     b.add_argument(
         "src",
@@ -119,16 +100,79 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     # endregion
 
+    # region Version cmd
+    sub.add_parser("version", help="Показывает версию py2glua")
+    # endregion
     return parser
 
 
 def _clean_build(src: Path | None) -> None:
     if src and src.exists():
+        logger.debug("Очистка build директории...")
         shutil.rmtree(src)
 
 
 def _build(src: Path, out: Path, args) -> None:
-    pass
+    logger.info("Начало сборки...")
+
+    if src is None:
+        src = Path("./source")
+
+    if out is None:
+        out = Path("./build")
+
+    src = src.resolve()
+    out = out.resolve()
+
+    if not src.exists():
+        raise FileNotFoundError(f"Исходная папка не найдена: {src}")
+
+    py_files = sorted(p for p in src.rglob("*.py"))
+    if not py_files:
+        logger.warning("В папке нет .py файлов - нечего собирать")
+        return
+
+    logger.info(f"Найдено файлов: {len(py_files)}")
+
+    project_ir = []
+    for f in py_files:
+        logger.debug(f"Чтение файла: {f}")
+        text = f.read_text(encoding="utf8")
+        ir = PyIRBuilder.build_file(text, f)
+        project_ir.append(ir)
+
+    compiler = Compiler()
+    compiler.add_file_pass(
+        [
+            UnknownSymbolPass,
+            RealmPass,
+            DirectivePass,
+        ]
+    )
+    compiler.add_project_pass([])
+
+    for ir_file in project_ir:
+        compiler.run_file_passes(ir_file)
+
+    _clean_build(out)
+
+    out.mkdir(parents=True, exist_ok=True)
+
+    for ir_file in project_ir:
+        logger.debug(f"Трансляция файла: {ir_file.path}")
+
+        glua_ir = PyToGluaIR.build_file(ir_file)
+
+        emitter = GluaEmitter()
+        lua_code = emitter.emit(glua_ir)
+
+        out_name = ir_file.path.stem + ".lua"
+        out_path = out / out_name
+
+        out_path.write_text(lua_code, encoding="utf8")
+        logger.info(f"Собрано: {out_path}")
+
+    logger.info("Сборка успешно завершена.")
 
 
 def main() -> None:
@@ -136,14 +180,27 @@ def main() -> None:
     args = parser.parse_args()
     logger.setLevel(logging.DEBUG if args.debug else logging.INFO)
 
-    logger.debug(f"Py2Glua\nVerison: {_verison()}")
+    logger.debug(f"Py2Glua\nVersion: {_verison()}")
 
     try:
         if args.cmd == "build":
             logger.debug(f"Start build\nSRC: {args.src}\nOUT: {args.out}")
             _build(args.src, args.out, args)
 
+        elif args.cmd == "version":
+            print(_verison())
+
         sys.exit(0)
+
+    except CompileError as err:
+        logger.error(err)
+        logger.error("Exit code 1")
+        sys.exit(1)
+
+    except SyntaxError as err:
+        logger.error(err)
+        logger.error("Exit code 1")
+        sys.exit(1)
 
     except KeyError as err:
         logger.error(f"Error accessing key {err}", exc_info=True)

@@ -279,6 +279,7 @@ class PyIRAssign(PyIRNode):
         yield self
         for t in self.targets:
             yield from t.walk()
+
         yield from self.value.walk()
 
 

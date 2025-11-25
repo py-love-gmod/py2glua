@@ -2,12 +2,12 @@ from collections import Counter
 
 import pytest
 
-from py2glua.lang.parse.py_logic_block_builder import (
+from py2glua._lang.parse.py_logic_block_builder import (
     PyLogicBlockBuilder,
     PyLogicKind,
     PyLogicNode,
 )
-from py2glua.lang.parse.py_parser import PyParser, RawNonTerminal, RawNonTerminalKind
+from py2glua._lang.parse.py_parser import PyParser, RawNonTerminal, RawNonTerminalKind
 
 
 # region Helpers
@@ -101,7 +101,7 @@ def test_nested_if_in_function():
 
 def test_try_except_finally_chain():
     result = PyLogicBlockBuilder.build(
-        "try:\n    pass\nexcept Exception:\n    pass\nelse:\n    pass\nfinally:\n    pass\n"
+        "try:\n    pass\nexcept Exception:\n    pass\nfinally:\n    pass\n"
     )
     kinds = _walk_kinds(result)
     assert kinds.count(PyLogicKind.TRY) == 1
@@ -168,9 +168,8 @@ def test_long_if_elif_chain():
     "src",
     [
         "try:\n    pass\nexcept Exception:\n    pass\n",
-        "try:\n    pass\nexcept Exception:\n    pass\nelse:\n    pass\n",
         "try:\n    pass\nfinally:\n    pass\n",
-        "try:\n    pass\nexcept Exception:\n    pass\nelse:\n    pass\nfinally:\n    pass\n",
+        "try:\n    pass\nexcept Exception:\n    pass\nfinally:\n    pass\n",
     ],
 )
 def test_try_combinations_valid(src: str):
@@ -442,7 +441,7 @@ def test_decorators_and_comments_survive():
 def test_branch_and_try_headers_preserved():
     src = (
         "if a:\n    pass\nelif b:\n    pass\nelse:\n    pass\n"
-        "try:\n    pass\nexcept Exception:\n    pass\nelse:\n    pass\nfinally:\n    pass\n"
+        "try:\n    pass\nexcept Exception:\n    pass\nfinally:\n    pass\n"
     )
     raws = _collect_all_raws_from_logic(PyLogicBlockBuilder.build(src))
     kinds = [r.kind.name for r in raws]
@@ -450,5 +449,5 @@ def test_branch_and_try_headers_preserved():
     for k in ("IF", "ELIF", "ELSE"):
         assert k in kinds, f"{k} header lost"
 
-    for k in ("TRY", "EXCEPT", "ELSE", "FINALLY"):
+    for k in ("TRY", "EXCEPT", "FINALLY"):
         assert k in kinds, f"{k} header lost in try-chain"

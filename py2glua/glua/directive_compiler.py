@@ -1,3 +1,6 @@
+from collections.abc import Callable
+
+
 class CompilerDirective:
     """Класс отвечающий за дерективы компилятору"""
 
@@ -20,6 +23,6 @@ class CompilerDirective:
         ...
 
     @staticmethod
-    def gmod_api(name: str) -> None:
+    def gmod_api(name: str) -> Callable:
         """Внутренняя функция для регистрации некомпилируемых апи вызовов гмода. Не рекомендуется для использования"""
         ...
