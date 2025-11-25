@@ -405,9 +405,16 @@ class PyToGluaIR:
             isinstance(t, PyIRVarUse) and t.name in self._globals for t in targets
         )
 
-        if all_plain_names and not has_global:
-            is_local = True
+        is_namespace_assign = (
+            all_plain_names
+            and len(targets) == 1
+            and isinstance(targets[0], PyIRVarUse)
+            and self._namespace is not None
+            and targets[0].name == self._namespace
+        )
 
+        if all_plain_names and not has_global and not is_namespace_assign:
+            is_local = True
         else:
             is_local = False
 
@@ -416,7 +423,6 @@ class PyToGluaIR:
 
         if isinstance(node.value, PyIRTuple):
             values = [self._emit_expr(el) for el in node.value.elements]
-
         else:
             values = [value]
 
