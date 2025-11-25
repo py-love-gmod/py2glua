@@ -67,7 +67,6 @@ class PyToGluaIR:
     # region Public API
     @classmethod
     def build_file(cls, py_file: PyIRFile) -> GluaFile:
-        """Главная точка входа: PyIRFile -> GluaFile."""
         self = cls()
         return self._build_file(py_file)
 

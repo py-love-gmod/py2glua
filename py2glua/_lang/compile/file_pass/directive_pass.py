@@ -4,11 +4,12 @@ from ...py.py_ir_dataclass import (
     PyIRFunctionDef,
 )
 from ..compile_exception import CompileError
+from ..compiler import Compiler
 
 
 class DirectivePass:
     @staticmethod
-    def run(file: PyIRFile):
+    def run(file: PyIRFile, compiler: Compiler):
         for node in file.body:
             DirectivePass._process_node(node)
 

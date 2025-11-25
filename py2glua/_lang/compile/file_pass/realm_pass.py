@@ -26,6 +26,7 @@ from ...py.py_ir_dataclass import (
     PyIRFile,
     PyIRVarUse,
 )
+from ..compiler import Compiler
 
 
 class RealmPass:
@@ -33,7 +34,7 @@ class RealmPass:
     MAGIC_NAME = "__realm__"
 
     @staticmethod
-    def run(file: PyIRFile) -> None:
+    def run(file: PyIRFile, compiler: Compiler):
         ctx = file.context
 
         realm_value: str | None = None

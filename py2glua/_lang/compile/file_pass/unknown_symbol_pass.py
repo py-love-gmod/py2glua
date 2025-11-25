@@ -10,11 +10,12 @@ from ...py.py_ir_dataclass import (
     PyIRVarUse,
 )
 from ..compile_exception import CompileError
+from ..compiler import Compiler
 
 
 class UnknownSymbolPass:
-    @classmethod
-    def run(cls, file: PyIRFile):
+    @staticmethod
+    def run(file: PyIRFile, compiler: Compiler):
         defined: set[str] = set()
 
         defined.update(dir(builtins))

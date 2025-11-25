@@ -11,7 +11,6 @@ from ._lang.compile import CompileError, Compiler
 from ._lang.compile.file_pass import DirectivePass, RealmPass, UnknownSymbolPass
 from ._lang.convert.py_to_glua_ir import PyToGluaIR
 from ._lang.glua.glua_emitter import GluaEmitter
-from ._lang.py.py_ir_builder import PyIRBuilder
 
 init(autoreset=True)
 
@@ -80,6 +79,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # endregion
 
     sub = parser.add_subparsers(dest="cmd", required=True)
+
     # region Build cmd
     b = sub.add_parser("build", help="Собирает python код в glua код")
 
@@ -103,6 +103,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # region Version cmd
     sub.add_parser("version", help="Показывает версию py2glua")
     # endregion
+
     return parser
 
 
@@ -134,28 +135,19 @@ def _build(src: Path, out: Path, args) -> None:
 
     logger.info(f"Найдено файлов: {len(py_files)}")
 
-    project_ir = []
-    for f in py_files:
-        logger.debug(f"Чтение файла: {f}")
-        text = f.read_text(encoding="utf8")
-        ir = PyIRBuilder.build_file(text, f)
-        project_ir.append(ir)
-
-    compiler = Compiler()
-    compiler.add_file_pass(
-        [
+    compiler = Compiler(
+        project_root=src,
+        file_passes=[
             UnknownSymbolPass,
             RealmPass,
             DirectivePass,
-        ]
+        ],
+        project_passes=[],
     )
-    compiler.add_project_pass([])
 
-    for ir_file in project_ir:
-        compiler.run_file_passes(ir_file)
+    project_ir = compiler.build(py_files)
 
     _clean_build(out)
-
     out.mkdir(parents=True, exist_ok=True)
 
     for ir_file in project_ir:
@@ -166,11 +158,10 @@ def _build(src: Path, out: Path, args) -> None:
         emitter = GluaEmitter()
         lua_code = emitter.emit(glua_ir)
 
-        out_name = ir_file.path.stem + ".lua"
+        out_name = ir_file.path.stem + ".lua"  # pyright: ignore[reportOptionalMemberAccess]
         out_path = out / out_name
 
         out_path.write_text(lua_code, encoding="utf8")
-        logger.info(f"Собрано: {out_path}")
 
     logger.info("Сборка успешно завершена.")
 
