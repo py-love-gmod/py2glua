@@ -1,7 +1,7 @@
 import tokenize
 from pathlib import Path
 
-from ..py_logic_block_builder import (
+from ..parse import (
     PyLogicBlockBuilder,
     PyLogicKind,
     PyLogicNode,

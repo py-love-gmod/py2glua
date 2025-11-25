@@ -2,7 +2,7 @@ import tokenize
 from enum import Enum, auto
 from io import BytesIO
 
-from .python_etc import TokenStream
+from ..etc import TokenStream
 
 
 # region RawNonTerminal

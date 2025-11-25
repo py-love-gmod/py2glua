@@ -2,12 +2,12 @@ from collections import Counter
 
 import pytest
 
-from py2glua.lang.py_logic_block_builder import (
+from py2glua.lang.parse.py_logic_block_builder import (
     PyLogicBlockBuilder,
     PyLogicKind,
     PyLogicNode,
 )
-from py2glua.lang.py_parser import RawNonTerminal, RawNonTerminalKind
+from py2glua.lang.parse.py_parser import PyParser, RawNonTerminal, RawNonTerminalKind
 
 
 # region Helpers
@@ -17,6 +17,7 @@ def _walk_kinds(nodes, flat=True):
         kinds.append(n.kind)
         if flat or n.children:
             kinds.extend(_walk_kinds(n.children, flat=flat))
+
     return kinds
 
 
@@ -57,8 +58,6 @@ def _collect_all_raws(nodes, attr="tokens"):
 
 
 def _collect_all_raws_from_parser(src):
-    from py2glua.lang.py_parser import PyParser
-
     return _collect_all_raws(PyParser.parse(src), attr="tokens")
 
 

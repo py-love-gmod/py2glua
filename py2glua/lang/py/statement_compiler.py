@@ -1,7 +1,7 @@
 import ast
 import tokenize
 
-from ..python_etc import TokenStream
+from ..etc import TokenStream
 from .py_ir_dataclass import (
     PyAugAssignType,
     PyBinOPType,

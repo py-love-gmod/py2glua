@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Sequence
 
 from ...config import Py2GluaConfig
-from ..py_logic_block_builder import PyLogicNode
+from ..parse import PyLogicNode
 from .py_ir_dataclass import PyIRContext, PyIRImport, PyIRImportType, PyIRNode
 
 
