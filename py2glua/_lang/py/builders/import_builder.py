@@ -35,7 +35,6 @@ class ImportBuilder:
         if context is None:
             raise ValueError("parent_obj context is missing")
 
-        # Берём чисто токены tokenize.TokenInfo
         toks: list[tokenize.TokenInfo] = [
             t for t in origin.tokens if isinstance(t, tokenize.TokenInfo)
         ]
