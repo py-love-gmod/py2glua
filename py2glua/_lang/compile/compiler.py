@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List, Sequence
 
-from ..py.py_ir_builder import PyIRBuilder
-from ..py.py_ir_dataclass import PyIRFile
+from ..py.ir_builder import PyIRBuilder
+from ..py.ir_dataclass import PyIRFile
 
 
 class Compiler:

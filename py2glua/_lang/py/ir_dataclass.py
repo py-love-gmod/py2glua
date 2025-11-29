@@ -3,6 +3,8 @@ from enum import IntEnum, auto
 from pathlib import Path
 from typing import Any
 
+from ...glua import nil
+
 
 # region Base
 @dataclass
@@ -86,7 +88,7 @@ class PyIRImport(PyIRNode):
 # region Vars & Constants
 @dataclass
 class PyIRConstant(PyIRNode):
-    value: object
+    value: object | nil
 
     def walk(self):
         yield self

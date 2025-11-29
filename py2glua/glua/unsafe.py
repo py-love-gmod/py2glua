@@ -1,6 +1,8 @@
 from pathlib import Path
 from warnings import deprecated
 
+from .directive_compiler import CompilerDirective
+
 
 class Unsafe:
     """Класс с небезопасными функциями, или функциями которые будут удалены в будующем. Все методы и декораторы из этого блока не советуется использовтаь от слова совсем."""
@@ -14,6 +16,7 @@ class Unsafe:
     @deprecated(
         "Данный метод остался лишь как отладочный для введения ресурсов вручную. В скором времени py2glua будет собирать все ресурсы сам через plg-sdk."
     )
+    @CompilerDirective.internal.gmod_api("AddCSLuaFile")
     def AddCSLuaFile(file_path: Path) -> None:
         """Метод используемый чтобы скзаать, что клиенту нужно загрузить файл который указан по указанной дерриктории."""
         ...

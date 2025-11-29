@@ -8,21 +8,6 @@ from pathlib import Path
 from colorama import Fore, Style, init
 
 from ._lang.compile import CompileError, Compiler
-from ._lang.compile.file_pass import (
-    ClassCtorCallPass,
-    ClassMethodRenamePass,
-    DirectivePass,
-    GlobalDirectivePass,
-    RealmPass,
-    UnknownSymbolPass,
-)
-from ._lang.compile.project_pass import (
-    BuildEntryFilePass,
-    GlobalUsagePass,
-    ResolveKwargsProjectPass,
-)
-from ._lang.convert.py_to_glua_ir import PyToGluaIR
-from ._lang.glua.glua_emitter import GluaEmitter
 
 init(autoreset=True)
 
@@ -169,47 +154,18 @@ def _build(src: Path, out: Path, args) -> None:
         project_root=src,
         config={
             "method_renames": {"__init__": "new"},
+            "name_space": f"{project_name}_{author_name}",
         },
-        file_passes=[
-            UnknownSymbolPass,
-            RealmPass,
-            GlobalDirectivePass,
-            DirectivePass,
-            ClassMethodRenamePass,
-            ClassCtorCallPass,
-        ],
-        project_passes=[
-            ResolveKwargsProjectPass,
-            GlobalUsagePass,
-            BuildEntryFilePass(project_name=project_name, author_name=author_name),
-        ],
+        file_passes=[],
+        project_passes=[],
     )
 
     project_ir = compiler.build(py_files)
 
     _clean_build(out)
     out.mkdir(parents=True, exist_ok=True)
-
-    for ir_file in project_ir:
-        logger.debug(f"Трансляция файла: {ir_file.path}")
-
-        glua_ir = PyToGluaIR.build_file(
-            ir_file, namespace=f"{project_name}_{author_name}"
-        )
-        emitter = GluaEmitter()
-        lua_code = emitter.emit(glua_ir)
-
-        try:
-            rel = ir_file.path.relative_to(src)  # pyright: ignore[reportOptionalMemberAccess]
-            out_rel = Path("lua") / rel.with_suffix(".lua")
-
-        except ValueError:
-            out_rel = ir_file.path.with_suffix(".lua")  # pyright: ignore[reportOptionalMemberAccess]
-
-        out_path = out / out_rel
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-
-        out_path.write_text(lua_code, encoding="utf8")
+    for ir in project_ir:
+        print(ir)  # TODO make normal output
 
     logger.info("Сборка успешно завершена.")
 
