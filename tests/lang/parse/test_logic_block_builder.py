@@ -7,7 +7,7 @@ from py2glua._lang.parse.py_logic_block_builder import (
     PyLogicKind,
     PyLogicNode,
 )
-from py2glua._lang.parse.py_parser import PyParser, RawNonTerminal, RawNonTerminalKind
+from py2glua._lang.parse.py_parser import PyParser, RawSyntaxNode, RawSyntaxNodeKind
 
 
 # region Helpers
@@ -66,7 +66,7 @@ def _collect_all_raws_from_logic(nodes):
 
 
 def _only_nt(seq):
-    return [x for x in seq if isinstance(x, RawNonTerminal)]
+    return [x for x in seq if isinstance(x, RawSyntaxNode)]
 
 
 # endregion
@@ -413,7 +413,7 @@ def test_no_raw_nodes_lost_in_simple_file():
     parsed_counts = Counter(r.kind for r in parsed_nt)
     logic_counts = Counter(r.kind for r in logic_nt)
 
-    IGNORED_KINDS = {RawNonTerminalKind.BLOCK}
+    IGNORED_KINDS = {RawSyntaxNodeKind.BLOCK}
     missing = {
         k.name: v
         for k, v in (parsed_counts - logic_counts).items()

@@ -1,3 +1,7 @@
+from .directive_compiler import CompilerDirective
+
+
+@CompilerDirective.internal.no_compile()
 class nil:
     """
     glua-тип отсутствующего значения.

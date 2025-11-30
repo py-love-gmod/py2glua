@@ -5,8 +5,8 @@ from io import BytesIO
 from ..etc import TokenStream
 
 
-# region RawNonTerminal
-class RawNonTerminalKind(Enum):
+# region RawSyntaxNode
+class RawSyntaxNodeKind(Enum):
     IMPORT = auto()
     FUNCTION = auto()
     CLASS = auto()
@@ -34,18 +34,18 @@ class RawNonTerminalKind(Enum):
     OTHER = auto()
 
 
-class _BaseRawNonTerminal:
+class _RawSyntaxNode:
     def __init__(
         self,
-        kind: RawNonTerminalKind,
-        tokens: list["tokenize.TokenInfo | _BaseRawNonTerminal"],
+        kind: RawSyntaxNodeKind,
+        tokens: list["tokenize.TokenInfo | _RawSyntaxNode"],
     ) -> None:
         self.kind = kind
         self.tokens = tokens
 
 
-class RawNonTerminal(_BaseRawNonTerminal):
-    def __init__(self, kind: RawNonTerminalKind, tokens: list):
+class RawSyntaxNode(_RawSyntaxNode):
+    def __init__(self, kind: RawSyntaxNodeKind, tokens: list):
         self.kind = kind
         self.tokens: list = tokens
 
@@ -54,28 +54,28 @@ class RawNonTerminal(_BaseRawNonTerminal):
 
 
 _HEADER_KEYWORDS = {
-    "import": RawNonTerminalKind.IMPORT,
-    "from": RawNonTerminalKind.IMPORT,
-    "del": RawNonTerminalKind.DEL,
-    "def": RawNonTerminalKind.FUNCTION,
-    "class": RawNonTerminalKind.CLASS,
-    "if": RawNonTerminalKind.IF,
-    "elif": RawNonTerminalKind.ELIF,
-    "else": RawNonTerminalKind.ELSE,
-    "try": RawNonTerminalKind.TRY,
-    "except": RawNonTerminalKind.EXCEPT,
-    "finally": RawNonTerminalKind.FINALLY,
-    "while": RawNonTerminalKind.WHILE,
-    "for": RawNonTerminalKind.FOR,
-    "with": RawNonTerminalKind.WITH,
-    "return": RawNonTerminalKind.RETURN,
-    "pass": RawNonTerminalKind.PASS,
+    "import": RawSyntaxNodeKind.IMPORT,
+    "from": RawSyntaxNodeKind.IMPORT,
+    "del": RawSyntaxNodeKind.DEL,
+    "def": RawSyntaxNodeKind.FUNCTION,
+    "class": RawSyntaxNodeKind.CLASS,
+    "if": RawSyntaxNodeKind.IF,
+    "elif": RawSyntaxNodeKind.ELIF,
+    "else": RawSyntaxNodeKind.ELSE,
+    "try": RawSyntaxNodeKind.TRY,
+    "except": RawSyntaxNodeKind.EXCEPT,
+    "finally": RawSyntaxNodeKind.FINALLY,
+    "while": RawSyntaxNodeKind.WHILE,
+    "for": RawSyntaxNodeKind.FOR,
+    "with": RawSyntaxNodeKind.WITH,
+    "return": RawSyntaxNodeKind.RETURN,
+    "pass": RawSyntaxNodeKind.PASS,
 }
 
 
 class PyParser:
     @classmethod
-    def parse(cls, source: str) -> list[RawNonTerminal]:
+    def parse(cls, source: str) -> list[RawSyntaxNode]:
         stream = cls._construct_tokens(source)
         raw = cls._construct_raw_non_terminal(stream)
         expanded = cls._expand_blocks(raw)
@@ -107,9 +107,9 @@ class PyParser:
     # region Non Terminal
     @classmethod
     def _construct_raw_non_terminal(cls, token_stream: TokenStream):
-        nodes: list[RawNonTerminal] = []
+        nodes: list[RawSyntaxNode] = []
         awaiting_block = False
-        pending_leading: list[RawNonTerminal] = []
+        pending_leading: list[RawSyntaxNode] = []
 
         while not token_stream.eof():
             tok = token_stream.peek()
@@ -220,7 +220,7 @@ class PyParser:
             if stop_predicate(tok, paren_open):
                 break
 
-        return RawNonTerminal(kind, tokens)
+        return RawSyntaxNode(kind, tokens)
 
     @classmethod
     def _build_finish_newline(cls, token_stream, kind):
@@ -252,7 +252,7 @@ class PyParser:
 
             tokens.append(token_stream.advance())
 
-        node = RawNonTerminal(kind, tokens)
+        node = RawSyntaxNode(kind, tokens)
 
         nxt = token_stream.peek()
         if nxt and nxt.type == tokenize.COMMENT:
@@ -270,7 +270,7 @@ class PyParser:
 
     @classmethod
     def _build_header_with_optional_inline_block(
-        cls, token_stream: TokenStream, kind: RawNonTerminalKind
+        cls, token_stream: TokenStream, kind: RawSyntaxNodeKind
     ):
         header = cls._build_finish_colon(token_stream, kind)
         nxt = token_stream.peek()
@@ -312,9 +312,9 @@ class PyParser:
                 break
 
         if first_real is None:
-            block = RawNonTerminal(
-                RawNonTerminalKind.BLOCK,
-                [RawNonTerminal(RawNonTerminalKind.OTHER, inline_tokens)],
+            block = RawSyntaxNode(
+                RawSyntaxNodeKind.BLOCK,
+                [RawSyntaxNode(RawSyntaxNodeKind.OTHER, inline_tokens)],
             )
             return (header, block)
 
@@ -330,11 +330,11 @@ class PyParser:
             else:
                 node = res
 
-            block = RawNonTerminal(RawNonTerminalKind.BLOCK, [node])
+            block = RawSyntaxNode(RawSyntaxNodeKind.BLOCK, [node])
             return (header, block)
 
-        node = RawNonTerminal(RawNonTerminalKind.OTHER, inline_tokens)
-        block = RawNonTerminal(RawNonTerminalKind.BLOCK, [node])
+        node = RawSyntaxNode(RawSyntaxNodeKind.OTHER, inline_tokens)
+        block = RawSyntaxNode(RawSyntaxNodeKind.BLOCK, [node])
         return (header, block)
 
     # endregion
@@ -342,97 +342,97 @@ class PyParser:
     # region specific builders
     @classmethod
     def _build_raw_import(cls, token_stream):
-        return cls._build_finish_newline(token_stream, RawNonTerminalKind.IMPORT)
+        return cls._build_finish_newline(token_stream, RawSyntaxNodeKind.IMPORT)
 
     @classmethod
     def _build_raw_from(cls, token_stream):
-        return cls._build_finish_newline(token_stream, RawNonTerminalKind.IMPORT)
+        return cls._build_finish_newline(token_stream, RawSyntaxNodeKind.IMPORT)
 
     @classmethod
     def _build_raw_del(cls, token_stream):
-        return cls._build_finish_newline(token_stream, RawNonTerminalKind.DEL)
+        return cls._build_finish_newline(token_stream, RawSyntaxNodeKind.DEL)
 
     @classmethod
     def _build_raw_return(cls, token_stream):
-        return cls._build_finish_newline(token_stream, RawNonTerminalKind.RETURN)
+        return cls._build_finish_newline(token_stream, RawSyntaxNodeKind.RETURN)
 
     @classmethod
     def _build_raw_pass(cls, token_stream):
-        return cls._build_finish_newline(token_stream, RawNonTerminalKind.PASS)
+        return cls._build_finish_newline(token_stream, RawSyntaxNodeKind.PASS)
 
     @classmethod
     def _build_raw_decorator(cls, token_stream):
-        return cls._build_finish_newline(token_stream, RawNonTerminalKind.DECORATORS)
+        return cls._build_finish_newline(token_stream, RawSyntaxNodeKind.DECORATORS)
 
     @classmethod
     def _build_raw_def(cls, token_stream):
         return cls._build_header_with_optional_inline_block(
-            token_stream, RawNonTerminalKind.FUNCTION
+            token_stream, RawSyntaxNodeKind.FUNCTION
         )
 
     @classmethod
     def _build_raw_class(cls, token_stream):
         return cls._build_header_with_optional_inline_block(
-            token_stream, RawNonTerminalKind.CLASS
+            token_stream, RawSyntaxNodeKind.CLASS
         )
 
     @classmethod
     def _build_raw_if(cls, token_stream):
         return cls._build_header_with_optional_inline_block(
-            token_stream, RawNonTerminalKind.IF
+            token_stream, RawSyntaxNodeKind.IF
         )
 
     @classmethod
     def _build_raw_elif(cls, token_stream):
         return cls._build_header_with_optional_inline_block(
-            token_stream, RawNonTerminalKind.ELIF
+            token_stream, RawSyntaxNodeKind.ELIF
         )
 
     @classmethod
     def _build_raw_else(cls, token_stream):
         return cls._build_header_with_optional_inline_block(
-            token_stream, RawNonTerminalKind.ELSE
+            token_stream, RawSyntaxNodeKind.ELSE
         )
 
     @classmethod
     def _build_raw_try(cls, token_stream):
         return cls._build_header_with_optional_inline_block(
-            token_stream, RawNonTerminalKind.TRY
+            token_stream, RawSyntaxNodeKind.TRY
         )
 
     @classmethod
     def _build_raw_except(cls, token_stream):
         return cls._build_header_with_optional_inline_block(
-            token_stream, RawNonTerminalKind.EXCEPT
+            token_stream, RawSyntaxNodeKind.EXCEPT
         )
 
     @classmethod
     def _build_raw_finally(cls, token_stream):
         return cls._build_header_with_optional_inline_block(
-            token_stream, RawNonTerminalKind.FINALLY
+            token_stream, RawSyntaxNodeKind.FINALLY
         )
 
     @classmethod
     def _build_raw_while(cls, token_stream):
         return cls._build_header_with_optional_inline_block(
-            token_stream, RawNonTerminalKind.WHILE
+            token_stream, RawSyntaxNodeKind.WHILE
         )
 
     @classmethod
     def _build_raw_for(cls, token_stream):
         return cls._build_header_with_optional_inline_block(
-            token_stream, RawNonTerminalKind.FOR
+            token_stream, RawSyntaxNodeKind.FOR
         )
 
     @classmethod
     def _build_raw_with(cls, token_stream):
         return cls._build_header_with_optional_inline_block(
-            token_stream, RawNonTerminalKind.WITH
+            token_stream, RawSyntaxNodeKind.WITH
         )
 
     @classmethod
     def _build_raw_other(cls, token_stream):
-        return cls._build_finish_newline(token_stream, RawNonTerminalKind.OTHER)
+        return cls._build_finish_newline(token_stream, RawSyntaxNodeKind.OTHER)
 
     @classmethod
     def _build_raw_indent(cls, token_stream):
@@ -466,10 +466,10 @@ class PyParser:
                 if depth == 0:
                     break
 
-        return RawNonTerminal(RawNonTerminalKind.BLOCK, tokens)
+        return RawSyntaxNode(RawSyntaxNodeKind.BLOCK, tokens)
 
     @classmethod
-    def _build_raw_comment(cls, token_stream: TokenStream) -> RawNonTerminal:
+    def _build_raw_comment(cls, token_stream: TokenStream) -> RawSyntaxNode:
         tokens = []
         while not token_stream.eof():
             tok = token_stream.advance()
@@ -480,17 +480,17 @@ class PyParser:
             if tok.type in (tokenize.NEWLINE, tokenize.NL):
                 break
 
-        return RawNonTerminal(RawNonTerminalKind.COMMENT, tokens)
+        return RawSyntaxNode(RawSyntaxNodeKind.COMMENT, tokens)
 
     # endregion
 
     # region expand & docstring
     @classmethod
-    def _expand_blocks(cls, nodes: list[RawNonTerminal]) -> list[RawNonTerminal]:
-        out: list[RawNonTerminal] = []
+    def _expand_blocks(cls, nodes: list[RawSyntaxNode]) -> list[RawSyntaxNode]:
+        out: list[RawSyntaxNode] = []
         for n in nodes:
-            if n.kind == RawNonTerminalKind.BLOCK:
-                raw_children = [t for t in n.tokens if isinstance(t, RawNonTerminal)]
+            if n.kind == RawSyntaxNodeKind.BLOCK:
+                raw_children = [t for t in n.tokens if isinstance(t, RawSyntaxNode)]
                 if raw_children:
                     n.tokens = cls._expand_blocks(raw_children)
                     cls._promote_leading_docstring(n.tokens)
@@ -519,10 +519,10 @@ class PyParser:
                 out.append(n)
                 continue
 
-            if any(isinstance(t, _BaseRawNonTerminal) for t in n.tokens):
+            if any(isinstance(t, _RawSyntaxNode) for t in n.tokens):
                 new_tokens = []
                 for t in n.tokens:
-                    if isinstance(t, RawNonTerminal):
+                    if isinstance(t, RawSyntaxNode):
                         new_tokens.extend(cls._expand_blocks([t]))
 
                     else:
@@ -535,7 +535,7 @@ class PyParser:
         return out
 
     @staticmethod
-    def _node_is_string_only_stmt(node: RawNonTerminal) -> bool:
+    def _node_is_string_only_stmt(node: RawSyntaxNode) -> bool:
         toks: list[tokenize.TokenInfo] = [
             t
             for t in node.tokens
@@ -545,13 +545,13 @@ class PyParser:
         return len(toks) == 1 and toks[0].type == tokenize.STRING
 
     @classmethod
-    def _promote_leading_docstring(cls, nodes: list[RawNonTerminal]) -> None:
+    def _promote_leading_docstring(cls, nodes: list[RawSyntaxNode]) -> None:
         i = 0
-        while i < len(nodes) and nodes[i].kind == RawNonTerminalKind.COMMENT:
+        while i < len(nodes) and nodes[i].kind == RawSyntaxNodeKind.COMMENT:
             i += 1
 
-        if i < len(nodes) and nodes[i].kind == RawNonTerminalKind.OTHER:
+        if i < len(nodes) and nodes[i].kind == RawSyntaxNodeKind.OTHER:
             if cls._node_is_string_only_stmt(nodes[i]):
-                nodes[i].kind = RawNonTerminalKind.DOCSTRING
+                nodes[i].kind = RawSyntaxNodeKind.DOCSTRING
 
     # endregion
