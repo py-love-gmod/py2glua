@@ -1,7 +1,7 @@
 from pathlib import Path
 from warnings import deprecated
 
-from .directive_compiler import CompilerDirective
+from .directive_compiler import InternalCompilerDirective
 
 
 class Unsafe:
@@ -10,13 +10,13 @@ class Unsafe:
     @staticmethod
     def raw(lua_code: str) -> None:
         """Позволяет сказать компилятору "вставь голый луа сюдa". Что либо возвращать из этого блока нельзя"""
-        ...
+        pass
 
     @staticmethod
     @deprecated(
         "Данный метод остался лишь как отладочный для введения ресурсов вручную. В скором времени py2glua будет собирать все ресурсы сам через plg-sdk."
     )
-    @CompilerDirective.internal.gmod_api("AddCSLuaFile")
+    @InternalCompilerDirective.gmod_api("AddCSLuaFile")
     def AddCSLuaFile(file_path: Path) -> None:
         """Метод используемый чтобы скзаать, что клиенту нужно загрузить файл который указан по указанной дерриктории."""
-        ...
+        pass

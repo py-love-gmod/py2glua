@@ -1,3 +1,7 @@
+from .directive_compiler import InternalCompilerDirective
+
+
+@InternalCompilerDirective.enum_name_gmod()
 class Realm:
     """Среда выполнения кода. Данный класс можно использовать как и для определения среды всего файла, так и для проверки среды в рантайме."""
 
