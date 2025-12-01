@@ -5,7 +5,11 @@ class CompilerDirective:
     """Класс отвечающий за дерективы компилятору"""
 
     DEBUG: bool
-    """Переменная отвечающая за дебаг сборку. True - debug, False - release"""
+    """Переменная отвечающая за дебаг сборку
+    
+    - True - debug
+    - False - release
+    """
 
     @staticmethod
     def debug_compile_only() -> Callable:
@@ -18,10 +22,10 @@ class CompilerDirective:
 
     @staticmethod
     def lazy_compile() -> Callable:
-        """Помечает метод или класс как "ленивый" для компилятора.
+        """Помечает метод или класс как "ленивый" для компилятора
 
         Код, помеченный как lazy, будет включён в итоговый glua только если
-        его использование может быть обнаружено статическим анализом IR.
+        его использование может быть обнаружено статическим анализом IR
         """
 
         def decorator(fn):
@@ -44,7 +48,7 @@ class InternalCompilerDirective:
 
     @staticmethod
     def no_compile() -> Callable:
-        """Помечает метод или класс как некомпилируемый.
+        """Помечает метод или класс как некомпилируемый
 
         Данный декоратор исключает питон реализацию из вывода glua
 
@@ -58,7 +62,7 @@ class InternalCompilerDirective:
 
     @staticmethod
     def gmod_api(name: str) -> Callable:
-        """Помечает функцию или класс как элемент GMod API.
+        """Помечает функцию или класс как элемент GMod API
 
         Делает две вещи:
         - присваивает указанное имя в таблице API
@@ -74,9 +78,9 @@ class InternalCompilerDirective:
 
     @staticmethod
     def enum_name_gmod() -> Callable:
-        """Помечает класс Enum как "используй имена как константы глуа".
+        """Помечает класс Enum как "используй имена как константы глуа"
 
-        По факту создан только для Reaml enum класса.
+        По факту изначально создан только из-за Reaml enum класса
 
         Внутренний инструмент для кодгена
 
