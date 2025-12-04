@@ -10,13 +10,11 @@ from ..py.ir_dataclass import PyIRFile
 class Compiler:
     def __init__(
         self,
-        version: str,
         project_root: Path,
         config: dict,
         file_passes: Sequence,
         project_passes: Sequence,
     ):
-        self.version: str = version
         self.project_root = project_root.resolve()
 
         self.modules: Dict[str, PyIRFile] = {}

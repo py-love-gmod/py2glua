@@ -52,7 +52,7 @@ logger.addHandler(ch)
 # endregion
 
 
-def _verison() -> str:
+def _version() -> str:
     try:
         return version("py2glua")
 
@@ -150,9 +150,9 @@ def _build(src: Path, out: Path, args) -> None:
     logger.info(f"Найдено файлов: {len(py_files)}")
 
     compiler = Compiler(
-        version=_verison(),
         project_root=src,
         config={
+            "version": _version(),
             "method_renames": {"__init__": "new"},
             "name_space": f"{project_name}_{author_name}",
         },
@@ -175,7 +175,7 @@ def main() -> None:
     args = parser.parse_args()
     logger.setLevel(logging.DEBUG if args.debug else logging.INFO)
 
-    logger.debug(f"Py2Glua\nVersion: {_verison()}")
+    logger.debug(f"Py2Glua\nVersion: {_version()}")
 
     try:
         if args.cmd == "build":
@@ -183,7 +183,7 @@ def main() -> None:
             _build(args.src, args.out, args)
 
         elif args.cmd == "version":
-            print(_verison())
+            print(_version())
 
         sys.exit(0)
 
