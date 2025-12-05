@@ -89,26 +89,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     b.add_argument(
-        "-a",
-        "--author",
+        "-n",
+        "--namespace",
         type=str,
-        help="Автор проекта",
+        help="Неймспейс проекта",
     )
 
     b.add_argument(
-        "-p",
-        "--project",
-        type=str,
-        help="Имя проекта",
-    )
-
-    b.add_argument(
-        "out",
+        "-o",
+        "--out",
         type=Path,
-        nargs="?",
-        default=None,
+        default=Path("./build"),
         help="Папка для собранного кода (по умолчанию: ./build)",
     )
+
     # endregion
 
     # region Version cmd
@@ -130,31 +124,25 @@ def _build(src: Path, out: Path, args) -> None:
     if src is None:
         src = Path("./source")
 
-    if out is None:
-        out = Path("./build")
-
     src = src.resolve()
     out = out.resolve()
-
-    project_name = args.project
-    author_name = args.author
 
     if not src.exists():
         raise FileNotFoundError(f"Исходная папка не найдена: {src}")
 
     py_files = sorted(p for p in src.rglob("*.py"))
     if not py_files:
-        logger.warning("В папке нет .py файлов - нечего собирать")
+        logger.warning("Нет .py файлов - нечего собирать")
         return
 
-    logger.info(f"Найдено файлов: {len(py_files)}")
+    logger.debug(f"Найдено файлов: {len(py_files)}")
 
     compiler = Compiler(
         project_root=src,
         config={
             "version": _version(),
             "method_renames": {"__init__": "new"},
-            "name_space": f"{project_name}_{author_name}",
+            "namespace": args.namespace,
         },
         file_passes=[],
         project_passes=[],
@@ -179,7 +167,6 @@ def main() -> None:
 
     try:
         if args.cmd == "build":
-            logger.debug(f"Start build\nSRC: {args.src}\nOUT: {args.out}")
             _build(args.src, args.out, args)
 
         elif args.cmd == "version":
@@ -196,11 +183,6 @@ def main() -> None:
         logger.error(err)
         logger.error("Exit code 1")
         sys.exit(1)
-
-    except KeyError as err:
-        logger.error(f"Error accessing key {err}", exc_info=True)
-        logger.error("Exit code 2")
-        sys.exit(2)
 
     except Exception as err:
         logger.error(str(err), exc_info=True)
