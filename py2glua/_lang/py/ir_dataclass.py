@@ -407,7 +407,6 @@ class PyIRIf(PyIRNode):
 class PyIRWhile(PyIRNode):
     test: PyIRNode
     body: list[PyIRNode] = field(default_factory=list)
-    orelse: list[PyIRNode] = field(default_factory=list)
 
     def walk(self):
         yield self
@@ -416,16 +415,12 @@ class PyIRWhile(PyIRNode):
         for node in self.body:
             yield from node.walk()
 
-        for node in self.orelse:
-            yield from node.walk()
-
 
 @dataclass
 class PyIRFor(PyIRNode):
     target: PyIRNode
     iter: PyIRNode
     body: list[PyIRNode] = field(default_factory=list)
-    orelse: list[PyIRNode] = field(default_factory=list)
 
     def walk(self):
         yield self
@@ -433,9 +428,6 @@ class PyIRFor(PyIRNode):
         yield from self.iter.walk()
 
         for node in self.body:
-            yield from node.walk()
-
-        for node in self.orelse:
             yield from node.walk()
 
 
@@ -474,7 +466,6 @@ class PyIRExceptHandler(PyIRNode):
 class PyIRTry(PyIRNode):
     body: list[PyIRNode] = field(default_factory=list)
     handlers: list[PyIRExceptHandler] = field(default_factory=list)
-    orelse: list[PyIRNode] = field(default_factory=list)
     finalbody: list[PyIRNode] = field(default_factory=list)
 
     def walk(self):
@@ -484,9 +475,6 @@ class PyIRTry(PyIRNode):
 
         for h in self.handlers:
             yield from h.walk()
-
-        for node in self.orelse:
-            yield from node.walk()
 
         for node in self.finalbody:
             yield from node.walk()
