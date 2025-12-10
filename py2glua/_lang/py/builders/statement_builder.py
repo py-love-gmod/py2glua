@@ -1086,3 +1086,10 @@ class StatementBuilder:
         )
 
     # endregion
+
+
+# TODO: chained comparisons (a < b < c)
+# TODO: ternary operator (x if cond else y)
+# TODO: f-strings parsing / IR node
+# TODO: full import resolution (relative, alias, external check)
+# TODO: pattern matching?

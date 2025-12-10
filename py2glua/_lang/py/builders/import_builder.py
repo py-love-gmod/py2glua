@@ -390,3 +390,6 @@ class ImportBuilder:
             return PyIRImportType.EXTERNAL
 
         return PyIRImportType.UNKNOWN
+
+
+# TODO: from x import (y, z) can crash all
