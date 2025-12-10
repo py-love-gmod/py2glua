@@ -138,9 +138,16 @@ class PyParser:
                 token_stream.advance()
                 continue
 
-            if tok_string in {"global", "nonlocal", "async", "await", "yield"}:
+            if tok_string in {
+                "global",
+                "nonlocal",
+                "async",
+                "await",
+                "yield",
+                "lambda",
+            }:
                 raise SyntaxError(
-                    f"global, nonlocal, async, await, yield keywords are not supported in py2glua\n"
+                    f"{tok_string} keyword is not supported in py2glua\n"
                     f"LINE|OFFSET: {tok.start[0]}|{tok.start[1]}"
                 )
 

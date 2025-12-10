@@ -5,11 +5,26 @@ from ..parse import (
     PyLogicKind,
     PyLogicNode,
 )
-from .builders import ImportBuilder
+from .builders import ImportBuilder, StatementBuilder
 from .ir_dataclass import PyIRContext, PyIRFile, PyIRNode
 
 
 class PyIRBuilder:
+    _DISPATCH = {
+        PyLogicKind.FUNCTION: None,
+        PyLogicKind.CLASS: None,
+        PyLogicKind.BRANCH: None,
+        PyLogicKind.LOOP: None,
+        PyLogicKind.TRY: None,
+        PyLogicKind.WITH: None,
+        PyLogicKind.IMPORT: ImportBuilder.build,
+        PyLogicKind.DELETE: None,
+        PyLogicKind.RETURN: None,
+        PyLogicKind.PASS: None,
+        PyLogicKind.COMMENT: None,
+        PyLogicKind.STATEMENT: StatementBuilder.build,
+    }
+
     @classmethod
     def build_file(cls, source: str, path_to_file: Path | None = None) -> PyIRFile:
         logic_blocks = PyLogicBlockBuilder.build(source)
@@ -39,24 +54,9 @@ class PyIRBuilder:
         nodes: list[PyLogicNode],
         parent_obj: PyIRNode,
     ) -> list[PyIRNode]:
-        dispatch = {
-            PyLogicKind.FUNCTION: None,
-            PyLogicKind.CLASS: None,
-            PyLogicKind.BRANCH: None,
-            PyLogicKind.LOOP: None,
-            PyLogicKind.TRY: None,
-            PyLogicKind.WITH: None,
-            PyLogicKind.IMPORT: ImportBuilder.build,
-            PyLogicKind.DELETE: None,
-            PyLogicKind.RETURN: None,
-            PyLogicKind.PASS: None,
-            PyLogicKind.COMMENT: None,
-            PyLogicKind.STATEMENT: None,
-        }
-
         out: list[PyIRNode] = []
         for node in nodes:
-            func = dispatch.get(node.kind)
+            func = cls._DISPATCH.get(node.kind)
             if func is None:
                 raise ValueError(
                     f"PyLogicKind {node.kind} has no handler in PyIRBuilder"

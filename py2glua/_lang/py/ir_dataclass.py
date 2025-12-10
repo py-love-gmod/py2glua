@@ -306,12 +306,14 @@ class PyIRAugAssign(PyIRNode):
 # region Function
 @dataclass
 class PyIRCall(PyIRNode):
-    name: str
+    func: PyIRNode
     args_p: list[PyIRNode] = field(default_factory=list)
     args_kw: dict[str, PyIRNode] = field(default_factory=dict)
 
     def walk(self):
         yield self
+        yield from self.func.walk()
+
         for arg_p in self.args_p:
             yield from arg_p.walk()
 
