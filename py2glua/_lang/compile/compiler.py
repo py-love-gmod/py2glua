@@ -4,7 +4,12 @@ from pathlib import Path
 from typing import Dict, List, Sequence
 
 from ..py.ir_builder import PyIRBuilder
-from ..py.ir_dataclass import PyIRFile
+from ..py.ir_dataclass import PyIRFile, PyIRImport, PyIRImportType
+
+# TODO: Фактически при from py2glua import module может произойти 2 сценария
+# Или оно упадёт ибо . импорт (скорее всего сейчас это будет)
+# Или оно решит, что грузить всю библиотеку это гуд идея
+# Шо то хуйня, что другое. Починить
 
 
 class Compiler:
@@ -18,7 +23,6 @@ class Compiler:
         self.project_root = project_root.resolve()
 
         self.modules: Dict[str, PyIRFile] = {}
-
         self.path_to_name: Dict[Path, str] = {}
 
         self.config = config
@@ -45,6 +49,9 @@ class Compiler:
         text = path.read_text("utf8")
         ir = PyIRBuilder.build_file(text, path)
 
+        if not isinstance(ir.context.meta, dict):
+            raise TypeError("PyIRFile.context.meta must be a dict")
+
         ir.context.meta["module"] = module_name
         self.modules[module_name] = ir
         self.path_to_name[path] = module_name
@@ -59,9 +66,39 @@ class Compiler:
 
         path = self._module_to_file(module_name)
         if path is None:
-            raise FileNotFoundError(f"Module '{module_name}' not found")
+            raise FileNotFoundError(
+                f"Module '{module_name}' not found inside project root: {self.project_root}"
+            )
 
         self.load_file(path)
+
+    def ensure_loaded_import(self, imp: PyIRImport) -> None:
+        if imp.i_type in [PyIRImportType.LOCAL, PyIRImportType.INTERNAL]:
+            for mod in imp.modules:
+                self.ensure_loaded(mod)
+
+            return
+
+        return
+
+    def load_imports_from_ir(self, ir: PyIRFile) -> None:
+        if not isinstance(ir.context.meta, dict):
+            return
+
+        imports = ir.context.meta.get("imports", [])
+        if not imports:
+            return
+
+        if not isinstance(imports, list):
+            raise TypeError("context.meta['imports'] must be a list")
+
+        for imp in imports:
+            if not isinstance(imp, PyIRImport):
+                raise TypeError(
+                    "context.meta['imports'] must contain PyIRImport objects"
+                )
+
+            self.ensure_loaded_import(imp)
 
     def _run_file_passes(self, ir: PyIRFile):
         for p in self.file_passes:

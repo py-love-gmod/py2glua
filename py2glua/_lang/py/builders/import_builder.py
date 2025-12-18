@@ -20,6 +20,11 @@ try:
 except Exception:
     PY2GLUA_ROOT = None
 
+# TODO: Фактически при from py2glua import module может произойти 2 сценария
+# Или оно упадёт ибо . импорт (скорее всего сейчас это будет)
+# Или оно решит, что грузить всю библиотеку это гуд идея
+# Шо то хуйня, что другое. Починить
+
 
 class ImportBuilder:
     @staticmethod
@@ -27,6 +32,9 @@ class ImportBuilder:
         parent_obj: PyIRNode,
         node: PyLogicNode,
     ) -> Sequence[PyIRNode]:
+        if not node.origins:
+            return []
+
         origin = node.origins[0]
         if origin is None:
             raise ValueError("Origin is None")
@@ -34,6 +42,12 @@ class ImportBuilder:
         context: PyIRContext | None = getattr(parent_obj, "context", None)
         if context is None:
             raise ValueError("parent_obj context is missing")
+
+        if not isinstance(context.meta, dict):
+            raise ValueError("context.meta must be a dict")
+
+        context.meta.setdefault("aliases", {})
+        context.meta.setdefault("imports", [])
 
         toks: list[tokenize.TokenInfo] = [
             t for t in origin.tokens if isinstance(t, tokenize.TokenInfo)
@@ -76,7 +90,6 @@ class ImportBuilder:
                 cur_file = cf
 
         modules: list[str] = []
-
         if head == "import":
             modules = ImportBuilder._parse_import_stmt(toks, context)
 
@@ -101,15 +114,15 @@ class ImportBuilder:
                     "External pip packages are not supported in py2glua."
                 )
 
-            ir_nodes.append(
-                PyIRImport(
-                    line=line,
-                    offset=offset,
-                    modules=[mod],
-                    i_type=i_type,
-                )
+            imp_node = PyIRImport(
+                line=line,
+                offset=offset,
+                modules=[mod],
+                i_type=i_type,
             )
-            context.meta["imports"].append(mod)
+
+            ir_nodes.append(imp_node)
+            context.meta["imports"].append(imp_node)
 
         return ir_nodes
 
@@ -179,6 +192,7 @@ class ImportBuilder:
             if i < n and toks[i].string == "as":
                 if i + 1 >= n or toks[i + 1].type != tokenize.NAME:
                     raise SyntaxError("Malformed import alias")
+
                 alias_name = toks[i + 1].string
                 context.meta["aliases"][alias_name] = full_name
                 i += 2

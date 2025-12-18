@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import Literal
 
 
 class CompilerDirective:
@@ -77,14 +78,19 @@ class InternalCompilerDirective:
         return decorator
 
     @staticmethod
-    def enum_name_gmod() -> Callable:
-        """Помечает класс Enum как "используй имена как константы глуа"
-
-        По факту изначально создан только из-за Reaml enum класса
-
-        Внутренний инструмент для кодгена
-
-        p.s. Я не хочу хардкодить чисто realm в вывод по имени. Слишком много чести ему
+    def gmod_special_enum(
+        *,
+        fields: dict[
+            str,
+            tuple[
+                Literal["str", "bool", "int", "global"],
+                str | bool | int,
+            ],
+        ],
+    ) -> Callable:
+        """Делает магию с енумами нестандартными.
+        Путь указания маппинга
+        "Поле": ["тип поля", значение]
         """
 
         def decorator(fn):
