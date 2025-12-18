@@ -200,15 +200,15 @@ class ImportBuilder:
 
         try:
             from_idx = next(i for i, t in enumerate(toks) if t.string == "from")
-            imp_idx = next(i for i, t in enumerate(toks) if t.string == "import")
+            import_idx = next(i for i, t in enumerate(toks) if t.string == "import")
 
         except StopIteration:
             raise SyntaxError("Malformed 'from' import statement")
 
-        if imp_idx <= from_idx:
+        if import_idx <= from_idx:
             raise SyntaxError("Malformed 'from' import statement")
 
-        base_toks = toks[from_idx + 1 : imp_idx]
+        base_toks = toks[from_idx + 1 : import_idx]
 
         level = 0
         pos = 0
@@ -222,9 +222,9 @@ class ImportBuilder:
 
         name_parts: list[str] = []
         while pos < len(base_toks):
-            bt = base_toks[pos]
-            if bt.type == tokenize.NAME:
-                name_parts.append(bt.string)
+            t = base_toks[pos]
+            if t.type == tokenize.NAME:
+                name_parts.append(t.string)
             pos += 1
 
         module_rel = ".".join(name_parts) if name_parts else None
@@ -241,7 +241,6 @@ class ImportBuilder:
                     "Relative import used but current file path is unknown "
                     "(parent_obj.path or context.meta['__file__'] must be set)."
                 )
-
             base_module = ImportBuilder._resolve_relative_module(
                 module_rel,
                 level,
@@ -249,13 +248,17 @@ class ImportBuilder:
                 project_root,
             )
 
-        name_toks = toks[imp_idx + 1 :]
+        name_toks = toks[import_idx + 1 :]
 
-        if any(nt.string == "*" for nt in name_toks):
+        if any(t.string == "*" for t in name_toks):
             raise SyntaxError("Wildcard import (*) is forbidden in py2glua.")
+
+        context.meta.setdefault("aliases", {})
+        context.meta.setdefault("imports", [])
 
         i = 0
         n = len(name_toks)
+        depth = 0
 
         def skip_trivia(idx: int) -> int:
             while idx < n and name_toks[idx].type in (
@@ -277,6 +280,16 @@ class ImportBuilder:
 
             s = t.string
 
+            if s == "(":
+                depth += 1
+                i += 1
+                continue
+
+            if s == ")":
+                depth -= 1
+                i += 1
+                continue
+
             if s in {",", ";"}:
                 i += 1
                 i = skip_trivia(i)
@@ -286,7 +299,8 @@ class ImportBuilder:
                 raise SyntaxError("Malformed 'from' import: 'as' without name")
 
             if t.type != tokenize.NAME:
-                break
+                i += 1
+                continue
 
             name = s
             full_name = f"{base_module}.{name}" if base_module else name
@@ -298,11 +312,11 @@ class ImportBuilder:
             if i < n and name_toks[i].string == "as":
                 if i + 1 >= n or name_toks[i + 1].type != tokenize.NAME:
                     raise SyntaxError("Malformed 'from' import alias")
+
                 alias_name = name_toks[i + 1].string
                 context.meta["aliases"][alias_name] = full_name
                 i += 2
                 i = skip_trivia(i)
-                continue
 
         return modules
 
@@ -390,6 +404,3 @@ class ImportBuilder:
             return PyIRImportType.EXTERNAL
 
         return PyIRImportType.UNKNOWN
-
-
-# TODO: from x import (y, z) can crash all

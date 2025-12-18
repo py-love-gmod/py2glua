@@ -14,6 +14,7 @@ from ..ir_dataclass import (
     PyIRConstant,
     PyIRDict,
     PyIRDictItem,
+    PyIRFString,
     PyIRList,
     PyIRNode,
     PyIRSet,
@@ -520,6 +521,7 @@ class StatementBuilder:
     @staticmethod
     def _parse_compare(stream: "_Stream") -> PyIRNode:
         node = StatementBuilder._parse_bit_or(stream)
+        used_comparison = False
 
         while True:
             tok = stream.peek()
@@ -539,7 +541,6 @@ class StatementBuilder:
             }:
                 op_tok = stream.advance()
                 assert op_tok is not None  # unreachable
-
                 op_enum = StatementBuilder._map_compare_op(op_tok.string)
 
             # in / not in / is / is not
@@ -549,7 +550,6 @@ class StatementBuilder:
                     op_enum = PyBinOPType.IN
 
                 elif tok.string == "is":
-                    start_idx = stream.index
                     stream.advance()
                     nxt = stream.peek()
                     if nxt and nxt.type == tokenize.NAME and nxt.string == "not":
@@ -573,6 +573,11 @@ class StatementBuilder:
 
             if op_enum is None:
                 break
+
+            if used_comparison:
+                raise SyntaxError("Chained comparisons are not supported in py2glua")
+
+            used_comparison = True
 
             right = StatementBuilder._parse_bit_or(stream)
             node = PyIRBinOP(
@@ -846,10 +851,14 @@ class StatementBuilder:
         if tok is None:
             raise SyntaxError("Unexpected end of input in primary expression")
 
+        # f-string
+        if tok.type == tokenize.STRING and tok.string and tok.string[0] in ("f", "F"):
+            return StatementBuilder._parse_fstring(stream)
+
         # Имя
         if tok.type == tokenize.NAME:
             tok = stream.advance()
-            assert tok is not None  # unreachable
+            assert tok is not None
 
             line, col = tok.start
             return PyIRVarUse(
@@ -858,16 +867,16 @@ class StatementBuilder:
                 name=tok.string,
             )
 
-        # Константа: число или строка
+        # Константа: число или обычная строка
         if tok.type in (tokenize.NUMBER, tokenize.STRING):
             tok = stream.advance()
-            assert tok is not None  # unreachable
+            assert tok is not None
 
             line, col = tok.start
             try:
                 value = literal_eval(tok.string)
+
             except Exception:
-                # f-строки и прочий трэш, если вдруг сюда дошло
                 value = tok.string
 
             return PyIRConstant(
@@ -1085,11 +1094,71 @@ class StatementBuilder:
             elements=elements,
         )
 
+    @staticmethod
+    def _parse_fstring(stream: _Stream) -> PyIRFString:
+        tok = stream.advance()
+        assert tok is not None
+
+        raw = tok.string  # f"..."
+        if not raw.startswith(('f"', "f'")):
+            raise SyntaxError("Only simple f-strings are supported")
+
+        body = raw[2:-1]
+
+        parts: list[str | PyIRNode] = []
+        buf: list[str] = []
+
+        i = 0
+        n = len(body)
+
+        def flush():
+            if buf:
+                parts.append("".join(buf))
+                buf.clear()
+
+        while i < n:
+            c = body[i]
+
+            if c == "{":
+                flush()
+                i += 1
+                start = i
+
+                while i < n and body[i] != "}":
+                    i += 1
+
+                if i >= n:
+                    raise SyntaxError("Unmatched '{' in f-string")
+
+                name = body[start:i].strip()
+                if not name.isidentifier():
+                    raise SyntaxError(
+                        "Only simple variable substitution is allowed in f-strings"
+                    )
+
+                parts.append(
+                    PyIRVarUse(
+                        line=tok.start[0],
+                        offset=tok.start[1],
+                        name=name,
+                    )
+                )
+
+                i += 1
+                continue
+
+            buf.append(c)
+            i += 1
+
+        flush()
+
+        return PyIRFString(
+            line=tok.start[0],
+            offset=tok.start[1],
+            parts=parts,
+        )
+
     # endregion
 
 
 # TODO: chained comparisons (a < b < c)
-# TODO: ternary operator (x if cond else y)
-# TODO: f-strings parsing / IR node
-# TODO: full import resolution (relative, alias, external check)
-# TODO: pattern matching?

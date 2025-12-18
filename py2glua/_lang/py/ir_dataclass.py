@@ -95,6 +95,17 @@ class PyIRConstant(PyIRNode):
 
 
 @dataclass
+class PyIRFString(PyIRNode):
+    parts: list[PyIRNode | str]
+
+    def walk(self):
+        yield self
+        for p in self.parts:
+            if isinstance(p, PyIRNode):
+                yield from p.walk()
+
+
+@dataclass
 class PyIRVarCreate(PyIRNode):
     name: str
     is_global: bool = False
