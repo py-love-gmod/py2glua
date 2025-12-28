@@ -490,7 +490,7 @@ class StatementBuilder:
         return node
 
     @staticmethod
-    def _parse_compare(stream: "TokenStream") -> PyIRNode:
+    def _parse_compare(stream: TokenStream) -> PyIRNode:
         node = StatementBuilder._parse_bit_or(stream)
         used_comparison = False
 

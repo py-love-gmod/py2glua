@@ -16,9 +16,9 @@ class PyIRBuilder:
         PyLogicKind.BRANCH: None,
         PyLogicKind.LOOP: None,
         PyLogicKind.TRY: None,  # Пока не делать в v0.0.1
-        PyLogicKind.WITH: None,  # Пока не делать в v0.0.1
+        PyLogicKind.WITH: None,
         PyLogicKind.IMPORT: None,
-        PyLogicKind.DELETE: None,
+        PyLogicKind.DELETE: None,  # Пока не делать в v0.0.1
         PyLogicKind.RETURN: None,
         PyLogicKind.PASS: None,
         PyLogicKind.COMMENT: None,
