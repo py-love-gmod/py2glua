@@ -2,6 +2,7 @@ import tokenize
 from ast import literal_eval
 from typing import List, Optional, Sequence
 
+from ...etc import TokenStream
 from ...parse import PyLogicNode
 from ..ir_dataclass import (
     PyAugAssignType,
@@ -24,37 +25,6 @@ from ..ir_dataclass import (
     PyIRVarUse,
     PyUnaryOPType,
 )
-
-
-# region Internal token stream helper
-class _Stream:
-    def __init__(self, tokens: List[tokenize.TokenInfo]) -> None:
-        self.tokens = tokens
-        self.index = 0
-
-    def peek(self, value: int = 0) -> Optional[tokenize.TokenInfo]:
-        if self.index + value >= len(self.tokens):
-            return None
-
-        return self.tokens[self.index + value]
-
-    def advance(self) -> Optional[tokenize.TokenInfo]:
-        tok = self.peek()
-        if tok is not None:
-            self.index += 1
-        return tok
-
-    def expect_op(self, value: str) -> tokenize.TokenInfo:
-        tok = self.advance()
-        if tok is None or tok.type != tokenize.OP or tok.string != value:
-            raise SyntaxError(f"Expected {value!r}, got {tok!r}")
-        return tok
-
-    def eof(self) -> bool:
-        return self.index >= len(self.tokens)
-
-
-# endregion
 
 
 class StatementBuilder:
@@ -139,6 +109,7 @@ class StatementBuilder:
             if t.type == tokenize.OP:
                 if t.string in "([{":
                     depth += 1
+
                 elif t.string in ")]}":
                     depth -= 1
 
@@ -195,7 +166,7 @@ class StatementBuilder:
             return StatementBuilder._build_assign(tokens, eq_indices)
 
         # Expression-statement
-        stream = _Stream(tokens)
+        stream = TokenStream(tokens)
         expr = StatementBuilder._parse_expression(stream)
         if not stream.eof():
             raise SyntaxError("Unexpected tokens at end of expression")
@@ -279,12 +250,12 @@ class StatementBuilder:
         if not right_toks:
             raise SyntaxError("Missing value for augmented assignment")
 
-        stream_left = _Stream(left_toks)
+        stream_left = TokenStream(left_toks)
         target = StatementBuilder._parse_postfix(stream_left)
         if not stream_left.eof():
             raise SyntaxError("Invalid target in augmented assignment")
 
-        stream_right = _Stream(right_toks)
+        stream_right = TokenStream(right_toks)
         value = StatementBuilder._parse_expression(stream_right)
         if not stream_right.eof():
             raise SyntaxError("Invalid value in augmented assignment")
@@ -332,7 +303,7 @@ class StatementBuilder:
             if not rhs_tokens:
                 raise SyntaxError("Missing RHS in chained assignment")
 
-            stream_r = _Stream(rhs_tokens)
+            stream_r = TokenStream(rhs_tokens)
             rhs_expr = StatementBuilder._parse_expression(stream_r)
             if not stream_r.eof():
                 raise SyntaxError("Invalid expression on RHS of assignment")
@@ -352,7 +323,7 @@ class StatementBuilder:
                 if not lhs_toks:
                     raise SyntaxError("Missing left-hand side in assignment")
 
-                stream_l = _Stream(lhs_toks)
+                stream_l = TokenStream(lhs_toks)
                 lhs_expr = StatementBuilder._parse_postfix(stream_l)
                 if not stream_l.eof():
                     raise SyntaxError("Unsupported complex assignment target")
@@ -387,7 +358,7 @@ class StatementBuilder:
 
         lhs_parts = StatementBuilder._split_top_level_commas(lhs_tokens)
 
-        stream_r = _Stream(rhs_tokens)
+        stream_r = TokenStream(rhs_tokens)
         rhs_expr = StatementBuilder._parse_expression(stream_r)
         if not stream_r.eof():
             raise SyntaxError("Invalid RHS in assignment")
@@ -396,7 +367,7 @@ class StatementBuilder:
 
         # Один таргет: x = expr
         if len(lhs_parts) == 1:
-            stream_l = _Stream(lhs_parts[0])
+            stream_l = TokenStream(lhs_parts[0])
             lhs_expr = StatementBuilder._parse_postfix(stream_l)
             if not stream_l.eof():
                 raise SyntaxError("Unsupported target expression")
@@ -417,7 +388,7 @@ class StatementBuilder:
         # Несколько таргетов: a, b = expr
         targets: List[PyIRNode] = []
         for part in lhs_parts:
-            stream_l = _Stream(part)
+            stream_l = TokenStream(part)
             t_expr = StatementBuilder._parse_postfix(stream_l)
             if not stream_l.eof():
                 raise SyntaxError("Invalid target in tuple assignment")
@@ -441,7 +412,7 @@ class StatementBuilder:
 
     # region Expression parser (with precedence)
     @staticmethod
-    def _parse_expression(stream: _Stream) -> PyIRNode:
+    def _parse_expression(stream: TokenStream) -> PyIRNode:
         """
         Верхний уровень выражения:
         - сначала парсим логическое / арифметическое;
@@ -477,7 +448,7 @@ class StatementBuilder:
         )
 
     @staticmethod
-    def _parse_or(stream: _Stream) -> PyIRNode:
+    def _parse_or(stream: TokenStream) -> PyIRNode:
         node = StatementBuilder._parse_and(stream)
         while True:
             tok = stream.peek()
@@ -498,7 +469,7 @@ class StatementBuilder:
         return node
 
     @staticmethod
-    def _parse_and(stream: _Stream) -> PyIRNode:
+    def _parse_and(stream: TokenStream) -> PyIRNode:
         node = StatementBuilder._parse_compare(stream)
         while True:
             tok = stream.peek()
@@ -519,7 +490,7 @@ class StatementBuilder:
         return node
 
     @staticmethod
-    def _parse_compare(stream: "_Stream") -> PyIRNode:
+    def _parse_compare(stream: "TokenStream") -> PyIRNode:
         node = StatementBuilder._parse_bit_or(stream)
         used_comparison = False
 
@@ -608,7 +579,7 @@ class StatementBuilder:
             raise SyntaxError(f"Unknown comparison operator: {op!r}")
 
     @staticmethod
-    def _parse_bit_or(stream: _Stream) -> PyIRNode:
+    def _parse_bit_or(stream: TokenStream) -> PyIRNode:
         node = StatementBuilder._parse_bit_xor(stream)
         while True:
             tok = stream.peek()
@@ -629,7 +600,7 @@ class StatementBuilder:
         return node
 
     @staticmethod
-    def _parse_bit_xor(stream: _Stream) -> PyIRNode:
+    def _parse_bit_xor(stream: TokenStream) -> PyIRNode:
         node = StatementBuilder._parse_bit_and(stream)
         while True:
             tok = stream.peek()
@@ -650,7 +621,7 @@ class StatementBuilder:
         return node
 
     @staticmethod
-    def _parse_bit_and(stream: _Stream) -> PyIRNode:
+    def _parse_bit_and(stream: TokenStream) -> PyIRNode:
         node = StatementBuilder._parse_shift(stream)
         while True:
             tok = stream.peek()
@@ -671,7 +642,7 @@ class StatementBuilder:
         return node
 
     @staticmethod
-    def _parse_shift(stream: _Stream) -> PyIRNode:
+    def _parse_shift(stream: TokenStream) -> PyIRNode:
         node = StatementBuilder._parse_add_sub(stream)
         while True:
             tok = stream.peek()
@@ -699,7 +670,7 @@ class StatementBuilder:
         return node
 
     @staticmethod
-    def _parse_add_sub(stream: _Stream) -> PyIRNode:
+    def _parse_add_sub(stream: TokenStream) -> PyIRNode:
         node = StatementBuilder._parse_mul_div(stream)
         while True:
             tok = stream.peek()
@@ -723,7 +694,7 @@ class StatementBuilder:
         return node
 
     @staticmethod
-    def _parse_mul_div(stream: _Stream) -> PyIRNode:
+    def _parse_mul_div(stream: TokenStream) -> PyIRNode:
         node = StatementBuilder._parse_unary(stream)
         while True:
             tok = stream.peek()
@@ -758,7 +729,7 @@ class StatementBuilder:
         return node
 
     @staticmethod
-    def _parse_unary(stream: _Stream) -> PyIRNode:
+    def _parse_unary(stream: TokenStream) -> PyIRNode:
         tok = stream.peek()
         if tok is None:
             raise SyntaxError("Unexpected end of input in unary expression")
@@ -806,7 +777,7 @@ class StatementBuilder:
 
     # region Primary + postfix (.attr, [idx], (args))
     @staticmethod
-    def _parse_postfix(stream: _Stream) -> PyIRNode:
+    def _parse_postfix(stream: TokenStream) -> PyIRNode:
         node = StatementBuilder._parse_atom(stream)
 
         while True:
@@ -846,7 +817,7 @@ class StatementBuilder:
         return node
 
     @staticmethod
-    def _parse_atom(stream: _Stream) -> PyIRNode:
+    def _parse_atom(stream: TokenStream) -> PyIRNode:
         tok = stream.peek()
         if tok is None:
             raise SyntaxError("Unexpected end of input in primary expression")
@@ -903,7 +874,7 @@ class StatementBuilder:
         raise SyntaxError(f"Unexpected token in primary expression: {tok!r}")
 
     @staticmethod
-    def _parse_call(stream: _Stream, func_node: PyIRNode) -> PyIRCall:
+    def _parse_call(stream: TokenStream, func_node: PyIRNode) -> PyIRCall:
         lpar = stream.advance()
         assert lpar and lpar.string == "("  # unreachable если вызывается корректно
 
@@ -969,7 +940,7 @@ class StatementBuilder:
         )
 
     @staticmethod
-    def _parse_subscript(stream: _Stream, base: PyIRNode) -> PyIRSubscript:
+    def _parse_subscript(stream: TokenStream, base: PyIRNode) -> PyIRSubscript:
         lbr = stream.advance()
         assert lbr and lbr.string == "["  # unreachable если вызывается корректно
 
@@ -987,7 +958,7 @@ class StatementBuilder:
         )
 
     @staticmethod
-    def _parse_list_literal(stream: _Stream) -> PyIRList:
+    def _parse_list_literal(stream: TokenStream) -> PyIRList:
         lbr = stream.advance()
         assert lbr and lbr.string == "["  # unreachable
 
@@ -1014,7 +985,7 @@ class StatementBuilder:
         )
 
     @staticmethod
-    def _parse_dict_or_set_literal(stream: _Stream) -> PyIRNode:
+    def _parse_dict_or_set_literal(stream: TokenStream) -> PyIRNode:
         lbr = stream.advance()
         assert lbr and lbr.string == "{"  # unreachable
 
@@ -1095,7 +1066,7 @@ class StatementBuilder:
         )
 
     @staticmethod
-    def _parse_fstring(stream: _Stream) -> PyIRFString:
+    def _parse_fstring(stream: TokenStream) -> PyIRFString:
         tok = stream.advance()
         assert tok is not None
 

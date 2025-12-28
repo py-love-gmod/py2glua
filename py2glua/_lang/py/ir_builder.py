@@ -5,7 +5,7 @@ from ..parse import (
     PyLogicKind,
     PyLogicNode,
 )
-from .builders import ImportBuilder, StatementBuilder
+from .builders import StatementBuilder
 from .ir_dataclass import PyIRContext, PyIRFile, PyIRNode
 
 
@@ -15,9 +15,9 @@ class PyIRBuilder:
         PyLogicKind.CLASS: None,
         PyLogicKind.BRANCH: None,
         PyLogicKind.LOOP: None,
-        PyLogicKind.TRY: None, # Пока не делать в v0.0.1
-        PyLogicKind.WITH: None, # Пока не делать в v0.0.1
-        PyLogicKind.IMPORT: ImportBuilder.build,
+        PyLogicKind.TRY: None,  # Пока не делать в v0.0.1
+        PyLogicKind.WITH: None,  # Пока не делать в v0.0.1
+        PyLogicKind.IMPORT: None,
         PyLogicKind.DELETE: None,
         PyLogicKind.RETURN: None,
         PyLogicKind.PASS: None,
@@ -32,8 +32,6 @@ class PyIRBuilder:
         context = PyIRContext(
             parent_context=None,
             meta={
-                "aliases": {},
-                "imports": [],
                 "__file__": path_to_file,
             },
         )
