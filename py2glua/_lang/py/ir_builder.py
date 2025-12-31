@@ -2,11 +2,14 @@ from pathlib import Path
 
 from ..parse import PyLogicBlockBuilder, PyLogicKind, PyLogicNode
 from .builders import (
+    BranchBuilder,
     CommentBuilder,
     ImportBuilder,
+    LoopBuilder,
     PassBuilder,
     ReturnBuilder,
     StatementBuilder,
+    WithBuilder,
 )
 from .ir_dataclass import PyIRFile, PyIRNode
 
@@ -15,10 +18,10 @@ class PyIRBuilder:
     _DISPATCH = {
         PyLogicKind.FUNCTION: None,
         PyLogicKind.CLASS: None,
-        PyLogicKind.BRANCH: None,
-        PyLogicKind.LOOP: None,
+        PyLogicKind.BRANCH: BranchBuilder.build,
+        PyLogicKind.LOOP: LoopBuilder.build,
         PyLogicKind.TRY: None,  # Пока не делать в v0.0.1
-        PyLogicKind.WITH: None,
+        PyLogicKind.WITH: WithBuilder.build,
         PyLogicKind.IMPORT: ImportBuilder.build,
         PyLogicKind.DELETE: None,  # Пока не делать в v0.0.1
         PyLogicKind.RETURN: ReturnBuilder.build,

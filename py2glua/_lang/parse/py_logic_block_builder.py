@@ -10,6 +10,7 @@ class PyLogicKind(Enum):
     FUNCTION = auto()
     CLASS = auto()
     BRANCH = auto()
+    BRANCH_PART = auto()
     LOOP = auto()
     TRY = auto()
     WITH = auto()
@@ -42,6 +43,7 @@ class _LogicBlockKind(Enum):
     FUNCTION = auto()
     CLASS = auto()
     BRANCHING_CONDITION = auto()
+    BRANCH_PART = auto()
     LOOPS = auto()
     TRY_EXCEPT = auto()
     WITH_BLOCK = auto()
@@ -77,6 +79,7 @@ class PyLogicBlockBuilder:
             _LogicBlockKind.FUNCTION: PyLogicKind.FUNCTION,
             _LogicBlockKind.CLASS: PyLogicKind.CLASS,
             _LogicBlockKind.BRANCHING_CONDITION: PyLogicKind.BRANCH,
+            _LogicBlockKind.BRANCH_PART: PyLogicKind.BRANCH_PART,
             _LogicBlockKind.LOOPS: PyLogicKind.LOOP,
             _LogicBlockKind.TRY_EXCEPT: PyLogicKind.TRY,
             _LogicBlockKind.WITH_BLOCK: PyLogicKind.WITH,
@@ -279,31 +282,36 @@ class PyLogicBlockBuilder:
         if nodes[i].kind is not RawSyntaxNodeKind.IF:
             i = start
 
-        parts_children: list[_PyLogicBlock] = []
+        parts: list[_PyLogicBlock] = []
         headers: list[RawSyntaxNode] = []
         j = i
         n = len(nodes)
 
-        # if
+        def add_part(hdr: RawSyntaxNode, blk: RawSyntaxNode) -> None:
+            inner = cls._build_logic_block(blk.tokens)
+            parts.append(
+                _PyLogicBlock(_LogicBlockKind.BRANCH_PART, inner, origins=[hdr])
+            )
+            headers.append(hdr)
+
+        # IF
         off, header, block = cls._consume_header_plus_block(nodes, j)
         j += off
-        headers.append(header)
-        parts_children.extend(cls._build_logic_block(block.tokens))
+        add_part(header, block)
 
-        # elif / else
+        # ELIF / ELSE
         while j < n and nodes[j].kind in (
             RawSyntaxNodeKind.ELIF,
             RawSyntaxNodeKind.ELSE,
         ):
             off2, hdr2, block2 = cls._consume_header_plus_block(nodes, j)
             j += off2
-            headers.append(hdr2)
-            parts_children.extend(cls._build_logic_block(block2.tokens))
+            add_part(hdr2, block2)
 
         return j - i, [
             _PyLogicBlock(
                 _LogicBlockKind.BRANCHING_CONDITION,
-                parts_children,
+                body=parts,
                 origins=headers,
             )
         ]

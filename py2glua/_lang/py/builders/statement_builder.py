@@ -1,5 +1,4 @@
 import tokenize
-from ast import literal_eval
 from typing import List, Optional, Sequence
 
 from ...etc import TokenStream
@@ -841,11 +840,7 @@ class StatementBuilder:
             assert tok is not None
 
             line, col = tok.start
-            try:
-                value = literal_eval(tok.string)
-
-            except Exception:
-                value = tok.string
+            value = tok.string
 
             return PyIRConstant(
                 line=line,
