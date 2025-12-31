@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from enum import IntEnum, auto
 from pathlib import Path
-from typing import Any
 
 from ...glua import nil
 
@@ -19,22 +18,10 @@ class PyIRNode:
 # endregion
 
 
-# region Context
-@dataclass
-class PyIRContext:
-    parent_context: "PyIRContext | None" = None
-    meta: dict[str, Any] = field(default_factory=dict)
-    scope_name: set[str] = field(default_factory=set)
-
-
-# endregion
-
-
 # region File / Decorator
 @dataclass
 class PyIRFile(PyIRNode):
     path: Path | None
-    context: PyIRContext
     body: list["PyIRNode"] = field(default_factory=list)
 
     def walk(self):
@@ -76,7 +63,13 @@ class PyIRImportType(IntEnum):
 @dataclass
 class PyIRImport(PyIRNode):
     modules: list[str]
-    i_type: PyIRImportType = PyIRImportType.UNKNOWN
+    """путь модуля: ["a","b","c"]"""
+    names: list[str | tuple[str, str]]
+    """`import: []` | `from-import: [("x","y")]` или `["x"]`"""
+    if_from: bool
+    level: int
+
+    itype: PyIRImportType
 
     def walk(self):
         yield self
@@ -336,7 +329,6 @@ class PyIRCall(PyIRNode):
 class PyIRFunctionDef(PyIRNode):
     name: str
     signature: dict[str, tuple[str | None, str | None]]
-    context: PyIRContext
     decorators: list[PyIRDecorator] = field(default_factory=list)
     body: list["PyIRNode"] = field(default_factory=list)
 
@@ -356,7 +348,6 @@ class PyIRFunctionDef(PyIRNode):
 @dataclass
 class PyIRClassDef(PyIRNode):
     name: str
-    context: PyIRContext
     decorators: list[PyIRDecorator] = field(default_factory=list)
     body: list["PyIRNode"] = field(default_factory=list)
 

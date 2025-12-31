@@ -91,6 +91,8 @@ class InternalCompilerDirective:
         """Делает магию с енумами нестандартными.
         Путь указания маппинга
         "Поле": ["тип поля", значение]
+
+        Для примера использования смотрите glua.realm
         """
 
         def decorator(fn):
@@ -98,6 +100,18 @@ class InternalCompilerDirective:
 
         return decorator
 
+    @staticmethod
+    def contextmanager() -> Callable:
+        """Указывает что данная функция обязана реализовывать конструкцию with"""
+
+        def decorator(fn):
+            return fn
+
+        return decorator
+
+    contextmanager_body = object()
+    """Указание компилятору что в данном месте для конструкции with необходимо подставить само тело блока"""
+    
     @staticmethod
     def std_lib_obj() -> Callable:
         """Помечает функцию или класс как std_lib объект

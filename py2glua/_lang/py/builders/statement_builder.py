@@ -129,10 +129,7 @@ class StatementBuilder:
 
     # region Public entry
     @staticmethod
-    def build(
-        parent_obj: PyIRNode,
-        node: PyLogicNode,
-    ) -> Sequence[PyIRNode]:
+    def build(node: PyLogicNode) -> Sequence[PyIRNode]:
         if not node.origins:
             raise ValueError("PyLogicNode.STATEMENT has no origins")
 
