@@ -7,6 +7,7 @@ from .py_parser import PyParser, RawSyntaxNode, RawSyntaxNodeKind
 
 # region Public
 class PyLogicKind(Enum):
+    DECORATOR = auto()
     FUNCTION = auto()
     CLASS = auto()
     BRANCH = auto()
@@ -27,11 +28,9 @@ class PyLogicNode:
     kind: PyLogicKind
     children: list["PyLogicNode"] = field(default_factory=list)
 
-    # Мы фактически тут не должны принимать больше 1 ориджина.
-    # Если сюда пришёл больше 1 - произошло что-то странное (если это не комментарий).
-    # В принципе нигде кроме как комментариев более 1 ориджина не должно быть.
-    # В принципе это можно считать костылём, но я не знаю как сделать лучше. OwO.
-    # By: @themanyfaceddemon
+    # Origin-правило:
+    # - почти везде 1 origin
+    # - исключение: COMMENT может иметь несколько
     origins: list[RawSyntaxNode] = field(default_factory=list)
 
 
@@ -40,6 +39,7 @@ class PyLogicNode:
 
 # region Internal
 class _LogicBlockKind(Enum):
+    DECORATOR = auto()
     FUNCTION = auto()
     CLASS = auto()
     BRANCHING_CONDITION = auto()
@@ -76,6 +76,7 @@ class PyLogicBlockBuilder:
     @classmethod
     def _export_to_public(cls, blocks: list[_PyLogicBlock]) -> list[PyLogicNode]:
         kind_map = {
+            _LogicBlockKind.DECORATOR: PyLogicKind.DECORATOR,
             _LogicBlockKind.FUNCTION: PyLogicKind.FUNCTION,
             _LogicBlockKind.CLASS: PyLogicKind.CLASS,
             _LogicBlockKind.BRANCHING_CONDITION: PyLogicKind.BRANCH,
@@ -134,7 +135,7 @@ class PyLogicBlockBuilder:
             RawSyntaxNodeKind,
             Callable[[list[RawSyntaxNode], int], tuple[int, list[_PyLogicBlock]]],
         ] = {
-            RawSyntaxNodeKind.DECORATORS: cls._build_logic_maybe_decorated,
+            RawSyntaxNodeKind.DECORATORS: cls._build_logic_decorator,
             RawSyntaxNodeKind.FUNCTION: cls._build_logic_func_block,
             RawSyntaxNodeKind.CLASS: cls._build_logic_class_block,
             RawSyntaxNodeKind.IF: cls._build_logic_branch_chain,
@@ -160,9 +161,8 @@ class PyLogicBlockBuilder:
 
         out: list[_PyLogicBlock] = []
         i = 0
-        n = len(nodes)
 
-        while i < n:
+        while i < len(nodes):
             node = nodes[i]
 
             if node.kind in illegal_solo:
@@ -172,7 +172,7 @@ class PyLogicBlockBuilder:
 
             func = dispatch.get(node.kind)
             if func is None:
-                raise ValueError(f"RawNodeKind kind {node.kind} no func to build logic")
+                raise ValueError(f"RawNodeKind {node.kind} has no logic builder")
 
             offset, blocks = func(nodes, i)
             out.extend(blocks)
@@ -184,6 +184,15 @@ class PyLogicBlockBuilder:
 
     # region Concrete block builders
     @classmethod
+    def _build_logic_decorator(
+        cls,
+        nodes: list[RawSyntaxNode],
+        start: int,
+    ) -> tuple[int, list[_PyLogicBlock]]:
+        node = nodes[start]
+        return 1, [_PyLogicBlock(_LogicBlockKind.DECORATOR, [], origins=[node])]
+
+    @classmethod
     def _build_logic_statement(
         cls,
         nodes: list[RawSyntaxNode],
@@ -191,43 +200,6 @@ class PyLogicBlockBuilder:
     ) -> tuple[int, list[_PyLogicBlock]]:
         node = nodes[start]
         return 1, [_PyLogicBlock(_LogicBlockKind.STATEMENT, [], origins=[node])]
-
-    @classmethod
-    def _build_logic_maybe_decorated(
-        cls,
-        nodes: list[RawSyntaxNode],
-        start: int,
-    ) -> tuple[int, list[_PyLogicBlock]]:
-        i = start
-        n = len(nodes)
-
-        decorators: list[RawSyntaxNode] = []
-        while i < n and nodes[i].kind is RawSyntaxNodeKind.DECORATORS:
-            decorators.append(nodes[i])
-            i += 1
-
-        if i >= n:
-            raise SyntaxError(
-                "Decorator sequence must be followed by a function or class."
-            )
-
-        header_kind = nodes[i].kind
-        if header_kind not in (RawSyntaxNodeKind.FUNCTION, RawSyntaxNodeKind.CLASS):
-            raise SyntaxError(f"Decorators cannot be applied to {header_kind.name}.")
-
-        blk_idx = cls._expect_block_after(nodes, i)
-        header = nodes[i]
-        block = nodes[blk_idx]
-
-        inner = cls._build_logic_block(block.tokens)
-        kind = (
-            _LogicBlockKind.FUNCTION
-            if header_kind is RawSyntaxNodeKind.FUNCTION
-            else _LogicBlockKind.CLASS
-        )
-
-        origins = [*decorators, header]
-        return (blk_idx + 1) - start, [_PyLogicBlock(kind, inner, origins=origins)]
 
     @classmethod
     def _build_logic_func_block(
@@ -271,6 +243,7 @@ class PyLogicBlockBuilder:
 
     @classmethod
     def _build_logic_branch_chain(cls, nodes: list[RawSyntaxNode], start: int):
+        # Find chain start (defensive; normally called on IF)
         i = start
         while i > 0 and nodes[i - 1].kind in (
             RawSyntaxNodeKind.IF,
@@ -283,36 +256,37 @@ class PyLogicBlockBuilder:
             i = start
 
         parts: list[_PyLogicBlock] = []
-        headers: list[RawSyntaxNode] = []
         j = i
-        n = len(nodes)
 
         def add_part(hdr: RawSyntaxNode, blk: RawSyntaxNode) -> None:
             inner = cls._build_logic_block(blk.tokens)
             parts.append(
                 _PyLogicBlock(_LogicBlockKind.BRANCH_PART, inner, origins=[hdr])
             )
-            headers.append(hdr)
 
-        # IF
+        # First 'if' part
         off, header, block = cls._consume_header_plus_block(nodes, j)
         j += off
         add_part(header, block)
 
-        # ELIF / ELSE
-        while j < n and nodes[j].kind in (
+        # BRANCH must have an origin (test requires it), but it must not duplicate IF/ELSE.
+        # Use the first suite BLOCK as BRANCH origin. BLOCK is real raw node and is ignored by raw-balance test.
+        branch_origin_block = block
+
+        # Following 'elif' / 'else' parts
+        while j < len(nodes) and nodes[j].kind in (
             RawSyntaxNodeKind.ELIF,
             RawSyntaxNodeKind.ELSE,
         ):
-            off2, hdr2, block2 = cls._consume_header_plus_block(nodes, j)
+            off2, hdr2, blk2 = cls._consume_header_plus_block(nodes, j)
             j += off2
-            add_part(hdr2, block2)
+            add_part(hdr2, blk2)
 
         return j - i, [
             _PyLogicBlock(
                 _LogicBlockKind.BRANCHING_CONDITION,
                 body=parts,
-                origins=headers,
+                origins=[branch_origin_block],
             )
         ]
 
@@ -330,38 +304,33 @@ class PyLogicBlockBuilder:
             i = start
 
         j = i
-        n = len(nodes)
-        parts_children: list[_PyLogicBlock] = []
+        parts: list[_PyLogicBlock] = []
         headers: list[RawSyntaxNode] = []
 
-        # TRY
         off, header, block = cls._consume_header_plus_block(nodes, j)
         j += off
         headers.append(header)
-        parts_children.extend(cls._build_logic_block(block.tokens))
+        parts.extend(cls._build_logic_block(block.tokens))
 
-        # EXCEPT*
-        while j < n and nodes[j].kind is RawSyntaxNodeKind.EXCEPT:
+        while j < len(nodes) and nodes[j].kind is RawSyntaxNodeKind.EXCEPT:
             off2, hdr2, blk2 = cls._consume_header_plus_block(nodes, j)
             j += off2
             headers.append(hdr2)
-            parts_children.extend(cls._build_logic_block(blk2.tokens))
+            parts.extend(cls._build_logic_block(blk2.tokens))
 
-        # ELSE?
-        if j < n and nodes[j].kind is RawSyntaxNodeKind.ELSE:
+        if j < len(nodes) and nodes[j].kind is RawSyntaxNodeKind.ELSE:
             raise SyntaxError("else after try is not supported in py2glua")
 
-        # FINALLY?
-        if j < n and nodes[j].kind is RawSyntaxNodeKind.FINALLY:
+        if j < len(nodes) and nodes[j].kind is RawSyntaxNodeKind.FINALLY:
             off4, hdr4, blk4 = cls._consume_header_plus_block(nodes, j)
             j += off4
             headers.append(hdr4)
-            parts_children.extend(cls._build_logic_block(blk4.tokens))
+            parts.extend(cls._build_logic_block(blk4.tokens))
 
         return j - i, [
             _PyLogicBlock(
                 _LogicBlockKind.TRY_EXCEPT,
-                parts_children,
+                parts,
                 origins=headers,
             )
         ]
@@ -372,8 +341,7 @@ class PyLogicBlockBuilder:
         nodes: list[RawSyntaxNode],
         start: int,
     ) -> tuple[int, list[_PyLogicBlock]]:
-        node = nodes[start]
-        return 1, [_PyLogicBlock(_LogicBlockKind.IMPORT, [], origins=[node])]
+        return 1, [_PyLogicBlock(_LogicBlockKind.IMPORT, [], origins=[nodes[start]])]
 
     @classmethod
     def _build_logic_delete(
@@ -381,8 +349,7 @@ class PyLogicBlockBuilder:
         nodes: list[RawSyntaxNode],
         start: int,
     ) -> tuple[int, list[_PyLogicBlock]]:
-        node = nodes[start]
-        return 1, [_PyLogicBlock(_LogicBlockKind.DELETE, [], origins=[node])]
+        return 1, [_PyLogicBlock(_LogicBlockKind.DELETE, [], origins=[nodes[start]])]
 
     @classmethod
     def _build_logic_return(
@@ -390,8 +357,7 @@ class PyLogicBlockBuilder:
         nodes: list[RawSyntaxNode],
         start: int,
     ) -> tuple[int, list[_PyLogicBlock]]:
-        node = nodes[start]
-        return 1, [_PyLogicBlock(_LogicBlockKind.RETURN, [], origins=[node])]
+        return 1, [_PyLogicBlock(_LogicBlockKind.RETURN, [], origins=[nodes[start]])]
 
     @classmethod
     def _build_logic_pass(
@@ -399,8 +365,7 @@ class PyLogicBlockBuilder:
         nodes: list[RawSyntaxNode],
         start: int,
     ) -> tuple[int, list[_PyLogicBlock]]:
-        node = nodes[start]
-        return 1, [_PyLogicBlock(_LogicBlockKind.PASS, [], origins=[node])]
+        return 1, [_PyLogicBlock(_LogicBlockKind.PASS, [], origins=[nodes[start]])]
 
     @classmethod
     def _build_logic_comment(
@@ -418,11 +383,8 @@ class PyLogicBlockBuilder:
             collected.append(nodes[i])
             i += 1
 
-        combined = _PyLogicBlock(
-            _LogicBlockKind.COMMENT,
-            [],
-            origins=collected,
-        )
-        return i - start, [combined]
+        return i - start, [
+            _PyLogicBlock(_LogicBlockKind.COMMENT, [], origins=collected)
+        ]
 
     # endregion

@@ -16,6 +16,7 @@ from .ir_dataclass import PyIRFile, PyIRNode
 
 class PyIRBuilder:
     _DISPATCH = {
+        PyLogicKind.DECORATOR: None,
         PyLogicKind.FUNCTION: None,
         PyLogicKind.CLASS: None,
         PyLogicKind.BRANCH: BranchBuilder.build,

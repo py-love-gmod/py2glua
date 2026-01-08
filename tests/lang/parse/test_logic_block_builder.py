@@ -145,7 +145,7 @@ def test_single_decorator_function():
     res = PyLogicBlockBuilder.build("@dec\ndef f():\n    pass\n")
     kinds = _walk_kinds(res)
     assert PyLogicKind.FUNCTION in kinds
-    assert _kinds_sequence(res) == [PyLogicKind.FUNCTION]
+    assert _kinds_sequence(res) == [PyLogicKind.DECORATOR, PyLogicKind.FUNCTION]
 
 
 def test_multiple_decorators_function_and_class():
@@ -153,7 +153,13 @@ def test_multiple_decorators_function_and_class():
         "@d1\n@d2\ndef f():\n    pass\n\n@dc\nclass C:\n    pass\n"
     )
     seq = _kinds_sequence(res)
-    assert seq == [PyLogicKind.FUNCTION, PyLogicKind.CLASS]
+    assert seq == [
+        PyLogicKind.DECORATOR,
+        PyLogicKind.DECORATOR,
+        PyLogicKind.FUNCTION,
+        PyLogicKind.DECORATOR,
+        PyLogicKind.CLASS,
+    ]
 
 
 def test_long_if_elif_chain():
@@ -256,6 +262,7 @@ def test_visual_snapshot():
     assert kinds == [
         PyLogicKind.FUNCTION,
         PyLogicKind.BRANCH,
+        PyLogicKind.BRANCH_PART,
         PyLogicKind.LOOP,
         PyLogicKind.PASS,
     ]
