@@ -4,6 +4,7 @@ from ..parse import PyLogicBlockBuilder, PyLogicKind, PyLogicNode
 from .builders import (
     BranchBuilder,
     CommentBuilder,
+    DecoratorBuilder,
     ImportBuilder,
     LoopBuilder,
     PassBuilder,
@@ -16,7 +17,7 @@ from .ir_dataclass import PyIRFile, PyIRNode
 
 class PyIRBuilder:
     _DISPATCH = {
-        PyLogicKind.DECORATOR: None,
+        PyLogicKind.DECORATOR: DecoratorBuilder.build,
         PyLogicKind.FUNCTION: None,
         PyLogicKind.CLASS: None,
         PyLogicKind.BRANCH: BranchBuilder.build,
