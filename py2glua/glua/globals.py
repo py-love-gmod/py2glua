@@ -4,7 +4,7 @@ from typing import Any
 
 class Global:
     @staticmethod
-    def var(value: Any, *, external: bool = False) -> Any:
+    def var(value: Any, external: bool = False) -> Any:
         """Помечает переменную как глобальную для компилятора.
         В случае если не был установлен флаг external, и переменная не используется внутри проекта - ложит билд.
 
@@ -15,13 +15,14 @@ class Global:
         pass
 
     @staticmethod
-    def mark(*, external: bool = False) -> Callable: 
+    def mark(external: bool = False) -> Callable:
         """Помечает класс/функцию/метод как глобальную для компилятора.
         В случае если не был установлен флаг external, и переменная не используется внутри проекта - ложит билд.
 
         Args:
             external (bool, optional): Необходимо ли этот класс/функция/метод для внешнего апи аддона? Defaults to False.
         """
+
         def decorator(fn):
             return fn
 

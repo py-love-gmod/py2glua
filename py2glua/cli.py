@@ -1,55 +1,10 @@
 import argparse
-import logging
 import shutil
-import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from colorama import Fore, Style, init
-
-from ._lang.compile import CompileError, Compiler
-
-init(autoreset=True)
-
-
-# region Logger and color
-class AlignedColorFormatter(logging.Formatter):
-    COLORS = {
-        "DEBUG": Fore.CYAN,
-        "INFO": Fore.GREEN,
-        "WARNING": Fore.YELLOW,
-        "ERROR": Fore.RED,
-        "CRITICAL": Fore.MAGENTA + Style.BRIGHT,
-    }
-
-    def __init__(self, fmt=None, datefmt=None, level_width=8):
-        super().__init__(fmt, datefmt)
-        self.level_width = level_width
-
-    def format(self, record):
-        if not isinstance(record.msg, str):
-            record.msg = str(record.msg)
-
-        levelname = record.levelname
-        color = self.COLORS.get(levelname, "")
-        padded_level = f"{color}{levelname:<{self.level_width}}{Style.RESET_ALL}"
-
-        if "\n" in record.msg:
-            lines = record.msg.splitlines()
-            record.msg = ("\n" + " " * (self.level_width + 3)).join(lines)
-
-        record.levelname = padded_level
-        return super().format(record)
-
-
-logger = logging.getLogger("py2glua")
-logger.setLevel(logging.DEBUG)
-
-ch = logging.StreamHandler()
-formatter = AlignedColorFormatter("[%(levelname)s] %(message)s")
-ch.setFormatter(formatter)
-logger.addHandler(ch)
-# endregion
+from ._cli.logging_setup import exit_with_code, logger, setup_logging
+from ._lang.compiler import Compiler
 
 
 def _version() -> str:
@@ -100,7 +55,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--out",
         type=Path,
         default=Path("./build"),
-        help="Папка для собранного кода (по умолчанию: ./build)",
+        help="Папка для результата (по умолчанию: ./build)",
     )
 
     # endregion
@@ -112,48 +67,28 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _clean_build(src: Path | None) -> None:
-    if src and src.exists():
+def _clean_build(out: Path) -> None:
+    if out.exists():
+        if not out.is_dir():
+            exit_with_code(2, f"Путь build не является директорией: {out}")
+
         logger.debug("Очистка build директории...")
-        shutil.rmtree(src)
+        shutil.rmtree(out)
 
 
-def _build(src: Path, out: Path, args) -> None:
+def _build(src: Path, out: Path) -> None:
     logger.info("Начало сборки...")
-
-    if src is None:
-        src = Path("./source")
 
     src = src.resolve()
     out = out.resolve()
 
-    if not src.exists():
-        raise FileNotFoundError(f"Исходная папка не найдена: {src}")
-
-    py_files = sorted(p for p in src.rglob("*.py"))
-    if not py_files:
-        logger.warning("Нет .py файлов - нечего собирать")
-        return
-
-    logger.debug(f"Найдено файлов: {len(py_files)}")
-
-    compiler = Compiler(
-        project_root=src,
-        config={
-            "version": _version(),
-            "method_renames": {"__init__": "new"},
-            "namespace": args.namespace,
-        },
-        file_passes=[],
-        project_passes=[],
-    )
-
-    project_ir = compiler.build(py_files)
+    project_ir = Compiler.build(project_root=src)
 
     _clean_build(out)
     out.mkdir(parents=True, exist_ok=True)
+
     for ir in project_ir:
-        print(ir)  # TODO make normal output
+        print(ir)
 
     logger.info("Сборка успешно завершена.")
 
@@ -161,30 +96,19 @@ def _build(src: Path, out: Path, args) -> None:
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
-    logger.setLevel(logging.DEBUG if args.debug else logging.INFO)
+    setup_logging(args.debug)
 
     logger.debug(f"Py2Glua\nVersion: {_version()}")
 
-    try:
-        if args.cmd == "build":
-            _build(args.src, args.out, args)
+    if args.cmd == "build":
+        _build(args.src, args.out)
+        exit_with_code(0)
 
-        elif args.cmd == "version":
-            print(_version())
+    elif args.cmd == "version":
+        print(_version())
+        exit_with_code(0)
 
-        sys.exit(0)
+    else:
+        exit_with_code(1, "Неизвестный параметр консоли")
 
-    except CompileError as err:
-        logger.error(err)
-        logger.error("Exit code 1")
-        sys.exit(1)
-
-    except SyntaxError as err:
-        logger.error(err)
-        logger.error("Exit code 1")
-        sys.exit(1)
-
-    except Exception as err:
-        logger.error(str(err), exc_info=True)
-        logger.error("Exit code 3")
-        sys.exit(3)
+    exit_with_code(3)

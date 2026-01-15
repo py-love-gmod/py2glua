@@ -79,7 +79,6 @@ class InternalCompilerDirective:
 
     @staticmethod
     def gmod_special_enum(
-        *,
         fields: dict[
             str,
             tuple[
@@ -111,7 +110,7 @@ class InternalCompilerDirective:
 
     contextmanager_body = object()
     """Указание компилятору что в данном месте для конструкции with необходимо подставить само тело блока"""
-    
+
     @staticmethod
     def std_lib_obj() -> Callable:
         """Помечает функцию или класс как std_lib объект

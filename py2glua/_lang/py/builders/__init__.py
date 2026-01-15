@@ -1,4 +1,5 @@
 from .branch_builder import BranchBuilder
+from .class_builder import ClassBuilder
 from .comment_builder import CommentBuilder
 from .decorator_builder import DecoratorBuilder
 from .function_builder import FunctionBuilder

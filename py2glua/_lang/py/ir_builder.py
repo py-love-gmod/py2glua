@@ -3,6 +3,7 @@ from pathlib import Path
 from ..parse import PyLogicBlockBuilder, PyLogicKind, PyLogicNode
 from .builders import (
     BranchBuilder,
+    ClassBuilder,
     CommentBuilder,
     DecoratorBuilder,
     FunctionBuilder,
@@ -20,7 +21,7 @@ class PyIRBuilder:
     _DISPATCH = {
         PyLogicKind.DECORATOR: DecoratorBuilder.build,
         PyLogicKind.FUNCTION: FunctionBuilder.build,
-        PyLogicKind.CLASS: None,  # Пока не делать в v0.0.1
+        PyLogicKind.CLASS: ClassBuilder.build,
         PyLogicKind.BRANCH: BranchBuilder.build,
         PyLogicKind.LOOP: LoopBuilder.build,
         PyLogicKind.TRY: None,  # Пока не делать в v0.0.1
@@ -46,7 +47,6 @@ class PyIRBuilder:
         py_ir_file.body = cls._build_ir_block(logic_blocks)
         return py_ir_file
 
-    # region Core block dispatcher
     @classmethod
     def _build_ir_block(
         cls,
@@ -64,5 +64,3 @@ class PyIRBuilder:
             out.extend(result_nodes)
 
         return out
-
-    # endregion

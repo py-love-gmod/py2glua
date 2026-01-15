@@ -63,9 +63,7 @@ class PyIRImportType(IntEnum):
 @dataclass
 class PyIRImport(PyIRNode):
     modules: list[str]
-    """путь модуля: ["a","b","c"]"""
     names: list[str | tuple[str, str]]
-    """`import: []` | `from-import: [("x","y")]` или `["x"]`"""
     if_from: bool
     level: int
 

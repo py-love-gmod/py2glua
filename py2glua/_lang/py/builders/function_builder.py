@@ -34,18 +34,14 @@ class FunctionBuilder:
         if not tokens:
             raise SyntaxError("Empty function header")
 
-        # def <name>(... ) [-> ann] :
-        # Find 'def'
         def_idx = FunctionBuilder._find_def(tokens)
 
-        # name
         if def_idx + 1 >= len(tokens) or tokens[def_idx + 1].type != tokenize.NAME:
             raise SyntaxError("Expected function name after 'def'")
 
         name_tok = tokens[def_idx + 1]
         func_name = name_tok.string
 
-        # (
         if def_idx + 2 >= len(tokens) or not (
             tokens[def_idx + 2].type == tokenize.OP
             and tokens[def_idx + 2].string == "("
@@ -57,12 +53,10 @@ class FunctionBuilder:
 
         params_tokens = tokens[lpar_idx + 1 : rpar_idx]
 
-        # tail: after ')'
         tail = tokens[rpar_idx + 1 :]
         if not tail:
             raise SyntaxError("Function header must end with ':'")
 
-        # Return annotation: -> ...
         return_ann_str: Optional[str] = None
         colon_idx_in_tail = FunctionBuilder._find_colon_in_tail(tail)
 
@@ -70,11 +64,9 @@ class FunctionBuilder:
         after_colon = tail[colon_idx_in_tail + 1 :]
 
         if after_colon:
-            # Something like: def f(): x
             raise SyntaxError("Unexpected tokens after ':' in function header")
 
         if before_colon:
-            # allow only: '->' <ann_tokens>
             if not (
                 len(before_colon) >= 2 and FunctionBuilder._is_op(before_colon[0], "->")
             ):
@@ -88,15 +80,13 @@ class FunctionBuilder:
             if not return_ann_str:
                 raise SyntaxError("Empty return annotation")
 
-        # Parse signature
         signature = FunctionBuilder._parse_params(params_tokens)
         if return_ann_str is not None:
             signature["__return__"] = (return_ann_str, None)
 
-        # Collect decorators if они пришли как leading children
         body_children = list(node.children)
 
-        from ..ir_builder import PyIRBuilder  # local import to dodge cycles
+        from ..ir_builder import PyIRBuilder
 
         body = PyIRBuilder._build_ir_block(body_children)
 
@@ -114,7 +104,6 @@ class FunctionBuilder:
         ]
 
     # region helpers
-
     @staticmethod
     def _find_def(tokens: List[tokenize.TokenInfo]) -> int:
         for i, t in enumerate(tokens):
@@ -171,6 +160,7 @@ class FunctionBuilder:
             if t.type == tokenize.OP:
                 if t.string in "([{":
                     depth += 1
+
                 elif t.string in ")]}":
                     depth -= 1
 
@@ -192,9 +182,6 @@ class FunctionBuilder:
     def _parse_params(
         tokens: List[tokenize.TokenInfo],
     ) -> dict[str, tuple[str | None, str | None]]:
-        """
-        signature: { name: (annotation_str|None, default_expr_src|None) }
-        """
         signature: dict[str, tuple[str | None, str | None]] = {}
 
         if not tokens:
@@ -231,7 +218,6 @@ class FunctionBuilder:
 
             default_str: Optional[str] = None
             if default_tokens is not None:
-                # validate default expression using your expression parser
                 stream = TokenStream(default_tokens)
                 _ = StatementBuilder._parse_expression(stream)
                 if not stream.eof():
