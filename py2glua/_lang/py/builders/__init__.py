@@ -1,6 +1,7 @@
 from .branch_builder import BranchBuilder
 from .comment_builder import CommentBuilder
 from .decorator_builder import DecoratorBuilder
+from .function_builder import FunctionBuilder
 from .import_builder import ImportBuilder
 from .loop_builder import LoopBuilder
 from .pass_builder import PassBuilder

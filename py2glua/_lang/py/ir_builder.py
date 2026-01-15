@@ -5,6 +5,7 @@ from .builders import (
     BranchBuilder,
     CommentBuilder,
     DecoratorBuilder,
+    FunctionBuilder,
     ImportBuilder,
     LoopBuilder,
     PassBuilder,
@@ -18,8 +19,8 @@ from .ir_dataclass import PyIRFile, PyIRNode
 class PyIRBuilder:
     _DISPATCH = {
         PyLogicKind.DECORATOR: DecoratorBuilder.build,
-        PyLogicKind.FUNCTION: None,
-        PyLogicKind.CLASS: None,
+        PyLogicKind.FUNCTION: FunctionBuilder.build,
+        PyLogicKind.CLASS: None,  # Пока не делать в v0.0.1
         PyLogicKind.BRANCH: BranchBuilder.build,
         PyLogicKind.LOOP: LoopBuilder.build,
         PyLogicKind.TRY: None,  # Пока не делать в v0.0.1
