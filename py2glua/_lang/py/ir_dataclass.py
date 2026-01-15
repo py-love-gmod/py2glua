@@ -531,3 +531,32 @@ class PyIRPass(PyIRNode):
 
 
 # endregion
+
+
+# region Backend expr
+class PyIRBackendKind(IntEnum):
+    GLOBAL = auto()
+    CALL = auto()
+    ATTR = auto()
+    INDEX = auto()
+    RAW = auto()
+
+
+@dataclass
+class PyIRBackendExpr(PyIRNode):
+    kind: PyIRBackendKind
+    name: str
+    args_p: list[PyIRNode] = field(default_factory=list)
+    args_kw: dict[str, PyIRNode] = field(default_factory=dict)
+
+    def walk(self):
+        yield self
+
+        for arg_p in self.args_p:
+            yield from arg_p.walk()
+
+        for arg_kw in self.args_kw.values():
+            yield from arg_kw.walk()
+
+
+# endregion
