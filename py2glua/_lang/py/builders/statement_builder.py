@@ -1,11 +1,13 @@
 import tokenize
-from typing import List, Optional, Sequence
+from typing import List, Sequence
 
 from ...etc import TokenStream
 from ...parse import PyLogicNode
 from ..ir_dataclass import (
     PyAugAssignType,
     PyBinOPType,
+    PyIRAnnotatedAssign,
+    PyIRAnnotation,
     PyIRAssign,
     PyIRAttribute,
     PyIRAugAssign,
@@ -27,9 +29,15 @@ from ..ir_dataclass import (
 
 
 class StatementBuilder:
-    # region helpers: assignment detection
+    # Helpers: assignment detection / comma splitting
     @staticmethod
     def _find_assign_ops(tokens: List[tokenize.TokenInfo]):
+        """
+        Находит:
+        - augassign:  x += y
+        - assign:     x = y, a = b = c
+        Только на верхнем уровне (не внутри (), [], {}).
+        """
         AUG = {
             "+=",
             "-=",
@@ -50,8 +58,8 @@ class StatementBuilder:
         depth_brace = 0
 
         eq_indices: list[int] = []
-        aug_index: Optional[int] = None
-        aug_op: Optional[str] = None
+        aug_index: int | None = None
+        aug_op: str | None = None
 
         for i, t in enumerate(tokens):
             if t.type != tokenize.OP:
@@ -60,33 +68,40 @@ class StatementBuilder:
             s = t.string
             if s == "(":
                 depth_paren += 1
+                continue
 
-            elif s == ")":
+            if s == ")":
                 depth_paren -= 1
+                continue
 
-            elif s == "[":
+            if s == "[":
                 depth_brack += 1
+                continue
 
-            elif s == "]":
+            if s == "]":
                 depth_brack -= 1
+                continue
 
-            elif s == "{":
+            if s == "{":
                 depth_brace += 1
+                continue
 
-            elif s == "}":
+            if s == "}":
                 depth_brace -= 1
-            else:
-                # Только на верхнем уровне считаем '=' и AUG
-                if depth_paren == 0 and depth_brack == 0 and depth_brace == 0:
-                    if s == "=":
-                        eq_indices.append(i)
+                continue
 
-                    elif s in AUG:
-                        if aug_index is not None:
-                            raise SyntaxError("Multiple augmented assignments")
+            if depth_paren == 0 and depth_brack == 0 and depth_brace == 0:
+                if s == "=":
+                    eq_indices.append(i)
 
-                        aug_index = i
-                        aug_op = s
+                elif s in AUG:
+                    if aug_index is not None:
+                        raise SyntaxError(
+                            "Нельзя использовать несколько операторов расширенного присваивания"
+                        )
+
+                    aug_index = i
+                    aug_op = s
 
         if aug_index is not None:
             return "augassign", aug_index, aug_op
@@ -100,6 +115,9 @@ class StatementBuilder:
     def _split_top_level_commas(
         tokens: List[tokenize.TokenInfo],
     ) -> List[List[tokenize.TokenInfo]]:
+        """
+        Делит токены по ',' на верхнем уровне (не внутри (), [], {}).
+        """
         out: List[List[tokenize.TokenInfo]] = []
         acc: List[tokenize.TokenInfo] = []
 
@@ -124,9 +142,143 @@ class StatementBuilder:
 
         return out
 
-    # endregion
+    # Helpers: forbidden constructs
+    @staticmethod
+    def _forbid_slice(tokens: List[tokenize.TokenInfo]) -> None:
+        """
+        Любой ':' внутри [] считаем slice и рубим.
+        Dict не ломается, т.к. там {}.
+        """
+        stack: List[str] = []
 
-    # region Public entry
+        for t in tokens:
+            if t.type != tokenize.OP:
+                continue
+
+            s = t.string
+            if s in "([{":
+                stack.append(s)
+                continue
+
+            if s in ")]}":
+                if stack:
+                    stack.pop()
+                continue
+
+            if s == ":" and stack and stack[-1] == "[":
+                line, col = t.start
+                raise SyntaxError(
+                    "Срезы (slice) не поддерживаются в py2glua\n"
+                    f"LINE|OFFSET: {line}|{col}"
+                )
+
+    @staticmethod
+    def _forbid_comprehension(tokens: List[tokenize.TokenInfo]) -> None:
+        """
+        Любой 'for ... in ...' внутри ()/[]/{} считаем comprehension и рубим.
+        """
+        stack: List[str] = []
+        n = len(tokens)
+
+        for i, t in enumerate(tokens):
+            if t.type == tokenize.OP:
+                if t.string in "([{":
+                    stack.append(t.string)
+
+                elif t.string in ")]}":
+                    if stack:
+                        stack.pop()
+
+            if t.type == tokenize.NAME and t.string == "for":
+                if not stack:
+                    continue
+
+                for j in range(i + 1, n):
+                    tj = tokens[j]
+                    if tj.type == tokenize.NAME and tj.string == "in":
+                        line, col = t.start
+                        raise SyntaxError(
+                            "Генераторы списков/словари/множества (comprehension) не поддерживаются в py2glua\n"
+                            f"LINE|OFFSET: {line}|{col}"
+                        )
+
+    # Helpers: annotation parsing
+    @staticmethod
+    def _parse_annotation_header(
+        tokens: List[tokenize.TokenInfo],
+    ) -> tuple[tokenize.TokenInfo, str, int | None] | None:
+        """
+        Распознаёт:
+            NAME : TYPE
+            NAME : TYPE = EXPR
+
+        Возвращает:
+            (name_token, annotation_text, eq_index_or_None)
+
+        Важно:
+        - eq_index — индекс токена '=' на верхнем уровне (не внутри (), [], {}), если он есть.
+        """
+        if not tokens:
+            return None
+
+        if tokens[0].type != tokenize.NAME:
+            return None
+
+        if len(tokens) < 2:
+            return None
+
+        if tokens[1].type != tokenize.OP or tokens[1].string != ":":
+            return None
+
+        depth = 0
+        ann_tokens: list[tokenize.TokenInfo] = []
+        eq_index: int | None = None
+
+        for i in range(2, len(tokens)):
+            t = tokens[i]
+            if t.type == tokenize.OP:
+                if t.string in "([{":
+                    depth += 1
+
+                elif t.string in ")]}":
+                    depth -= 1
+
+                elif t.string == "=" and depth == 0:
+                    eq_index = i
+                    break
+
+            ann_tokens.append(t)
+
+        if not ann_tokens:
+            raise SyntaxError("Отсутствует тип аннотации после ':'")
+
+        ann_text = "".join(t.string for t in ann_tokens).strip()
+        if not ann_text:
+            raise SyntaxError("Тип аннотации пустой")
+
+        return tokens[0], ann_text, eq_index
+
+    # Helper
+    @staticmethod
+    def _parse_expression_until(
+        stream: TokenStream,
+        stop_ops: set[str],
+    ) -> PyIRNode:
+        """
+        Парсит выражение, но запрещает выход за стоп-операторы
+        (используется для dict key / value).
+        """
+        start = stream.index
+        node = StatementBuilder._parse_or(stream)
+
+        tok = stream.peek()
+        if tok and tok.type == tokenize.OP and tok.string in stop_ops:
+            return node
+
+        stream.index = start
+        raise SyntaxError(f"Unexpected token in expression: {tok!r}")
+
+    # Public entry
     @staticmethod
     def build(node: PyLogicNode) -> Sequence[PyIRNode]:
         if not node.origins:
@@ -147,93 +299,68 @@ class StatementBuilder:
         StatementBuilder._forbid_slice(tokens)
         StatementBuilder._forbid_comprehension(tokens)
 
+        # 1) Аннотация / annotated assign: NAME : TYPE [= EXPR]
+        ann = StatementBuilder._parse_annotation_header(tokens)
+        if ann is not None:
+            name_tok, ann_text, eq_index = ann
+            line, col = name_tok.start
+
+            # NAME : TYPE
+            if eq_index is None:
+                return [
+                    PyIRAnnotation(
+                        line=line,
+                        offset=col,
+                        name=name_tok.string,
+                        annotation=ann_text,
+                    )
+                ]
+
+            # NAME : TYPE = EXPR   (annotated assign)
+            if eq_index + 1 >= len(tokens):
+                raise SyntaxError(
+                    "Отсутствует выражение после '=' в аннотированном присваивании"
+                )
+
+            rhs_tokens = tokens[eq_index + 1 :]
+            stream_r = TokenStream(rhs_tokens)
+            rhs_expr = StatementBuilder._parse_expression(stream_r)
+            if not stream_r.eof():
+                raise SyntaxError(
+                    "Лишние токены в правой части аннотированного присваивания"
+                )
+
+            return [
+                PyIRAnnotatedAssign(
+                    line=line,
+                    offset=col,
+                    name=name_tok.string,
+                    annotation=ann_text,
+                    value=rhs_expr,
+                )
+            ]
+
+        # 2) AugAssign / Assign / Expr
         assign_info = StatementBuilder._find_assign_ops(tokens)
 
-        # AugAssign
         if assign_info and assign_info[0] == "augassign":
             _, idx, op_str = assign_info
-            assert op_str is not None  # unreachable если _find_assign_ops норм
-
+            assert op_str is not None  # unreachable
             return [StatementBuilder._build_augassign(tokens, idx, op_str)]
 
-        # Simple / chained assign
         if assign_info and assign_info[0] == "assign":
             _, eq_indices = assign_info
             return StatementBuilder._build_assign(tokens, eq_indices)
 
-        # Expression-statement
+        # 3) Expression-statement
         stream = TokenStream(tokens)
         expr = StatementBuilder._parse_expression(stream)
         if not stream.eof():
-            raise SyntaxError("Unexpected tokens at end of expression")
+            raise SyntaxError("Лишние токены в конце выражения")
 
         return [expr]
 
-    # endregion
-
-    # region Forbidden constructs
-    @staticmethod
-    def _forbid_slice(tokens: List[tokenize.TokenInfo]) -> None:
-        """
-        Любой ':' внутри [] считаем slice и рубим.
-        Dict не ломается, т.к. там {}.
-        """
-        stack: List[str] = []
-
-        for t in tokens:
-            if t.type == tokenize.OP:
-                s = t.string
-                if s in "([{":
-                    stack.append(s)
-
-                elif s in ")]}":
-                    if stack:
-                        stack.pop()
-
-                elif s == ":" and stack and stack[-1] == "[":
-                    line, col = t.start
-                    raise SyntaxError(
-                        "Slicing syntax is not supported in py2glua\n"
-                        f"LINE|OFFSET: {line}|{col}"
-                    )
-
-    @staticmethod
-    def _forbid_comprehension(tokens: List[tokenize.TokenInfo]) -> None:
-        """
-        Любой 'for ... in ...' внутри ()/[]/{} считаем comprehension и рубим.
-        """
-        stack: List[str] = []
-
-        n = len(tokens)
-        for i, t in enumerate(tokens):
-            if t.type == tokenize.OP:
-                s = t.string
-                if s in "([{":
-                    stack.append(s)
-                elif s in ")]}":
-                    if stack:
-                        stack.pop()
-
-            if t.type == tokenize.NAME and t.string == "for":
-                if not stack:
-                    # for на верхнем уровне - это уже не expression-statement, сюда не долетит
-                    continue
-
-                # ищем "in" после этого же "for"
-                for j in range(i + 1, n):
-                    tj = tokens[j]
-                    if tj.type == tokenize.NAME and tj.string == "in":
-                        line, col = t.start
-                        raise SyntaxError(
-                            "Comprehensions are not supported in py2glua\n"
-                            f"LINE|OFFSET: {line}|{col}"
-                        )
-
-                # если не нашли in - это не comprehension, просто идём дальше
-
-    # endregion
-
-    # region Assignment builders
+    # Assignment builders
     @staticmethod
     def _build_augassign(
         tokens: List[tokenize.TokenInfo], op_index: int, op_str: str
@@ -242,19 +369,19 @@ class StatementBuilder:
         right_toks = tokens[op_index + 1 :]
 
         if not left_toks:
-            raise SyntaxError("Missing target for augmented assignment")
+            raise SyntaxError("Отсутствует цель для расширенного присваивания")
         if not right_toks:
-            raise SyntaxError("Missing value for augmented assignment")
+            raise SyntaxError("Отсутствует значение для расширенного присваивания")
 
         stream_left = TokenStream(left_toks)
         target = StatementBuilder._parse_postfix(stream_left)
         if not stream_left.eof():
-            raise SyntaxError("Invalid target in augmented assignment")
+            raise SyntaxError("Некорректная цель в расширенном присваивании")
 
         stream_right = TokenStream(right_toks)
         value = StatementBuilder._parse_expression(stream_right)
         if not stream_right.eof():
-            raise SyntaxError("Invalid value in augmented assignment")
+            raise SyntaxError("Некорректное значение в расширенном присваивании")
 
         op_map = {
             "+=": PyAugAssignType.ADD,
@@ -273,8 +400,9 @@ class StatementBuilder:
 
         op_enum = op_map.get(op_str)
         if op_enum is None:
-            # unreachable, если _find_assign_ops фильтрует по AUG
-            raise SyntaxError(f"Unknown augmented assignment operator: {op_str!r}")
+            raise SyntaxError(
+                f"Неизвестный оператор расширенного присваивания: {op_str!r}"
+            )
 
         line = left_toks[0].start[0]
         col = left_toks[0].start[1]
@@ -297,15 +425,14 @@ class StatementBuilder:
             rhs_tokens = tokens[last_eq + 1 :]
 
             if not rhs_tokens:
-                raise SyntaxError("Missing RHS in chained assignment")
+                raise SyntaxError("Отсутствует правая часть в цепочке присваиваний")
 
             stream_r = TokenStream(rhs_tokens)
             rhs_expr = StatementBuilder._parse_expression(stream_r)
             if not stream_r.eof():
-                raise SyntaxError("Invalid expression on RHS of assignment")
+                raise SyntaxError("Некорректное выражение в правой части присваивания")
 
             assigns: List[PyIRAssign] = []
-
             prev_value: PyIRNode = rhs_expr
 
             splits: List[List[tokenize.TokenInfo]] = []
@@ -314,15 +441,15 @@ class StatementBuilder:
                 splits.append(tokens[start:idx])
                 start = idx + 1  # пропускаем '='
 
-            # идём справа налево: c = expr, b = c, a = b
+            # справа налево: c = expr, b = c, a = b
             for lhs_toks in reversed(splits):
                 if not lhs_toks:
-                    raise SyntaxError("Missing left-hand side in assignment")
+                    raise SyntaxError("Отсутствует левая часть присваивания")
 
                 stream_l = TokenStream(lhs_toks)
                 lhs_expr = StatementBuilder._parse_postfix(stream_l)
                 if not stream_l.eof():
-                    raise SyntaxError("Unsupported complex assignment target")
+                    raise SyntaxError("Слишком сложная цель для присваивания")
 
                 line = lhs_toks[0].start[0]
                 col = lhs_toks[0].start[1]
@@ -335,11 +462,8 @@ class StatementBuilder:
                         value=prev_value,
                     )
                 )
-
                 prev_value = lhs_expr
 
-            # Порядок в assigns сейчас: [c = expr, b = c, a = b]
-            # Это правильный порядок исполнения, не трогаем.
             return assigns
 
         # Обычный assignment: LHS = RHS
@@ -348,38 +472,35 @@ class StatementBuilder:
         rhs_tokens = tokens[eq + 1 :]
 
         if not lhs_tokens:
-            raise SyntaxError("Missing LHS in assignment")
+            raise SyntaxError("Отсутствует левая часть присваивания")
         if not rhs_tokens:
-            raise SyntaxError("Missing RHS in assignment")
+            raise SyntaxError("Отсутствует правая часть присваивания")
 
         lhs_parts = StatementBuilder._split_top_level_commas(lhs_tokens)
 
         stream_r = TokenStream(rhs_tokens)
         rhs_expr = StatementBuilder._parse_expression(stream_r)
         if not stream_r.eof():
-            raise SyntaxError("Invalid RHS in assignment")
-
-        assigns: List[PyIRAssign] = []
+            raise SyntaxError("Некорректное выражение в правой части присваивания")
 
         # Один таргет: x = expr
         if len(lhs_parts) == 1:
             stream_l = TokenStream(lhs_parts[0])
             lhs_expr = StatementBuilder._parse_postfix(stream_l)
             if not stream_l.eof():
-                raise SyntaxError("Unsupported target expression")
+                raise SyntaxError("Некорректная цель присваивания")
 
             line = lhs_parts[0][0].start[0]
             col = lhs_parts[0][0].start[1]
 
-            assigns.append(
+            return [
                 PyIRAssign(
                     line=line,
                     offset=col,
                     targets=[lhs_expr],
                     value=rhs_expr,
                 )
-            )
-            return assigns
+            ]
 
         # Несколько таргетов: a, b = expr
         targets: List[PyIRNode] = []
@@ -387,32 +508,28 @@ class StatementBuilder:
             stream_l = TokenStream(part)
             t_expr = StatementBuilder._parse_postfix(stream_l)
             if not stream_l.eof():
-                raise SyntaxError("Invalid target in tuple assignment")
+                raise SyntaxError("Некорректная цель в множественном присваивании")
             targets.append(t_expr)
 
         line = lhs_parts[0][0].start[0]
         col = lhs_parts[0][0].start[1]
 
-        assigns.append(
+        return [
             PyIRAssign(
                 line=line,
                 offset=col,
                 targets=targets,
                 value=rhs_expr,
             )
-        )
+        ]
 
-        return assigns
-
-    # endregion
-
-    # region Expression parser (with precedence)
+    # Expression parser (precedence)
     @staticmethod
     def _parse_expression(stream: TokenStream) -> PyIRNode:
         """
         Верхний уровень выражения:
-        - сначала парсим логическое / арифметическое;
-        - затем, если есть ',' - собираем PyIRTuple.
+        - сначала парсим "or"
+        - затем, если есть ',' - собираем PyIRTuple (a, b, c)
         """
         first = StatementBuilder._parse_or(stream)
 
@@ -420,7 +537,6 @@ class StatementBuilder:
         if not (tok and tok.type == tokenize.OP and tok.string == ","):
             return first
 
-        # tuple expression: a, b, c
         elements: List[PyIRNode] = [first]
         while True:
             tok = stream.peek()
@@ -428,20 +544,16 @@ class StatementBuilder:
                 break
 
             stream.advance()  # съесть ','
-            tok = stream.peek()
-            if tok is None:
-                raise SyntaxError("Trailing comma in expression")
+            tok2 = stream.peek()
+            if tok2 is None:
+                raise SyntaxError("Запятая в конце выражения не поддерживается")
 
             elem = StatementBuilder._parse_or(stream)
             elements.append(elem)
 
         line = elements[0].line
         col = elements[0].offset
-        return PyIRTuple(
-            line=line,
-            offset=col,
-            elements=elements,
-        )
+        return PyIRTuple(line=line, offset=col, elements=elements)
 
     @staticmethod
     def _parse_or(stream: TokenStream) -> PyIRNode:
@@ -495,9 +607,8 @@ class StatementBuilder:
             if tok is None:
                 break
 
-            op_enum: Optional[PyBinOPType] = None
+            op_enum: PyBinOPType | None = None
 
-            # == != < > <= >=
             if tok.type == tokenize.OP and tok.string in {
                 "==",
                 "!=",
@@ -507,10 +618,9 @@ class StatementBuilder:
                 ">=",
             }:
                 op_tok = stream.advance()
-                assert op_tok is not None  # unreachable
+                assert op_tok is not None
                 op_enum = StatementBuilder._map_compare_op(op_tok.string)
 
-            # in / not in / is / is not
             elif tok.type == tokenize.NAME:
                 if tok.string == "in":
                     stream.advance()
@@ -522,6 +632,7 @@ class StatementBuilder:
                     if nxt and nxt.type == tokenize.NAME and nxt.string == "not":
                         stream.advance()
                         op_enum = PyBinOPType.IS_NOT
+
                     else:
                         op_enum = PyBinOPType.IS
 
@@ -534,7 +645,6 @@ class StatementBuilder:
                         op_enum = PyBinOPType.NOT_IN
 
                     else:
-                        # это не сравнение, откатываем
                         stream.index = start_idx
                         op_enum = None
 
@@ -542,7 +652,9 @@ class StatementBuilder:
                 break
 
             if used_comparison:
-                raise SyntaxError("Chained comparisons are not supported in py2glua")
+                raise SyntaxError(
+                    "Цепочные сравнения (a < b < c) не поддерживаются в py2glua"
+                )
 
             used_comparison = True
 
@@ -571,8 +683,7 @@ class StatementBuilder:
             return mapping[op]
 
         except KeyError:
-            # unreachable, выше фильтруем по набору
-            raise SyntaxError(f"Unknown comparison operator: {op!r}")
+            raise SyntaxError(f"Неизвестный оператор сравнения: {op!r}")
 
     @staticmethod
     def _parse_bit_or(stream: TokenStream) -> PyIRNode:
@@ -644,14 +755,14 @@ class StatementBuilder:
             tok = stream.peek()
             if tok and tok.type == tokenize.OP and tok.string in {"<<", ">>"}:
                 op_tok = stream.advance()
-                assert op_tok is not None  # unreachable
-
+                assert op_tok is not None
                 right = StatementBuilder._parse_add_sub(stream)
                 op = (
                     PyBinOPType.BIT_LSHIFT
                     if op_tok.string == "<<"
                     else PyBinOPType.BIT_RSHIFT
                 )
+
                 node = PyIRBinOP(
                     line=node.line,
                     offset=node.offset,
@@ -672,8 +783,7 @@ class StatementBuilder:
             tok = stream.peek()
             if tok and tok.type == tokenize.OP and tok.string in {"+", "-"}:
                 op_tok = stream.advance()
-                assert op_tok is not None  # unreachable
-
+                assert op_tok is not None
                 right = StatementBuilder._parse_mul_div(stream)
                 op = PyBinOPType.ADD if op_tok.string == "+" else PyBinOPType.SUB
                 node = PyIRBinOP(
@@ -691,14 +801,13 @@ class StatementBuilder:
 
     @staticmethod
     def _parse_mul_div(stream: TokenStream) -> PyIRNode:
-        node = StatementBuilder._parse_unary(stream)
+        node = StatementBuilder._parse_power(stream)
         while True:
             tok = stream.peek()
             if tok and tok.type == tokenize.OP and tok.string in {"*", "/", "//", "%"}:
                 op_tok = stream.advance()
-                assert op_tok is not None  # unreachable
-
-                right = StatementBuilder._parse_unary(stream)
+                assert op_tok is not None
+                right = StatementBuilder._parse_power(stream)
 
                 if op_tok.string == "*":
                     op = PyBinOPType.MUL
@@ -710,7 +819,7 @@ class StatementBuilder:
                     op = PyBinOPType.FLOORDIV
 
                 else:
-                    op = PyBinOPType.MOD  # "%"
+                    op = PyBinOPType.MOD
 
                 node = PyIRBinOP(
                     line=node.line,
@@ -719,24 +828,45 @@ class StatementBuilder:
                     left=node,
                     right=right,
                 )
+
             else:
                 break
 
         return node
 
     @staticmethod
+    def _parse_power(stream: TokenStream) -> PyIRNode:
+        """
+        '**' — правоассоциативный.
+        """
+        left = StatementBuilder._parse_unary(stream)
+
+        tok = stream.peek()
+        if tok and tok.type == tokenize.OP and tok.string == "**":
+            stream.advance()
+            right = StatementBuilder._parse_power(stream)  # right-assoc
+            return PyIRBinOP(
+                line=left.line,
+                offset=left.offset,
+                op=PyBinOPType.POW,
+                left=left,
+                right=right,
+            )
+
+        return left
+
+    @staticmethod
     def _parse_unary(stream: TokenStream) -> PyIRNode:
         tok = stream.peek()
         if tok is None:
-            raise SyntaxError("Unexpected end of input in unary expression")
+            raise SyntaxError("Неожиданный конец ввода в унарном выражении")
 
-        # +x, -x, ~x
         if tok.type == tokenize.OP and tok.string in {"+", "-", "~"}:
             op_tok = stream.advance()
-            assert op_tok is not None  # unreachable
-
+            assert op_tok is not None
             operand = StatementBuilder._parse_unary(stream)
             line, col = op_tok.start
+
             if op_tok.string == "+":
                 op = PyUnaryOPType.PLUS
 
@@ -753,11 +883,9 @@ class StatementBuilder:
                 value=operand,
             )
 
-        # not x
         if tok.type == tokenize.NAME and tok.string == "not":
             op_tok = stream.advance()
-            assert op_tok is not None  # unreachable
-
+            assert op_tok is not None
             operand = StatementBuilder._parse_unary(stream)
             line, col = op_tok.start
             return PyIRUnaryOP(
@@ -769,9 +897,7 @@ class StatementBuilder:
 
         return StatementBuilder._parse_postfix(stream)
 
-    # endregion
-
-    # region Primary + postfix (.attr, [idx], (args))
+    # Primary + postfix (.attr, [idx], (args))
     @staticmethod
     def _parse_postfix(stream: TokenStream) -> PyIRNode:
         node = StatementBuilder._parse_atom(stream)
@@ -781,29 +907,24 @@ class StatementBuilder:
             if tok is None:
                 break
 
-            # Attribute: .name
             if tok.type == tokenize.OP and tok.string == ".":
                 stream.advance()
                 name_tok = stream.advance()
                 if name_tok is None or name_tok.type != tokenize.NAME:
-                    raise SyntaxError("Expected attribute name after '.'")
+                    raise SyntaxError("Ожидалось имя атрибута после '.'")
 
-                line = node.line
-                col = node.offset
                 node = PyIRAttribute(
-                    line=line,
-                    offset=col,
+                    line=node.line,
+                    offset=node.offset,
                     value=node,
                     attr=name_tok.string,
                 )
                 continue
 
-            # Call: (args)
             if tok.type == tokenize.OP and tok.string == "(":
                 node = StatementBuilder._parse_call(stream, node)
                 continue
 
-            # Subscript: [expr]
             if tok.type == tokenize.OP and tok.string == "[":
                 node = StatementBuilder._parse_subscript(stream, node)
                 continue
@@ -816,59 +937,55 @@ class StatementBuilder:
     def _parse_atom(stream: TokenStream) -> PyIRNode:
         tok = stream.peek()
         if tok is None:
-            raise SyntaxError("Unexpected end of input in primary expression")
+            raise SyntaxError("Неожиданный конец ввода в выражении")
 
         # f-string
         if tok.type == tokenize.STRING and tok.string and tok.string[0] in ("f", "F"):
             return StatementBuilder._parse_fstring(stream)
 
-        # Имя
+        # Name / keywords treated as names at this stage
         if tok.type == tokenize.NAME:
-            tok = stream.advance()
-            assert tok is not None
+            tok2 = stream.advance()
+            assert tok2 is not None
+            line, col = tok2.start
+            return PyIRVarUse(line=line, offset=col, name=tok2.string)
 
-            line, col = tok.start
-            return PyIRVarUse(
-                line=line,
-                offset=col,
-                name=tok.string,
-            )
-
-        # Константа: число или обычная строка
+        # Constant
         if tok.type in (tokenize.NUMBER, tokenize.STRING):
-            tok = stream.advance()
-            assert tok is not None
+            tok2 = stream.advance()
+            assert tok2 is not None
+            line, col = tok2.start
+            return PyIRConstant(line=line, offset=col, value=tok2.string)
 
-            line, col = tok.start
-            value = tok.string
-
-            return PyIRConstant(
-                line=line,
-                offset=col,
-                value=value,
-            )
-
-        # (expr) или (a, b, c)
+        # Parenthesized
         if tok.type == tokenize.OP and tok.string == "(":
-            stream.advance()
+            lpar = stream.advance()
+            assert lpar is not None
+
+            nxt = stream.peek()
+            if nxt and nxt.type == tokenize.OP and nxt.string == ")":
+                stream.advance()
+                line, col = lpar.start
+                return PyIRTuple(line=line, offset=col, elements=[])
+
             node = StatementBuilder._parse_expression(stream)
             stream.expect_op(")")
             return node
 
-        # [a, b, c]
+        # List
         if tok.type == tokenize.OP and tok.string == "[":
             return StatementBuilder._parse_list_literal(stream)
 
-        # {a, b} или {k: v}
+        # Dict or Set
         if tok.type == tokenize.OP and tok.string == "{":
             return StatementBuilder._parse_dict_or_set_literal(stream)
 
-        raise SyntaxError(f"Unexpected token in primary expression: {tok!r}")
+        raise SyntaxError(f"Неожиданный токен в выражении: {tok!r}")
 
     @staticmethod
     def _parse_call(stream: TokenStream, func_node: PyIRNode) -> PyIRCall:
         lpar = stream.advance()
-        assert lpar and lpar.string == "("  # unreachable если вызывается корректно
+        assert lpar and lpar.string == "("
 
         args_p: list[PyIRNode] = []
         args_kw: dict[str, PyIRNode] = {}
@@ -876,7 +993,7 @@ class StatementBuilder:
         tok = stream.peek()
         if tok and tok.type == tokenize.OP and tok.string in ("*", "**"):
             raise SyntaxError(
-                "Argument unpacking (*args / **kwargs) is not supported in py2glua"
+                "Распаковка аргументов (*args / **kwargs) не поддерживается в py2glua"
             )
 
         if not (tok and tok.type == tokenize.OP and tok.string == ")"):
@@ -884,13 +1001,12 @@ class StatementBuilder:
                 t = stream.peek()
                 if t and t.type == tokenize.OP and t.string in ("*", "**"):
                     raise SyntaxError(
-                        "Argument unpacking (*args / **kwargs) is not supported in py2glua"
+                        "Распаковка аргументов (*args / **kwargs) не поддерживается в py2glua"
                     )
 
                 t1 = stream.peek()
                 t2 = stream.peek(1)
 
-                # keyword-аргумент: name=expr
                 if (
                     t1
                     and t1.type == tokenize.NAME
@@ -899,15 +1015,11 @@ class StatementBuilder:
                     and t2.string == "="
                 ):
                     key_tok = stream.advance()
-                    assert key_tok is not None  # unreachable
-
-                    stream.advance()  # съесть '='
-
+                    assert key_tok is not None
+                    stream.advance()  # '='
                     val = StatementBuilder._parse_expression(stream)
                     args_kw[key_tok.string] = val
-
                 else:
-                    # позиционный аргумент
                     arg = StatementBuilder._parse_expression(stream)
                     args_p.append(arg)
 
@@ -915,17 +1027,13 @@ class StatementBuilder:
                 if tok and tok.type == tokenize.OP and tok.string == ",":
                     stream.advance()
                     continue
-
                 break
 
         stream.expect_op(")")
 
-        line = func_node.line
-        col = func_node.offset
-
         return PyIRCall(
-            line=line,
-            offset=col,
+            line=func_node.line,
+            offset=func_node.offset,
             func=func_node,
             args_p=args_p,
             args_kw=args_kw,
@@ -934,17 +1042,14 @@ class StatementBuilder:
     @staticmethod
     def _parse_subscript(stream: TokenStream, base: PyIRNode) -> PyIRSubscript:
         lbr = stream.advance()
-        assert lbr and lbr.string == "["  # unreachable если вызывается корректно
+        assert lbr and lbr.string == "["
 
         index_expr = StatementBuilder._parse_expression(stream)
         stream.expect_op("]")
 
-        line = base.line
-        col = base.offset
-
         return PyIRSubscript(
-            line=line,
-            offset=col,
+            line=base.line,
+            offset=base.offset,
             value=base,
             index=index_expr,
         )
@@ -952,11 +1057,11 @@ class StatementBuilder:
     @staticmethod
     def _parse_list_literal(stream: TokenStream) -> PyIRList:
         lbr = stream.advance()
-        assert lbr and lbr.string == "["  # unreachable
+        assert lbr and lbr.string == "["
 
         elements: list[PyIRNode] = []
-
         tok = stream.peek()
+
         if tok and not (tok.type == tokenize.OP and tok.string == "]"):
             while True:
                 elem = StatementBuilder._parse_expression(stream)
@@ -964,107 +1069,102 @@ class StatementBuilder:
                 tok = stream.peek()
                 if tok and tok.type == tokenize.OP and tok.string == ",":
                     stream.advance()
+                    tok2 = stream.peek()
+                    if tok2 and tok2.type == tokenize.OP and tok2.string == "]":
+                        break
                     continue
-
                 break
 
         stream.expect_op("]")
         line, col = lbr.start
-        return PyIRList(
-            line=line,
-            offset=col,
-            elements=elements,
-        )
+        return PyIRList(line=line, offset=col, elements=elements)
 
     @staticmethod
     def _parse_dict_or_set_literal(stream: TokenStream) -> PyIRNode:
         lbr = stream.advance()
-        assert lbr and lbr.string == "{"  # unreachable
+        assert lbr and lbr.string == "{"
 
-        items: list[PyIRDictItem] = []
-        elements: list[PyIRNode] = []
+        line, col = lbr.start
 
         tok = stream.peek()
-        if tok and not (tok.type == tokenize.OP and tok.string == "}"):
-            first_expr = StatementBuilder._parse_expression(stream)
-            tok = stream.peek()
+        if tok and tok.type == tokenize.OP and tok.string == "}":
+            stream.advance()
+            return PyIRDict(line=line, offset=col, items=[])
 
-            # dict: {k: v, ...}
-            if tok and tok.type == tokenize.OP and tok.string == ":":
-                stream.advance()
-                value_expr = StatementBuilder._parse_expression(stream)
-                line = first_expr.line
-                col = first_expr.offset
+        key = StatementBuilder._parse_expression_until(stream, {":"})
+        tok = stream.peek()
+
+        if tok and tok.type == tokenize.OP and tok.string == ":":
+            items: list[PyIRDictItem] = []
+
+            while True:
+                stream.expect_op(":")
+                value = StatementBuilder._parse_expression_until(stream, {",", "}"})
+
                 items.append(
                     PyIRDictItem(
-                        line=line,
-                        offset=col,
-                        key=first_expr,
-                        value=value_expr,
+                        line=key.line,
+                        offset=key.offset,
+                        key=key,
+                        value=value,
                     )
                 )
 
-                while True:
+                tok = stream.peek()
+                if tok and tok.type == tokenize.OP and tok.string == ",":
+                    stream.advance()
+
                     tok = stream.peek()
-                    if tok and tok.type == tokenize.OP and tok.string == ",":
+                    if tok and tok.type == tokenize.OP and tok.string == "}":
                         stream.advance()
-                        tok = stream.peek()
-                        if tok and not (tok.type == tokenize.OP and tok.string == "}"):
-                            k_expr = StatementBuilder._parse_expression(stream)
-                            stream.expect_op(":")
-                            v_expr = StatementBuilder._parse_expression(stream)
-                            line = k_expr.line
-                            col = k_expr.offset
-                            items.append(
-                                PyIRDictItem(
-                                    line=line,
-                                    offset=col,
-                                    key=k_expr,
-                                    value=v_expr,
-                                )
-                            )
-                            continue
-                    break
+                        return PyIRDict(line=line, offset=col, items=items)
 
-            else:
-                # set-like: {a, b, c}
-                elements.append(first_expr)
-                while True:
-                    tok = stream.peek()
-                    if tok and tok.type == tokenize.OP and tok.string == ",":
-                        stream.advance()
-                        tok = stream.peek()
-                        if tok and not (tok.type == tokenize.OP and tok.string == "}"):
-                            elem = StatementBuilder._parse_expression(stream)
-                            elements.append(elem)
-                            continue
-                    break
+                    key = StatementBuilder._parse_expression_until(stream, {":"})
+                    continue
 
-        stream.expect_op("}")
-        line, col = lbr.start
+                if tok and tok.type == tokenize.OP and tok.string == "}":
+                    stream.advance()
+                    return PyIRDict(line=line, offset=col, items=items)
 
-        # {} -> dict, {a: b} -> dict, {a, b} -> set
-        if items or not elements:
-            return PyIRDict(
-                line=line,
-                offset=col,
-                items=items,
-            )
+                raise SyntaxError(f"Expected ',' or '}}' in dict literal, got {tok!r}")
 
-        return PyIRSet(
-            line=line,
-            offset=col,
-            elements=elements,
-        )
+        elements: list[PyIRNode] = [key]
+
+        while True:
+            tok = stream.peek()
+            if tok and tok.type == tokenize.OP and tok.string == ",":
+                stream.advance()
+
+                tok = stream.peek()
+                if tok and tok.type == tokenize.OP and tok.string == "}":
+                    stream.advance()
+                    return PyIRSet(line=line, offset=col, elements=elements)
+
+                el = StatementBuilder._parse_expression(stream)
+                elements.append(el)
+                continue
+
+            if tok and tok.type == tokenize.OP and tok.string == "}":
+                stream.advance()
+                return PyIRSet(line=line, offset=col, elements=elements)
+
+            raise SyntaxError(f"Expected ',' or '}}' in set literal, got {tok!r}")
 
     @staticmethod
     def _parse_fstring(stream: TokenStream) -> PyIRFString:
         tok = stream.advance()
         assert tok is not None
 
-        raw = tok.string  # f"..."
-        if not raw.startswith(('f"', "f'")):
-            raise SyntaxError("Only simple f-strings are supported")
+        raw = tok.string
+        if not raw or raw[0] not in ("f", "F"):
+            raise SyntaxError("Некорректная f-строка")
+
+        # минималистичная поддержка: f"....{name}...."
+        # без форматов, без выражений, только идентификатор
+        if not raw.startswith(('f"', "f'", 'F"', "F'")):
+            raise SyntaxError(
+                "Поддерживаются только простые f-строки вида f\"...\" или f'...'"
+            )
 
         body = raw[2:-1]
 
@@ -1074,7 +1174,7 @@ class StatementBuilder:
         i = 0
         n = len(body)
 
-        def flush():
+        def flush() -> None:
             if buf:
                 parts.append("".join(buf))
                 buf.clear()
@@ -1091,12 +1191,12 @@ class StatementBuilder:
                     i += 1
 
                 if i >= n:
-                    raise SyntaxError("Unmatched '{' in f-string")
+                    raise SyntaxError("Незакрытая '{' в f-строке")
 
                 name = body[start:i].strip()
                 if not name.isidentifier():
                     raise SyntaxError(
-                        "Only simple variable substitution is allowed in f-strings"
+                        "В f-строках разрешена только подстановка простого имени: {name}"
                     )
 
                 parts.append(
@@ -1106,7 +1206,6 @@ class StatementBuilder:
                         name=name,
                     )
                 )
-
                 i += 1
                 continue
 
@@ -1120,8 +1219,3 @@ class StatementBuilder:
             offset=tok.start[1],
             parts=parts,
         )
-
-    # endregion
-
-
-# TODO: chained comparisons (a < b < c)

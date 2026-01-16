@@ -56,6 +56,6 @@ def exit_with_code(code: int, msg: str | None = None) -> None:
 
         else:
             logger.error(msg)
+            logger.error(f"Exit code: {code}")
 
-    logger.info(f"Код выхода: {code}")
     sys.exit(code)

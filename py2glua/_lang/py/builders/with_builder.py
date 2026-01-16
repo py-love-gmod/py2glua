@@ -5,7 +5,7 @@ from typing import List, Sequence
 
 from ...etc import TokenStream
 from ...parse import PyLogicNode
-from ..ir_builder import PyIRBuilder
+from ..build_context import build_block
 from ..ir_dataclass import PyIRNode, PyIRWith, PyIRWithItem
 from .statement_builder import StatementBuilder
 
@@ -84,7 +84,7 @@ class WithBuilder:
                 )
             )
 
-        body_nodes = PyIRBuilder._build_ir_block(node.children)
+        body_nodes = build_block(node.children)
 
         return [
             PyIRWith(

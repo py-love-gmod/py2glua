@@ -1,10 +1,11 @@
 import tokenize
-from typing import List, Optional, Sequence
+from typing import List, Sequence
 
 from ...etc import TokenStream
 from ...parse import PyLogicKind, PyLogicNode
-from ..builders import StatementBuilder
+from ..build_context import build_block
 from ..ir_dataclass import PyIRFunctionDef, PyIRNode
+from .statement_builder import StatementBuilder
 
 
 class FunctionBuilder:
@@ -57,7 +58,7 @@ class FunctionBuilder:
         if not tail:
             raise SyntaxError("Function header must end with ':'")
 
-        return_ann_str: Optional[str] = None
+        return_ann_str: str | None = None
         colon_idx_in_tail = FunctionBuilder._find_colon_in_tail(tail)
 
         before_colon = tail[:colon_idx_in_tail]
@@ -76,7 +77,7 @@ class FunctionBuilder:
             if not ann_tokens:
                 raise SyntaxError("Missing return annotation after '->'")
 
-            return_ann_str = FunctionBuilder._tokens_to_src(ann_tokens).strip()
+            return_ann_str = FunctionBuilder._tokens_to_clean_src(ann_tokens).strip()
             if not return_ann_str:
                 raise SyntaxError("Empty return annotation")
 
@@ -86,9 +87,7 @@ class FunctionBuilder:
 
         body_children = list(node.children)
 
-        from ..ir_builder import PyIRBuilder
-
-        body = PyIRBuilder._build_ir_block(body_children)
+        body = build_block(body_children)
 
         line, col = tokens[def_idx].start
 
@@ -145,8 +144,14 @@ class FunctionBuilder:
         return tok.type == tokenize.OP and tok.string == s
 
     @staticmethod
-    def _tokens_to_src(tokens: List[tokenize.TokenInfo]) -> str:
-        return tokenize.untokenize(tokens)
+    def _tokens_to_clean_src(tokens: list[tokenize.TokenInfo]) -> str:
+        parts: list[str] = []
+
+        for t in tokens:
+            if t.type in (tokenize.NAME, tokenize.OP, tokenize.STRING, tokenize.NUMBER):
+                parts.append(t.string)
+
+        return "".join(parts)
 
     @staticmethod
     def _split_top_level_commas(
@@ -211,12 +216,12 @@ class FunctionBuilder:
                 raise SyntaxError(f"Duplicate parameter name: {name!r}")
 
             ann_str = (
-                FunctionBuilder._tokens_to_src(ann_tokens).strip()
+                FunctionBuilder._tokens_to_clean_src(ann_tokens).strip()
                 if ann_tokens
                 else None
             )
 
-            default_str: Optional[str] = None
+            default_str: str | None = None
             if default_tokens is not None:
                 stream = TokenStream(default_tokens)
                 _ = StatementBuilder._parse_expression(stream)
@@ -225,7 +230,9 @@ class FunctionBuilder:
                         "Invalid default value expression in function parameter"
                     )
 
-                default_str = FunctionBuilder._tokens_to_src(default_tokens).strip()
+                default_str = FunctionBuilder._tokens_to_clean_src(
+                    default_tokens
+                ).strip()
                 if not default_str:
                     raise SyntaxError("Empty default expression in function parameter")
 
@@ -236,7 +243,7 @@ class FunctionBuilder:
     @staticmethod
     def _parse_single_param(
         tokens: List[tokenize.TokenInfo],
-    ) -> tuple[str, List[tokenize.TokenInfo], Optional[List[tokenize.TokenInfo]]]:
+    ) -> tuple[str, List[tokenize.TokenInfo], List[tokenize.TokenInfo] | None]:
         if tokens[0].type == tokenize.OP and tokens[0].string in {"*", "**"}:
             raise SyntaxError(
                 "Argument unpacking in function signature is not supported in py2glua"
@@ -251,8 +258,8 @@ class FunctionBuilder:
         if not rest:
             return name, [], None
 
-        colon_idx: Optional[int] = None
-        eq_idx: Optional[int] = None
+        colon_idx: int | None = None
+        eq_idx: int | None = None
 
         depth = 0
         for i, t in enumerate(rest):
@@ -274,7 +281,7 @@ class FunctionBuilder:
                 continue
 
         ann_tokens: List[tokenize.TokenInfo] = []
-        default_tokens: Optional[List[tokenize.TokenInfo]] = None
+        default_tokens: List[tokenize.TokenInfo] | None = None
 
         if colon_idx is None and eq_idx is not None:
             rhs = rest[eq_idx + 1 :]

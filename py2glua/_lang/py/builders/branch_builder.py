@@ -1,9 +1,9 @@
 import tokenize
-from typing import Sequence
+from collections.abc import Sequence
 
 from ...etc import TokenStream
 from ...parse import PyLogicKind, PyLogicNode
-from ..ir_builder import PyIRBuilder
+from ..build_context import build_block
 from ..ir_dataclass import PyIRIf, PyIRNode
 from .statement_builder import StatementBuilder
 
@@ -32,11 +32,14 @@ class BranchBuilder:
             raise SyntaxError("Branch chain must start with 'if'")
 
         test = BranchBuilder._parse_if_test(first_hdr)
-        body = PyIRBuilder._build_ir_block(parts[0].children)
+        body = build_block(parts[0].children)
+
+        first_tok = BranchBuilder._first_token(first_hdr)
+        line, col = first_tok.start
 
         root = PyIRIf(
-            line=first_hdr.tokens[0].start[0],
-            offset=first_hdr.tokens[0].start[1],
+            line=line,
+            offset=col,
             test=test,
             body=body,
             orelse=[],
@@ -50,10 +53,14 @@ class BranchBuilder:
 
             if kw == "elif":
                 test2 = BranchBuilder._parse_if_test(hdr)
-                body2 = PyIRBuilder._build_ir_block(p.children)
+                body2 = build_block(p.children)
+
+                t0 = BranchBuilder._first_token(hdr)
+                l2, c2 = t0.start
+
                 nxt = PyIRIf(
-                    line=hdr.tokens[0].start[0],
-                    offset=hdr.tokens[0].start[1],
+                    line=l2,
+                    offset=c2,
                     test=test2,
                     body=body2,
                     orelse=[],
@@ -63,26 +70,36 @@ class BranchBuilder:
                 continue
 
             if kw == "else":
-                cur.orelse = PyIRBuilder._build_ir_block(p.children)
+                cur.orelse = build_block(p.children)
                 continue
 
             raise SyntaxError(f"Unexpected branch header: {kw!r}")
 
         return root
 
+    # region header helpers
     @staticmethod
     def _get_header(part: PyLogicNode):
         if not part.origins:
             raise ValueError("BRANCH_PART has no origins")
+
         return part.origins[0]
 
     @staticmethod
-    def _header_keyword(raw_header) -> str:
+    def _first_token(raw_header) -> tokenize.TokenInfo:
         toks = [t for t in raw_header.tokens if isinstance(t, tokenize.TokenInfo)]
-        if not toks or toks[0].type != tokenize.NAME:
+        if not toks:
+            raise SyntaxError("Empty branch header tokens")
+
+        return toks[0]
+
+    @staticmethod
+    def _header_keyword(raw_header) -> str:
+        tok0 = BranchBuilder._first_token(raw_header)
+        if tok0.type != tokenize.NAME:
             raise SyntaxError("Invalid branch header")
 
-        return toks[0].string
+        return tok0.string
 
     @staticmethod
     def _parse_if_test(raw_header) -> PyIRNode:
@@ -118,3 +135,5 @@ class BranchBuilder:
             raise SyntaxError("Invalid condition expression in if/elif")
 
         return test
+
+    # endregion

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import IntEnum, auto
 from pathlib import Path
@@ -5,7 +7,7 @@ from pathlib import Path
 from ...glua import nil
 
 
-# region Base
+# Base
 @dataclass
 class PyIRNode:
     line: int | None
@@ -15,10 +17,7 @@ class PyIRNode:
         raise NotImplementedError()
 
 
-# endregion
-
-
-# region File / Decorator
+# File / Decorators
 @dataclass
 class PyIRFile(PyIRNode):
     path: Path | None
@@ -36,22 +35,18 @@ class PyIRFile(PyIRNode):
 @dataclass
 class PyIRDecorator(PyIRNode):
     name: str
-    args_p: list[PyIRNode] = field(default_factory=list)
-    args_kw: dict[str, PyIRNode] = field(default_factory=dict)
+    args_p: list["PyIRNode"] = field(default_factory=list)
+    args_kw: dict[str, "PyIRNode"] = field(default_factory=dict)
 
     def walk(self):
         yield self
-        for arg_p in self.args_p:
-            yield from arg_p.walk()
-
-        for arg_kw in self.args_kw.values():
-            yield from arg_kw.walk()
-
-
-# endregion
+        for a in self.args_p:
+            yield from a.walk()
+        for a in self.args_kw.values():
+            yield from a.walk()
 
 
-# region Import
+# Import
 class PyIRImportType(IntEnum):
     UNKNOWN = auto()
     LOCAL = auto()
@@ -66,40 +61,16 @@ class PyIRImport(PyIRNode):
     names: list[str | tuple[str, str]]
     if_from: bool
     level: int
-
-    itype: PyIRImportType
+    itype: PyIRImportType = PyIRImportType.UNKNOWN
 
     def walk(self):
         yield self
 
 
-# endregion
-
-
-# region Vars & Constants
+# Constants / Names
 @dataclass
 class PyIRConstant(PyIRNode):
     value: object | nil
-
-    def walk(self):
-        yield self
-
-
-@dataclass
-class PyIRFString(PyIRNode):
-    parts: list[PyIRNode | str]
-
-    def walk(self):
-        yield self
-        for p in self.parts:
-            if isinstance(p, PyIRNode):
-                yield from p.walk()
-
-
-@dataclass
-class PyIRVarCreate(PyIRNode):
-    name: str
-    is_global: bool = False
 
     def walk(self):
         yield self
@@ -113,10 +84,48 @@ class PyIRVarUse(PyIRNode):
         yield self
 
 
-# endregion
+@dataclass
+class PyIRVarCreate(PyIRNode):
+    name: str
+    is_global: bool = False
+
+    def walk(self):
+        yield self
 
 
-# region Attribute / Subscript / Collections
+@dataclass
+class PyIRFString(PyIRNode):
+    parts: list["PyIRNode | str"]
+
+    def walk(self):
+        yield self
+        for p in self.parts:
+            if isinstance(p, PyIRNode):
+                yield from p.walk()
+
+
+# Annotation
+@dataclass
+class PyIRAnnotation(PyIRNode):
+    name: str
+    annotation: str
+
+    def walk(self):
+        yield self
+
+
+@dataclass
+class PyIRAnnotatedAssign(PyIRNode):
+    name: str
+    annotation: str
+    value: PyIRNode
+
+    def walk(self):
+        yield self
+        yield from self.value.walk()
+
+
+# Attribute / Subscript / Collections
 @dataclass
 class PyIRAttribute(PyIRNode):
     value: PyIRNode
@@ -144,8 +153,8 @@ class PyIRList(PyIRNode):
 
     def walk(self):
         yield self
-        for el in self.elements:
-            yield from el.walk()
+        for e in self.elements:
+            yield from e.walk()
 
 
 @dataclass
@@ -154,8 +163,8 @@ class PyIRTuple(PyIRNode):
 
     def walk(self):
         yield self
-        for el in self.elements:
-            yield from el.walk()
+        for e in self.elements:
+            yield from e.walk()
 
 
 @dataclass
@@ -164,8 +173,8 @@ class PyIRSet(PyIRNode):
 
     def walk(self):
         yield self
-        for el in self.elements:
-            yield from el.walk()
+        for e in self.elements:
+            yield from e.walk()
 
 
 @dataclass
@@ -185,55 +194,43 @@ class PyIRDict(PyIRNode):
 
     def walk(self):
         yield self
-        for item in self.items:
-            yield from item.walk()
+        for i in self.items:
+            yield from i.walk()
 
 
-# endregion
-
-
-# region OP
+# Operations
 class PyBinOPType(IntEnum):
-    OR = auto()  # or
-    AND = auto()  # and
-
-    EQ = auto()  # ==
-    NE = auto()  # !=
-    LT = auto()  # <
-    GT = auto()  # >
-    LE = auto()  # <=
-    GE = auto()  # >=
-
-    IN = auto()  # in
-    NOT_IN = auto()  # not in
-
-    IS = auto()  # is
-    IS_NOT = auto()  # is not
-
-    BIT_OR = auto()  # |
-    BIT_XOR = auto()  # ^
-    BIT_AND = auto()  # &
-    BIT_LSHIFT = auto()  # <<
-    BIT_RSHIFT = auto()  # >>
-
-    ADD = auto()  # +
-    SUB = auto()  # -
-
-    MUL = auto()  # *
-    DIV = auto()  # /
-    FLOORDIV = auto()  # //
-    MOD = auto()  # %
-
-    POW = auto()  # **
+    OR = auto()
+    AND = auto()
+    EQ = auto()
+    NE = auto()
+    LT = auto()
+    GT = auto()
+    LE = auto()
+    GE = auto()
+    IN = auto()
+    NOT_IN = auto()
+    IS = auto()
+    IS_NOT = auto()
+    BIT_OR = auto()
+    BIT_XOR = auto()
+    BIT_AND = auto()
+    BIT_LSHIFT = auto()
+    BIT_RSHIFT = auto()
+    ADD = auto()
+    SUB = auto()
+    MUL = auto()
+    DIV = auto()
+    FLOORDIV = auto()
+    MOD = auto()
+    POW = auto()
 
 
 class PyUnaryOPType(IntEnum):
-    PLUS = auto()  # +
-    MINUS = auto()  # -
-
-    NOT = auto()  # not
-
-    BIT_INV = auto()  # ~
+    PLUS = auto()
+    MINUS = auto()
+    NOT = auto()
+    BIT_INV = auto()
 
 
 @dataclass
@@ -258,23 +255,20 @@ class PyIRUnaryOP(PyIRNode):
         yield from self.value.walk()
 
 
-# endregion
-
-
-# region Assignment
+# Assignment
 class PyAugAssignType(IntEnum):
-    ADD = auto()  # +=
-    SUB = auto()  # -=
-    MUL = auto()  # *=
-    DIV = auto()  # /=
-    FLOORDIV = auto()  # //=
-    MOD = auto()  # %=
-    POW = auto()  # **=
-    BIT_OR = auto()  # |=
-    BIT_XOR = auto()  # ^=
-    BIT_AND = auto()  # &=
-    LSHIFT = auto()  # <<=
-    RSHIFT = auto()  # >>=
+    ADD = auto()
+    SUB = auto()
+    MUL = auto()
+    DIV = auto()
+    FLOORDIV = auto()
+    MOD = auto()
+    POW = auto()
+    BIT_OR = auto()
+    BIT_XOR = auto()
+    BIT_AND = auto()
+    LSHIFT = auto()
+    RSHIFT = auto()
 
 
 @dataclass
@@ -302,10 +296,7 @@ class PyIRAugAssign(PyIRNode):
         yield from self.value.walk()
 
 
-# endregion
-
-
-# region Function
+# Call / Function / Class
 @dataclass
 class PyIRCall(PyIRNode):
     func: PyIRNode
@@ -315,12 +306,11 @@ class PyIRCall(PyIRNode):
     def walk(self):
         yield self
         yield from self.func.walk()
+        for a in self.args_p:
+            yield from a.walk()
 
-        for arg_p in self.args_p:
-            yield from arg_p.walk()
-
-        for arg_kw in self.args_kw.values():
-            yield from arg_kw.walk()
+        for a in self.args_kw.values():
+            yield from a.walk()
 
 
 @dataclass
@@ -328,66 +318,33 @@ class PyIRFunctionDef(PyIRNode):
     name: str
     signature: dict[str, tuple[str | None, str | None]]
     decorators: list[PyIRDecorator] = field(default_factory=list)
-    body: list["PyIRNode"] = field(default_factory=list)
+    body: list[PyIRNode] = field(default_factory=list)
 
     def walk(self):
         yield self
-        for dec in self.decorators:
-            yield from dec.walk()
+        for d in self.decorators:
+            yield from d.walk()
 
-        for node in self.body:
-            yield from node.walk()
-
-
-# endregion
+        for n in self.body:
+            yield from n.walk()
 
 
-# region Class
 @dataclass
 class PyIRClassDef(PyIRNode):
     name: str
     decorators: list[PyIRDecorator] = field(default_factory=list)
-    body: list["PyIRNode"] = field(default_factory=list)
+    body: list[PyIRNode] = field(default_factory=list)
 
     def walk(self):
         yield self
-        for dec in self.decorators:
-            yield from dec.walk()
+        for d in self.decorators:
+            yield from d.walk()
 
-        for node in self.body:
-            yield from node.walk()
-
-
-# endregion
+        for n in self.body:
+            yield from n.walk()
 
 
-# region Del
-@dataclass
-class PyIRDel(PyIRNode):
-    value: PyIRNode
-
-    def walk(self):
-        yield self
-        yield from self.value.walk()
-
-
-# endregion
-
-
-# region Return
-@dataclass
-class PyIRReturn(PyIRNode):
-    value: PyIRNode
-
-    def walk(self):
-        yield self
-        yield from self.value.walk()
-
-
-# endregion
-
-
-# region Control Flow: If / Loop / Break / Continue
+# Control Flow
 @dataclass
 class PyIRIf(PyIRNode):
     test: PyIRNode
@@ -397,12 +354,11 @@ class PyIRIf(PyIRNode):
     def walk(self):
         yield self
         yield from self.test.walk()
+        for n in self.body:
+            yield from n.walk()
 
-        for node in self.body:
-            yield from node.walk()
-
-        for node in self.orelse:
-            yield from node.walk()
+        for n in self.orelse:
+            yield from n.walk()
 
 
 @dataclass
@@ -413,9 +369,8 @@ class PyIRWhile(PyIRNode):
     def walk(self):
         yield self
         yield from self.test.walk()
-
-        for node in self.body:
-            yield from node.walk()
+        for n in self.body:
+            yield from n.walk()
 
 
 @dataclass
@@ -428,9 +383,17 @@ class PyIRFor(PyIRNode):
         yield self
         yield from self.target.walk()
         yield from self.iter.walk()
+        for n in self.body:
+            yield from n.walk()
 
-        for node in self.body:
-            yield from node.walk()
+
+@dataclass
+class PyIRReturn(PyIRNode):
+    value: PyIRNode
+
+    def walk(self):
+        yield self
+        yield from self.value.walk()
 
 
 @dataclass
@@ -445,43 +408,7 @@ class PyIRContinue(PyIRNode):
         yield self
 
 
-# endregion
-
-
-# region Try / Except / With
-@dataclass
-class PyIRExceptHandler(PyIRNode):
-    type: PyIRNode | None  # except ValueError:
-    name: str | None  # except ValueError as e:
-    body: list[PyIRNode] = field(default_factory=list)
-
-    def walk(self):
-        yield self
-        if self.type is not None:
-            yield from self.type.walk()
-
-        for node in self.body:
-            yield from node.walk()
-
-
-@dataclass
-class PyIRTry(PyIRNode):
-    body: list[PyIRNode] = field(default_factory=list)
-    handlers: list[PyIRExceptHandler] = field(default_factory=list)
-    finalbody: list[PyIRNode] = field(default_factory=list)
-
-    def walk(self):
-        yield self
-        for node in self.body:
-            yield from node.walk()
-
-        for h in self.handlers:
-            yield from h.walk()
-
-        for node in self.finalbody:
-            yield from node.walk()
-
-
+# With
 @dataclass
 class PyIRWithItem(PyIRNode):
     context_expr: PyIRNode
@@ -508,10 +435,7 @@ class PyIRWith(PyIRNode):
             yield from node.walk()
 
 
-# endregion
-
-
-# region Comment
+# Comment
 @dataclass
 class PyIRComment(PyIRNode):
     value: str
@@ -520,20 +444,14 @@ class PyIRComment(PyIRNode):
         yield self
 
 
-# endregion
-
-
-# region Pass
+# Pass
 @dataclass
 class PyIRPass(PyIRNode):
     def walk(self):
         yield self
 
 
-# endregion
-
-
-# region Backend expr
+# Backend escape hatch
 class PyIRBackendKind(IntEnum):
     GLOBAL = auto()
     CALL = auto()
@@ -551,12 +469,8 @@ class PyIRBackendExpr(PyIRNode):
 
     def walk(self):
         yield self
+        for a in self.args_p:
+            yield from a.walk()
 
-        for arg_p in self.args_p:
-            yield from arg_p.walk()
-
-        for arg_kw in self.args_kw.values():
-            yield from arg_kw.walk()
-
-
-# endregion
+        for a in self.args_kw.values():
+            yield from a.walk()

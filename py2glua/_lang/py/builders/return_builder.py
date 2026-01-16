@@ -4,8 +4,8 @@ from typing import Sequence
 from ....glua import nil
 from ...etc import TokenStream
 from ...parse import PyLogicNode
-from ..builders import StatementBuilder
 from ..ir_dataclass import PyIRConstant, PyIRNode, PyIRReturn
+from .statement_builder import StatementBuilder
 
 
 class ReturnBuilder:
@@ -14,7 +14,8 @@ class ReturnBuilder:
         raw = node.origins[0]
 
         tokens = [
-            t for t in raw.tokens
+            t
+            for t in raw.tokens
             if isinstance(t, tokenize.TokenInfo)
             and t.type not in (tokenize.NL, tokenize.NEWLINE)
         ]

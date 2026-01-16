@@ -1,5 +1,6 @@
 import argparse
 import shutil
+import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -39,7 +40,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "src",
         type=Path,
         nargs="?",
-        default=None,
+        default=Path("./source"),
         help="Исходная папка для исходного кода (по умолчанию: ./source)",
     )
 

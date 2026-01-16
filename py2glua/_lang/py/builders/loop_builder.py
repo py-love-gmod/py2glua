@@ -3,7 +3,7 @@ from typing import Sequence
 
 from ...etc import TokenStream
 from ...parse import PyLogicKind, PyLogicNode
-from ..ir_builder import PyIRBuilder
+from ..build_context import build_block
 from ..ir_dataclass import PyIRFor, PyIRNode, PyIRWhile
 from .statement_builder import StatementBuilder
 
@@ -39,7 +39,7 @@ class LoopBuilder:
         if first.type != tokenize.NAME:
             raise SyntaxError("Invalid loop header")
 
-        body = PyIRBuilder._build_ir_block(node.children)
+        body = build_block(node.children)
 
         if first.string == "while":
             return [LoopBuilder._build_while(tokens, body)]

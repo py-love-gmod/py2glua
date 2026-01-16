@@ -2,6 +2,7 @@ import tokenize
 from typing import Sequence
 
 from ...parse import PyLogicKind, PyLogicNode
+from ..build_context import build_block
 from ..ir_dataclass import PyIRClassDef, PyIRNode
 
 
@@ -47,9 +48,7 @@ class ClassBuilder:
 
         body_children = list(node.children)
 
-        from ..ir_builder import PyIRBuilder
-
-        body = PyIRBuilder._build_ir_block(body_children)
+        body = build_block(body_children)
 
         line, col = name_tok.start
 

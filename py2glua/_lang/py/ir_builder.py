@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from ..parse import PyLogicBlockBuilder, PyLogicKind, PyLogicNode
+from .build_context import set_build_block
 from .builders import (
     BranchBuilder,
     ClassBuilder,
@@ -36,6 +37,7 @@ class PyIRBuilder:
 
     @classmethod
     def build_file(cls, source: str, path_to_file: Path | None = None) -> PyIRFile:
+        set_build_block(cls._build_ir_block)
         logic_blocks = PyLogicBlockBuilder.build(source)
 
         py_ir_file = PyIRFile(
