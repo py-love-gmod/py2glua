@@ -1,19 +1,10 @@
 import argparse
 import shutil
-import sys
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from ._cli.logging_setup import exit_with_code, logger, setup_logging
 from ._lang.compiler import Compiler
-
-
-def _version() -> str:
-    try:
-        return version("py2glua")
-
-    except PackageNotFoundError:
-        return "0.0.0dev"
+from .config import Py2GluaConfig
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -99,14 +90,14 @@ def main() -> None:
     args = parser.parse_args()
     setup_logging(args.debug)
 
-    logger.debug(f"Py2Glua\nVersion: {_version()}")
+    logger.debug(f"Py2Glua\nVersion: {Py2GluaConfig.version()}")
 
     if args.cmd == "build":
         _build(args.src, args.out)
         exit_with_code(0)
 
     elif args.cmd == "version":
-        print(_version())
+        print(Py2GluaConfig.version())
         exit_with_code(0)
 
     else:
