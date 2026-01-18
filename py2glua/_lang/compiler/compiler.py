@@ -11,20 +11,23 @@ from .file_pass import (
     DirectiveStubPass,
     NormalizeImportsPass,
     StripDirectivePass,
-    StripModulesImportPass,
 )
 from .import_resolver import ImportResolver
+from .project_pass import (
+    LowerClassTablePass,
+)
 
 
 class Compiler:
     file_passes: list = [
         NormalizeImportsPass,
-        StripModulesImportPass,
         AttachDecoratorsPass,
         StripDirectivePass,
         DirectiveStubPass,
     ]
-    project_passes: list = []
+    project_passes: list = [
+        LowerClassTablePass,
+    ]
 
     _INTERNAL_PREFIX = ("py2glua", "glua")
     _INTERNAL_PKG = "py2glua.glua"

@@ -4,15 +4,7 @@ from pathlib import Path
 
 from ._cli.logging_setup import exit_with_code, logger, setup_logging
 from ._lang.compiler import Compiler
-from ._lang.py.ir_dataclass import (
-    PyIRAssign,
-    PyIRClassDef,
-    PyIRDecorator,
-    PyIRFile,
-    PyIRFunctionDef,
-    PyIRImport,
-    PyIRReturn,
-)
+from ._lang.lua_emiter import LuaEmitter
 from .config import Py2GluaConfig
 
 
@@ -77,54 +69,6 @@ def _clean_build(out: Path) -> None:
         shutil.rmtree(out)
 
 
-def _print_decorator(d: PyIRDecorator, indent: int) -> None:
-    pad = "  " * indent
-    print(f"{pad}@{d.name}")
-
-
-def pretty_print_ir(ir: PyIRFile) -> None:
-    path = ir.path or "<unknown>"
-    print(f"\n=== {path} ===")
-
-    for node in ir.body:
-        _print_node(node, indent=0)
-
-
-def _print_node(node, indent: int) -> None:
-    pad = "  " * indent
-
-    if isinstance(node, PyIRClassDef):
-        print(f"{pad}class {node.name}")
-        for d in node.decorators:
-            _print_decorator(d, indent + 1)
-
-        for n in node.body:
-            _print_node(n, indent + 1)
-
-    elif isinstance(node, PyIRFunctionDef):
-        sig = ", ".join(node.signature.keys())
-        print(f"{pad}def {node.name}({sig})")
-        for d in node.decorators:
-            _print_decorator(d, indent + 1)
-
-        for n in node.body:
-            _print_node(n, indent + 1)
-
-    elif isinstance(node, PyIRImport):
-        kind = node.itype.name.lower()
-        mod = ".".join(node.modules or [])
-        print(f"{pad}import [{kind}] {mod}")
-
-    elif isinstance(node, PyIRAssign):
-        print(f"{pad}assign")
-
-    elif isinstance(node, PyIRReturn):
-        print(f"{pad}return")
-
-    else:
-        print(f"{pad}{node.__class__.__name__}")
-
-
 def _build(src: Path, out: Path) -> None:
     logger.info("Начало сборки...")
 
@@ -136,9 +80,21 @@ def _build(src: Path, out: Path) -> None:
     _clean_build(out)
     out.mkdir(parents=True, exist_ok=True)
 
+    emitter = LuaEmitter()
+
     for ir in project_ir:
-        pretty_print_ir(ir)
-    print("")
+        if ir.path is None:
+            exit_with_code(3, "Внутренняя ошибка: IR-файл без path")
+
+        rel = ir.path.relative_to(src)  # type: ignore
+        out_path = out / rel.with_suffix(".lua")
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        result = emitter.emit_file(ir)
+
+        out_path.write_text(result.code, encoding="utf-8")
+        logger.info(f"Сгенерирован файл: {out_path}")
 
     logger.info("Сборка успешно завершена.")
 

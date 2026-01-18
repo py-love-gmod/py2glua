@@ -1,0 +1,1 @@
+from .lower_class_table import LowerClassTablePass
