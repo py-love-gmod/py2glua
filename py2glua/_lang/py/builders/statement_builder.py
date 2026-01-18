@@ -324,7 +324,7 @@ class StatementBuilder:
 
             rhs_tokens = tokens[eq_index + 1 :]
             stream_r = TokenStream(rhs_tokens)
-            rhs_expr = StatementBuilder._parse_expression(stream_r)
+            rhs_expr = StatementBuilder._parse_expression(stream_r, stop_ops=set())
             if not stream_r.eof():
                 raise SyntaxError(
                     "Лишние токены в правой части аннотированного присваивания"
@@ -354,7 +354,7 @@ class StatementBuilder:
 
         # 3) Expression-statement
         stream = TokenStream(tokens)
-        expr = StatementBuilder._parse_expression(stream)
+        expr = StatementBuilder._parse_expression(stream, stop_ops=set())
         if not stream.eof():
             raise SyntaxError("Лишние токены в конце выражения")
 
@@ -379,7 +379,7 @@ class StatementBuilder:
             raise SyntaxError("Некорректная цель в расширенном присваивании")
 
         stream_right = TokenStream(right_toks)
-        value = StatementBuilder._parse_expression(stream_right)
+        value = StatementBuilder._parse_expression(stream_right, stop_ops=set())
         if not stream_right.eof():
             raise SyntaxError("Некорректное значение в расширенном присваивании")
 
@@ -428,7 +428,7 @@ class StatementBuilder:
                 raise SyntaxError("Отсутствует правая часть в цепочке присваиваний")
 
             stream_r = TokenStream(rhs_tokens)
-            rhs_expr = StatementBuilder._parse_expression(stream_r)
+            rhs_expr = StatementBuilder._parse_expression(stream_r, stop_ops=set())
             if not stream_r.eof():
                 raise SyntaxError("Некорректное выражение в правой части присваивания")
 
@@ -479,7 +479,7 @@ class StatementBuilder:
         lhs_parts = StatementBuilder._split_top_level_commas(lhs_tokens)
 
         stream_r = TokenStream(rhs_tokens)
-        rhs_expr = StatementBuilder._parse_expression(stream_r)
+        rhs_expr = StatementBuilder._parse_expression(stream_r, stop_ops=set())
         if not stream_r.eof():
             raise SyntaxError("Некорректное выражение в правой части присваивания")
 
@@ -525,16 +525,28 @@ class StatementBuilder:
 
     # Expression parser (precedence)
     @staticmethod
-    def _parse_expression(stream: TokenStream) -> PyIRNode:
+    def _parse_expression(
+        stream: TokenStream,
+        stop_ops: set[str] | None = None,
+    ) -> PyIRNode:
         """
         Верхний уровень выражения:
         - сначала парсим "or"
         - затем, если есть ',' - собираем PyIRTuple (a, b, c)
         """
+        if stop_ops is None:
+            stop_ops = set()
+
         first = StatementBuilder._parse_or(stream)
 
         tok = stream.peek()
+        if tok and tok.type == tokenize.OP and tok.string in stop_ops:
+            return first
+
         if not (tok and tok.type == tokenize.OP and tok.string == ","):
+            return first
+
+        if "," in stop_ops:
             return first
 
         elements: List[PyIRNode] = [first]
@@ -548,8 +560,21 @@ class StatementBuilder:
             if tok2 is None:
                 raise SyntaxError("Запятая в конце выражения не поддерживается")
 
+            if tok2.type == tokenize.OP and tok2.string in stop_ops:
+                raise SyntaxError(
+                    "Trailing comma is not supported in this expression context"
+                )
+
             elem = StatementBuilder._parse_or(stream)
             elements.append(elem)
+
+            tok_after = stream.peek()
+            if (
+                tok_after
+                and tok_after.type == tokenize.OP
+                and tok_after.string in stop_ops
+            ):
+                break
 
         line = elements[0].line
         col = elements[0].offset
@@ -968,7 +993,7 @@ class StatementBuilder:
                 line, col = lpar.start
                 return PyIRTuple(line=line, offset=col, elements=[])
 
-            node = StatementBuilder._parse_expression(stream)
+            node = StatementBuilder._parse_expression(stream, stop_ops={")"})
             stream.expect_op(")")
             return node
 
@@ -1017,16 +1042,25 @@ class StatementBuilder:
                     key_tok = stream.advance()
                     assert key_tok is not None
                     stream.advance()  # '='
-                    val = StatementBuilder._parse_expression(stream)
+                    val = StatementBuilder._parse_expression(
+                        stream, stop_ops={",", ")"}
+                    )
                     args_kw[key_tok.string] = val
                 else:
-                    arg = StatementBuilder._parse_expression(stream)
+                    arg = StatementBuilder._parse_expression(
+                        stream, stop_ops={",", ")"}
+                    )
                     args_p.append(arg)
 
                 tok = stream.peek()
                 if tok and tok.type == tokenize.OP and tok.string == ",":
                     stream.advance()
+                    nxt = stream.peek()
+                    if nxt and nxt.type == tokenize.OP and nxt.string == ")":
+                        break
+
                     continue
+
                 break
 
         stream.expect_op(")")
@@ -1044,7 +1078,7 @@ class StatementBuilder:
         lbr = stream.advance()
         assert lbr and lbr.string == "["
 
-        index_expr = StatementBuilder._parse_expression(stream)
+        index_expr = StatementBuilder._parse_expression(stream, stop_ops={"]"})
         stream.expect_op("]")
 
         return PyIRSubscript(
@@ -1064,7 +1098,7 @@ class StatementBuilder:
 
         if tok and not (tok.type == tokenize.OP and tok.string == "]"):
             while True:
-                elem = StatementBuilder._parse_expression(stream)
+                elem = StatementBuilder._parse_expression(stream, stop_ops={",", "]"})
                 elements.append(elem)
                 tok = stream.peek()
                 if tok and tok.type == tokenize.OP and tok.string == ",":
@@ -1140,7 +1174,7 @@ class StatementBuilder:
                     stream.advance()
                     return PyIRSet(line=line, offset=col, elements=elements)
 
-                el = StatementBuilder._parse_expression(stream)
+                el = StatementBuilder._parse_expression(stream, stop_ops={",", "}"})
                 elements.append(el)
                 continue
 

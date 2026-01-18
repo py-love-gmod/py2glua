@@ -4,6 +4,15 @@ from pathlib import Path
 
 from ._cli.logging_setup import exit_with_code, logger, setup_logging
 from ._lang.compiler import Compiler
+from ._lang.py.ir_dataclass import (
+    PyIRAssign,
+    PyIRClassDef,
+    PyIRDecorator,
+    PyIRFile,
+    PyIRFunctionDef,
+    PyIRImport,
+    PyIRReturn,
+)
 from .config import Py2GluaConfig
 
 
@@ -68,6 +77,54 @@ def _clean_build(out: Path) -> None:
         shutil.rmtree(out)
 
 
+def _print_decorator(d: PyIRDecorator, indent: int) -> None:
+    pad = "  " * indent
+    print(f"{pad}@{d.name}")
+
+
+def pretty_print_ir(ir: PyIRFile) -> None:
+    path = ir.path or "<unknown>"
+    print(f"\n=== {path} ===")
+
+    for node in ir.body:
+        _print_node(node, indent=0)
+
+
+def _print_node(node, indent: int) -> None:
+    pad = "  " * indent
+
+    if isinstance(node, PyIRClassDef):
+        print(f"{pad}class {node.name}")
+        for d in node.decorators:
+            _print_decorator(d, indent + 1)
+
+        for n in node.body:
+            _print_node(n, indent + 1)
+
+    elif isinstance(node, PyIRFunctionDef):
+        sig = ", ".join(node.signature.keys())
+        print(f"{pad}def {node.name}({sig})")
+        for d in node.decorators:
+            _print_decorator(d, indent + 1)
+
+        for n in node.body:
+            _print_node(n, indent + 1)
+
+    elif isinstance(node, PyIRImport):
+        kind = node.itype.name.lower()
+        mod = ".".join(node.modules or [])
+        print(f"{pad}import [{kind}] {mod}")
+
+    elif isinstance(node, PyIRAssign):
+        print(f"{pad}assign")
+
+    elif isinstance(node, PyIRReturn):
+        print(f"{pad}return")
+
+    else:
+        print(f"{pad}{node.__class__.__name__}")
+
+
 def _build(src: Path, out: Path) -> None:
     logger.info("Начало сборки...")
 
@@ -80,7 +137,8 @@ def _build(src: Path, out: Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
 
     for ir in project_ir:
-        print(ir)
+        pretty_print_ir(ir)
+    print("")
 
     logger.info("Сборка успешно завершена.")
 

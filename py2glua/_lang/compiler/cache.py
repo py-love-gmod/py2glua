@@ -59,7 +59,7 @@ class _IndexCache:
         self._dirty: dict[Path, bytes] = {}
 
     def _build_global_fingerprint(self, fp_name: list[str]) -> bytes:
-        parts: list[str] = [
+        parts = [
             f"{sys.version_info.major}."
             f"{sys.version_info.minor}."
             f"{sys.version_info.micro}",
@@ -164,10 +164,37 @@ class IRCache:
 
         self.valid_paths = self._index.valid_paths()
 
-        valid_pkls = {f"{_hash_path(p)}.pkl" for p in self.valid_paths}
-        for pkl in self._cache_dir.glob("*.pkl"):
-            if pkl.name not in valid_pkls:
-                pkl.unlink(missing_ok=True)
+        valid = {_hash_path(p) for p in self.valid_paths}
+
+        for f in self._cache_dir.glob("*.pkl"):
+            name = f.stem.replace(".raw", "")
+            if name not in valid:
+                f.unlink(missing_ok=True)
+
+    def load_raw(self, path: Path) -> PyIRFile | None:
+        assert self._cache_dir is not None
+
+        raw = self._cache_dir / f"{_hash_path(path)}.raw.pkl"
+        if not raw.exists():
+            return None
+
+        try:
+            with raw.open("rb") as f:
+                return pickle.load(f)
+
+        except Exception:
+            raw.unlink(missing_ok=True)
+            return None
+
+    def store_raw(self, path: Path, ir: PyIRFile) -> None:
+        assert self._cache_dir is not None
+
+        raw = self._cache_dir / f"{_hash_path(path)}.raw.pkl"
+        if raw.exists():
+            return
+
+        with raw.open("wb") as f:
+            pickle.dump(ir, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     def load(self, path: Path) -> PyIRFile | None:
         if path not in self.valid_paths:
@@ -194,7 +221,6 @@ class IRCache:
         assert self._index is not None
 
         pkl = self._cache_dir / f"{_hash_path(path)}.pkl"
-
         if not pkl.exists():
             with pkl.open("wb") as f:
                 pickle.dump(ir, f, protocol=pickle.HIGHEST_PROTOCOL)

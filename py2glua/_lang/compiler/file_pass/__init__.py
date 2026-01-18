@@ -1,0 +1,5 @@
+from .attach_decorators import AttachDecoratorsPass
+from .directive_stub import DirectiveStubPass
+from .normalize_import import NormalizeImportsPass
+from .strip_directive import StripDirectivePass
+from .strip_module_imports import StripModulesImportPass

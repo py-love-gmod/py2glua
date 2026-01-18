@@ -1,7 +1,10 @@
 from collections.abc import Callable
 from typing import Any
 
+from .directive_compiler import InternalCompilerDirective
 
+
+@InternalCompilerDirective.stub()
 class Global:
     @staticmethod
     def var(value: Any, external: bool = False) -> Any:

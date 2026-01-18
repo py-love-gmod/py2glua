@@ -48,6 +48,19 @@ class InternalCompilerDirective:
     """Внутренние декораторы для py2glua"""
 
     @staticmethod
+    def stub() -> Callable:
+        """
+        Помечает метод как заглушку.
+        Вся внутренняя реализация будет убрана во время pass
+        Так же будут удалены и комментарии
+        """
+
+        def decorator(fn):
+            return fn
+
+        return decorator
+
+    @staticmethod
     def no_compile() -> Callable:
         """Помечает метод или класс как некомпилируемый
 
@@ -62,7 +75,7 @@ class InternalCompilerDirective:
         return decorator
 
     @staticmethod
-    def gmod_api(name: str) -> Callable:
+    def gmod_api(name: str, realm: list["RealmMarker"]) -> Callable:
         """Помечает функцию или класс как элемент GMod API
 
         Делает две вещи:
@@ -122,3 +135,8 @@ class InternalCompilerDirective:
             return fn
 
         return decorator
+
+
+@InternalCompilerDirective.no_compile()
+class RealmMarker:
+    pass

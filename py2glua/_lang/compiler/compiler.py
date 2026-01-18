@@ -6,11 +6,24 @@ from pathlib import Path
 from ..._cli.logging_setup import exit_with_code
 from ..py.ir_builder import PyIRBuilder, PyIRFile
 from .cache import IRCache
+from .file_pass import (
+    AttachDecoratorsPass,
+    DirectiveStubPass,
+    NormalizeImportsPass,
+    StripDirectivePass,
+    StripModulesImportPass,
+)
 from .import_resolver import ImportResolver
 
 
 class Compiler:
-    file_passes: list = []
+    file_passes: list = [
+        NormalizeImportsPass,
+        StripModulesImportPass,
+        AttachDecoratorsPass,
+        StripDirectivePass,
+        DirectiveStubPass,
+    ]
     project_passes: list = []
 
     _INTERNAL_PREFIX = ("py2glua", "glua")
@@ -78,16 +91,20 @@ class Compiler:
                         index_in_stack[path] = len(call_stack)
                         call_stack.append(path)
 
+                        raw = cache.load_raw(path)
+                        if raw is None:
+                            raw = cls._build_one(path)
+                            cache.store_raw(path, raw)
+
+                        deps = resolver.collect_deps(ir=raw, current_file=path)
+                        frames.append((path, deps, 0, True))
+
                         ir = cache.load(path)
                         if ir is None:
-                            ir = cls._build_one(path)
-                            ir = cls._build_file_ir(ir)
+                            ir = cls._build_file_ir(raw)
                             cache.store(path, ir)
 
                         ir_map[path] = ir
-
-                        deps = resolver.collect_deps(ir=ir, current_file=path)
-                        frames.append((path, deps, 0, True))
                         continue
 
                     if i >= len(deps):
@@ -143,9 +160,11 @@ class Compiler:
             project_root,
             [p.__class__.__qualname__ for p in cls.file_passes],
         )
+
         files = cls.build_ir_and_run_file_pass(project_root, cache)
         files = cls.run_project_passes(files)
         cache.commit()
+
         files.sort(key=lambda f: str(f.path))
         return files
 
