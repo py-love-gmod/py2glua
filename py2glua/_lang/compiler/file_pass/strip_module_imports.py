@@ -12,11 +12,6 @@ class StripModulesImportPass:
     Назначение:
       - полностью удаляет импорты заданных модулей
       - используется для очистки Python-only зависимостей
-        (typing, collections.abc, dataclasses и т.п.)
-
-    Примечание:
-      - pass не анализирует использование
-      - ответственность за корректность лежит на вызывающем
     """
 
     TARGET_MODULES: set[tuple[str, ...]] = {
