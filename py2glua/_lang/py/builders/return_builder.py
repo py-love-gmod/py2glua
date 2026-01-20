@@ -1,7 +1,7 @@
 import tokenize
 from typing import Sequence
 
-from ....glua import nil
+from ....glua.core.types import nil
 from ...etc import TokenStream
 from ...parse import PyLogicNode
 from ..ir_dataclass import PyIRConstant, PyIRNode, PyIRReturn

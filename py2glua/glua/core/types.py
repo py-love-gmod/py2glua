@@ -1,9 +1,9 @@
 from typing import Any
 
-from .directive_compiler import InternalCompilerDirective
+from .compiler_directive import CompilerDirective
 
 
-@InternalCompilerDirective.no_compile()
+@CompilerDirective.no_compile()
 class nil:
     """
     glua-тип отсутствующего значения.
@@ -25,7 +25,7 @@ class nil:
         return False
 
 
-@InternalCompilerDirective.no_compile()
+@CompilerDirective.no_compile()
 class lua_table:
     """
     луа таблица тип.

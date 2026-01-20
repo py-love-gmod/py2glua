@@ -5,7 +5,7 @@ from pathlib import Path
 
 from ..._cli.logging_setup import exit_with_code
 from ..py.ir_builder import PyIRBuilder, PyIRFile
-from .cache import IRCache
+from .cache import BuildCache
 from .file_pass import (
     AttachDecoratorsPass,
     DirectiveStubPass,
@@ -15,6 +15,9 @@ from .file_pass import (
 from .import_resolver import ImportResolver
 from .project_pass import (
     LowerClassTablePass,
+    RemoveDecoratedClassPass,
+    RemoveEmptyFilesPass,
+    RemoveNamedClassPass,
 )
 
 
@@ -26,7 +29,10 @@ class Compiler:
         DirectiveStubPass,
     ]
     project_passes: list = [
+        RemoveNamedClassPass,
+        RemoveDecoratedClassPass,
         LowerClassTablePass,
+        RemoveEmptyFilesPass,
     ]
 
     _INTERNAL_PREFIX = ("py2glua", "glua")
@@ -36,7 +42,7 @@ class Compiler:
     def build_ir_and_run_file_pass(
         cls,
         project_root: Path,
-        cache: IRCache,
+        cache: BuildCache,
     ) -> list[PyIRFile]:
         root = project_root.resolve()
         if not root.exists():
@@ -68,7 +74,6 @@ class Compiler:
             VISITING, DONE = 1, 2
             state: dict[Path, int] = {}
             ir_map: dict[Path, PyIRFile] = {}
-
             index_in_stack: dict[Path, int] = {}
             call_stack: list[Path] = []
             frames: list[tuple[Path, list[Path], int, bool]] = []
@@ -81,7 +86,6 @@ class Compiler:
 
                 while frames:
                     path, deps, i, entered = frames.pop()
-
                     if state.get(path) == DONE:
                         continue
 
@@ -94,19 +98,16 @@ class Compiler:
                         index_in_stack[path] = len(call_stack)
                         call_stack.append(path)
 
-                        raw = cache.load_raw(path)
-                        if raw is None:
+                        ir = cache.load_ir(path)
+                        deps = cache.load_deps(path)
+
+                        if ir is None or deps is None:
                             raw = cls._build_one(path)
-                            cache.store_raw(path, raw)
+                            deps = resolver.collect_deps(ir=raw, current_file=path)
+                            ir = cls._run_file_passess(raw)
+                            cache.store(path, ir, deps)
 
-                        deps = resolver.collect_deps(ir=raw, current_file=path)
                         frames.append((path, deps, 0, True))
-
-                        ir = cache.load(path)
-                        if ir is None:
-                            ir = cls._build_file_ir(raw)
-                            cache.store(path, ir)
-
                         ir_map[path] = ir
                         continue
 
@@ -122,8 +123,7 @@ class Compiler:
                     if state.get(dep) == VISITING:
                         cycle = cls._format_cycle(dep, call_stack, index_in_stack)
                         exit_with_code(
-                            1,
-                            "Обнаружена циклическая зависимость импортов:\n" + cycle,
+                            1, "Обнаружена циклическая зависимость импортов:\n" + cycle
                         )
                         raise AssertionError("unreachable")
 
@@ -133,15 +133,13 @@ class Compiler:
             return list(ir_map.values())
 
     @classmethod
-    def _build_file_ir(cls, ir: PyIRFile) -> PyIRFile:
+    def _run_file_passess(cls, ir: PyIRFile) -> PyIRFile:
         for p in cls.file_passes:
             try:
                 ir = p.run(ir)
-
             except Exception as e:
                 exit_with_code(3, f"Ошибка file-pass {p.__class__.__name__}: {e}")
                 raise AssertionError("unreachable")
-
         return ir
 
     @classmethod
@@ -149,25 +147,21 @@ class Compiler:
         for p in cls.project_passes:
             try:
                 files = p.run(files)
-
             except Exception as e:
                 exit_with_code(3, f"Ошибка project-pass {p.__class__.__name__}: {e}")
                 raise AssertionError("unreachable")
-
         return files
 
     @classmethod
     def build(cls, project_root: Path) -> list[PyIRFile]:
-        cache = IRCache()
+        cache = BuildCache()
         cache.validate(
             project_root,
             [p.__class__.__qualname__ for p in cls.file_passes],
         )
-
         files = cls.build_ir_and_run_file_pass(project_root, cache)
         files = cls.run_project_passes(files)
         cache.commit()
-
         files.sort(key=lambda f: str(f.path))
         return files
 

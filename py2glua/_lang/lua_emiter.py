@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import Final
 
-from ..glua import nil
+from ..glua.core.types import nil
 from .py.ir_dataclass import (
     PyAugAssignType,
     PyBinOPType,
@@ -94,10 +94,13 @@ class LuaEmitter:
     def _pos(self, node: PyIRNode | None) -> str:
         if node is None:
             return ""
+
         if node.line is not None and node.offset is not None:
             return f" LINE|OFFSET: {node.line}|{node.offset}"
+
         if node.line is not None:
             return f" LINE: {node.line}"
+
         return ""
 
     def _leak(self, what: str, node: PyIRNode | None = None) -> str:

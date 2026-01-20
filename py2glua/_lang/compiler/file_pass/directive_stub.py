@@ -5,28 +5,6 @@ from ...py.ir_dataclass import PyIRClassDef, PyIRComment, PyIRFunctionDef, PyIRN
 
 
 class DirectiveStubPass:
-    """
-    Обрабатывает:
-      - InternalCompilerDirective.stub
-      - InternalCompilerDirective.no_compile
-
-    Правила:
-      stub:
-        - чистит тело
-        - удаляет декоратор
-        - удаляет все комментарии
-
-      no_compile:
-        - чистит тело
-        - декоратор остаётся
-        - удаляет все комментарии
-    """
-
-    STUB_NAMES = {
-        "stub",
-        "InternalCompilerDirective.stub",
-    }
-
     NO_COMPILE_NAMES = {
         "no_compile",
         "InternalCompilerDirective.no_compile",
@@ -50,29 +28,21 @@ class DirectiveStubPass:
 
     @classmethod
     def _process_function(cls, fn: PyIRFunctionDef) -> None:
-        has_stub = cls._has_decorator(fn, cls.STUB_NAMES)
         has_no_compile = cls._has_decorator(fn, cls.NO_COMPILE_NAMES)
 
-        if has_stub or has_no_compile:
+        if has_no_compile:
             cls._strip_body(fn.body)
-
-        if has_stub:
-            cls._remove_decorators(fn, cls.STUB_NAMES)
 
     @classmethod
     def _process_class(cls, cls_node: PyIRClassDef) -> None:
-        has_stub = cls._has_decorator(cls_node, cls.STUB_NAMES)
         has_no_compile = cls._has_decorator(cls_node, cls.NO_COMPILE_NAMES)
 
-        if has_stub or has_no_compile:
+        if has_no_compile:
             cls._strip_class_body(cls_node.body)
 
             for item in cls_node.body:
                 if isinstance(item, PyIRFunctionDef):
                     cls._strip_body(item.body)
-
-        if has_stub:
-            cls._remove_decorators(cls_node, cls.STUB_NAMES)
 
         cls._process_block(cls_node.body)
 

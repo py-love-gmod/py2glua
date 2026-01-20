@@ -1,9 +1,9 @@
 from typing import Final
 
-from .directive_compiler import InternalCompilerDirective, RealmMarker
+from .core import CompilerDirective
 
 
-@InternalCompilerDirective.gmod_special_enum(
+@CompilerDirective.gmod_special_enum(
     fields={
         "SERVER": ("global", "SERVER"),
         "CLIENT": ("global", "CLIENT"),
@@ -14,13 +14,13 @@ from .directive_compiler import InternalCompilerDirective, RealmMarker
 class Realm:
     """Среда выполнения кода. Данный класс можно использовать как и для определения среды всего файла, так и для проверки среды в рантайме."""
 
-    SERVER: Final = RealmMarker()
+    SERVER: Final = CompilerDirective.RealmMarker()
     """Код выполняется исключительно на сервере"""
 
-    CLIENT: Final = RealmMarker()
+    CLIENT: Final = CompilerDirective.RealmMarker()
     """Код выполняется исключительно на клиенте"""
 
-    MENU: Final = RealmMarker()
+    MENU: Final = CompilerDirective.RealmMarker()
     """
     Отдельное Lua-состояние главного меню.
     Изолировано от CLIENT и SERVER, прямое взаимодействие невозможно.
@@ -28,5 +28,5 @@ class Realm:
     Требует перезаписи Lua-файлов движка.
     """
 
-    SHARED: Final = RealmMarker()
+    SHARED: Final = CompilerDirective.RealmMarker()
     """Код выполняется одновременно и на клиенте, и на сервере"""

@@ -5,6 +5,7 @@ from typing import Literal
 class CompilerDirective:
     """Класс отвечающий за дерективы компилятору"""
 
+    # region debug
     DEBUG: bool
     """Переменная отвечающая за дебаг сборку
     
@@ -21,6 +22,14 @@ class CompilerDirective:
 
         return decorator
 
+    # endregion
+
+    class RealmMarker:
+        """Маркер обозначающий что данная переменная отвечает за реалм"""
+
+        pass
+
+    # region compile func type
     @staticmethod
     def lazy_compile() -> Callable:
         """Помечает метод или класс как "ленивый" для компилятора
@@ -43,23 +52,6 @@ class CompilerDirective:
 
         return decorator
 
-
-class InternalCompilerDirective:
-    """Внутренние декораторы для py2glua"""
-
-    @staticmethod
-    def stub() -> Callable:
-        """
-        Помечает метод как заглушку.
-        Вся внутренняя реализация будет убрана во время pass
-        Так же будут удалены и комментарии
-        """
-
-        def decorator(fn):
-            return fn
-
-        return decorator
-
     @staticmethod
     def no_compile() -> Callable:
         """Помечает метод или класс как некомпилируемый
@@ -74,8 +66,10 @@ class InternalCompilerDirective:
 
         return decorator
 
+    # endregion
+
     @staticmethod
-    def gmod_api(name: str, realm: list["RealmMarker"]) -> Callable:
+    def gmod_api(name: str, realm: list[RealmMarker]) -> Callable:
         """Помечает функцию или класс как элемент GMod API
 
         Делает две вещи:
@@ -112,6 +106,7 @@ class InternalCompilerDirective:
 
         return decorator
 
+    # region contextmanager
     @staticmethod
     def contextmanager() -> Callable:
         """Указывает что данная функция обязана реализовывать конструкцию with"""
@@ -123,20 +118,4 @@ class InternalCompilerDirective:
 
     contextmanager_body = object()
     """Указание компилятору что в данном месте для конструкции with необходимо подставить само тело блока"""
-
-    @staticmethod
-    def std_lib_obj() -> Callable:
-        """Помечает функцию или класс как std_lib объект
-
-        Запрещено использование вне py2glua
-        """
-
-        def decorator(fn):
-            return fn
-
-        return decorator
-
-
-@InternalCompilerDirective.no_compile()
-class RealmMarker:
-    pass
+    # endregion

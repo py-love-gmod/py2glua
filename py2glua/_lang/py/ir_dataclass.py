@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum, auto
 from pathlib import Path
 
-from ...glua import nil
+from ...glua.core.types import nil
 
 
 # Base

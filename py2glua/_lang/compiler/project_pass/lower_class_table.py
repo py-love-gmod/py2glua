@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Literal
+from typing import Literal
 
 from ...._cli.logging_setup import exit_with_code
 from ...py.ir_dataclass import (
@@ -10,7 +10,6 @@ from ...py.ir_dataclass import (
     PyIRBinOP,
     PyIRCall,
     PyIRClassDef,
-    PyIRConstant,
     PyIRDecorator,
     PyIRDict,
     PyIRDictItem,

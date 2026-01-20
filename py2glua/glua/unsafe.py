@@ -2,15 +2,16 @@ from pathlib import Path
 from typing import Any
 from warnings import deprecated
 
-from .directive_compiler import InternalCompilerDirective
+from .core import CompilerDirective
 from .realm import Realm
 
 
-@InternalCompilerDirective.stub()
+@CompilerDirective.no_compile()
 class Unsafe:
     """Класс с небезопасными функциями, или функциями которые будут удалены в будующем. Все методы и декораторы из этого блока не советуется использовтаь от слова совсем."""
 
     @staticmethod
+    @CompilerDirective.no_compile()
     def raw(lua_code: str) -> None:
         """Позволяет сказать компилятору "вставь голый луа сюдa". Что либо возвращать из этого блока нельзя"""
         pass
@@ -19,7 +20,7 @@ class Unsafe:
     @deprecated(
         "Данный метод остался лишь как отладочный для введения ресурсов вручную. В скором времени py2glua будет собирать все ресурсы сам через plg-sdk."
     )
-    @InternalCompilerDirective.gmod_api(
+    @CompilerDirective.gmod_api(
         "AddCSLuaFile",
         [Realm.CLIENT, Realm.SERVER],
     )
@@ -31,7 +32,7 @@ class Unsafe:
     @deprecated(
         "Данный метод остался лишь как отладочный для введения ресурсов вручную.\nБинарные модули в скором времени будут зайдействовать отдельный API.\nВ скором времени py2glua будет собирать все ресурсы сам через plg-sdk."
     )
-    @InternalCompilerDirective.gmod_api(
+    @CompilerDirective.gmod_api(
         "include",
         [Realm.CLIENT, Realm.SERVER],
     )

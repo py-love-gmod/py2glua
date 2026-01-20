@@ -25,7 +25,7 @@ class _Resolved:
 
 class _InternalSymbolIndex:
     def __init__(self, internal_root: Path):
-        self._root = internal_root
+        self._root = internal_root.resolve()
         self._built = False
         self._sym2path: dict[str, Path] = {}
 
@@ -133,8 +133,10 @@ class ImportResolver:
             d0 = deps[0]
             if self._is_within(d0, self.project_root):
                 return _Resolved(PyIRImportType.LOCAL, tuple(deps))
+
             if self._is_within(d0, self.internal_root):
                 return _Resolved(PyIRImportType.INTERNAL, tuple(deps))
+
             return _Resolved(PyIRImportType.EXTERNAL, ())
 
         deps_local = self._resolve_absolute(self.project_root, imp, modules)
@@ -229,6 +231,12 @@ class ImportResolver:
         imp: PyIRImport,
         current_file: Path,
     ) -> list[Path]:
+        if self._is_within(current_file, self.internal_root):
+            base_root = self.internal_root
+
+        else:
+            base_root = self.project_root
+
         base = current_file.parent
         for _ in range(imp.level - 1):
             base = base.parent
@@ -252,6 +260,12 @@ class ImportResolver:
         for name in self._iter_imported_names(imp):
             p = self._resolve_module_or_package(pkg_dir, [name])
             if not p:
+                if self._is_within(base_root, self.internal_root):
+                    p2 = self._internal_index.resolve(name)
+                    if p2:
+                        deps.add(p2)
+                        continue
+
                 exit_with_code(
                     1,
                     "Не удалось разрешить относительный импорт\n"
