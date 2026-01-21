@@ -16,6 +16,7 @@ def _read_u32(f: BinaryIO) -> int:
     data = f.read(4)
     if len(data) != 4:
         raise EOFError("Unexpected EOF while reading u32")
+
     return int.from_bytes(data, "little")
 
 
@@ -28,6 +29,7 @@ def _hash_file(path: Path) -> bytes:
     with path.open("rb") as f:
         for chunk in iter(lambda: f.read(64 * 1024), b""):
             h.update(chunk)
+
     return h.digest()
 
 
@@ -55,6 +57,7 @@ class _IndexCache:
         try:
             if self.path.parent.exists():
                 shutil.rmtree(self.path.parent)
+
         except Exception:
             pass
 
@@ -78,11 +81,14 @@ class _IndexCache:
                     raw = f.read(path_len)
                     if len(raw) != path_len:
                         break
+
                     path = Path(raw.decode("utf-8"))
                     if not path.exists() or not path.is_file():
                         continue
+
                     if _hash_file(path) == src_hash:
                         self._entries[path] = src_hash
+
         except Exception:
             self._entries.clear()
             self._gc_full()

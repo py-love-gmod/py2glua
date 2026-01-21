@@ -5,7 +5,6 @@ from pathlib import Path
 
 from ..._cli.logging_setup import exit_with_code
 from ..py.ir_builder import PyIRBuilder, PyIRFile
-from .cache import BuildCache
 from .file_pass import (
     AttachDecoratorsPass,
     DirectiveStubPass,
@@ -42,7 +41,6 @@ class Compiler:
     def build_ir_and_run_file_pass(
         cls,
         project_root: Path,
-        cache: BuildCache,
     ) -> list[PyIRFile]:
         root = project_root.resolve()
         if not root.exists():
@@ -98,14 +96,9 @@ class Compiler:
                         index_in_stack[path] = len(call_stack)
                         call_stack.append(path)
 
-                        ir = cache.load_ir(path)
-                        deps = cache.load_deps(path)
-
-                        if ir is None or deps is None:
-                            raw = cls._build_one(path)
-                            deps = resolver.collect_deps(ir=raw, current_file=path)
-                            ir = cls._run_file_passess(raw)
-                            cache.store(path, ir, deps)
+                        raw = cls._build_one(path)
+                        deps = resolver.collect_deps(ir=raw, current_file=path)
+                        ir = cls._run_file_passess(raw)
 
                         frames.append((path, deps, 0, True))
                         ir_map[path] = ir
@@ -154,14 +147,8 @@ class Compiler:
 
     @classmethod
     def build(cls, project_root: Path) -> list[PyIRFile]:
-        cache = BuildCache()
-        cache.validate(
-            project_root,
-            [p.__class__.__qualname__ for p in cls.file_passes],
-        )
-        files = cls.build_ir_and_run_file_pass(project_root, cache)
+        files = cls.build_ir_and_run_file_pass(project_root)
         files = cls.run_project_passes(files)
-        cache.commit()
         files.sort(key=lambda f: str(f.path))
         return files
 
