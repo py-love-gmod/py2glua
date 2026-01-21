@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
+from .compiler.ir_compiler import PyIRSymbolRef
 from .py.ir_dataclass import (
     PyAugAssignType,
     PyIRAssign,
@@ -50,7 +51,6 @@ class LuaEmitter:
         self._indent: int = 0
         self._prev_top_kind: str | None = None
 
-    # Public API
     def emit_file(self, ir: PyIRFile) -> EmitResult:
         self._buf.clear()
         self._indent = 0
@@ -65,7 +65,6 @@ class LuaEmitter:
 
         return EmitResult(code=code)
 
-    # Helpers
     def _wl(self, s: str = "") -> None:
         if s:
             self._buf.append(self._INDENT * self._indent + s + "\n")
@@ -98,7 +97,6 @@ class LuaEmitter:
         if self._indent == 0:
             self._wl()
 
-    # Statements
     def _stmt(self, node: PyIRNode, *, top_level: bool) -> None:
         if isinstance(node, PyIRComment):
             self._maybe_blankline_before("comment", top_level=top_level)
@@ -174,7 +172,7 @@ class LuaEmitter:
             self._wl(self._leak("with-statement"))
             return
 
-        if isinstance(node, PyIRCall):
+        if isinstance(node, (PyIRCall, PyIRAttribute, PyIRSymbolRef)):
             self._maybe_blankline_before("stmt", top_level=top_level)
             self._wl(self._expr(node))
             return
@@ -182,10 +180,8 @@ class LuaEmitter:
         self._maybe_blankline_before("misc", top_level=top_level)
         self._wl(self._leak(type(node).__name__))
 
-    # Block emitters
     def _emit_comment(self, node: PyIRComment) -> None:
-        lines = (node.value or "").splitlines() or [""]
-        for line in lines:
+        for line in (node.value or "").splitlines() or [""]:
             self._wl(f"-- {line}")
 
     def _emit_function(self, fn: PyIRFunctionDef) -> None:
@@ -244,25 +240,25 @@ class LuaEmitter:
         v = self._expr(node.value)
         self._wl(f"{t} = ({t} {op} {v})")
 
-    # Expressions
     def _expr(self, node: PyIRNode) -> str:
+        if isinstance(node, PyIRAttribute):
+            return f"{self._expr(node.value)}.{node.attr}"
+
         if isinstance(
             node,
             (
                 PyIRConstant,
                 PyIRVarUse,
                 PyIRVarCreate,
-                PyIRAttribute,
                 PyIRSubscript,
+                PyIRSymbolRef,
+                PyIREmitExpr,
             ),
         ):
             return str(node)
 
         if isinstance(node, PyIRCall):
             return self._call(node)
-
-        if isinstance(node, PyIREmitExpr):
-            return str(node)
 
         if isinstance(node, (PyIRDict, PyIRSet, PyIRBinOP, PyIRUnaryOP)):
             return self._leak(type(node).__name__)
@@ -276,7 +272,6 @@ class LuaEmitter:
         args = ", ".join(self._expr(a) for a in node.args_p)
         return f"{self._expr(node.func)}({args})"
 
-    # Operators
     @staticmethod
     def _augassign_op(op: PyAugAssignType) -> str | None:
         return {

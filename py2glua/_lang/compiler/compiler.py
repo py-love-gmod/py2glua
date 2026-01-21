@@ -2,10 +2,17 @@ from __future__ import annotations
 
 from importlib import resources
 from pathlib import Path
+from typing import Iterable
 
-from ..._cli.logging_setup import exit_with_code
+from ..._cli.logging_setup import exit_with_code, logger
 from ..py.ir_builder import PyIRBuilder, PyIRFile
 from .import_resolver import ImportResolver
+from .passes.analysis import (
+    AnalysisContext,
+    BuildSymbolIndexPass,
+    CollectSymbolsPass,
+    ResolveSymbolsPass,
+)
 from .passes.normalize import AttachDecoratorsPass, NormalizeImportsPass
 
 
@@ -15,9 +22,17 @@ class Compiler:
         AttachDecoratorsPass,
     ]
 
+    analysis_passes = [
+        CollectSymbolsPass,
+        BuildSymbolIndexPass,
+        ResolveSymbolsPass,
+    ]
+
+    # validation
     @classmethod
     def _validate_project(cls, project_root: Path):
         root = project_root.resolve()
+
         if not root.exists():
             exit_with_code(1, f"Папка проекта не найдена: {root}")
 
@@ -25,6 +40,7 @@ class Compiler:
             exit_with_code(1, f"Указанный путь не является папкой: {root}")
 
         project_files = sorted(p.resolve() for p in root.rglob("*.py") if p.is_file())
+
         if not project_files:
             exit_with_code(1, f"В проекте нет ни одного .py файла: {root}")
 
@@ -32,7 +48,10 @@ class Compiler:
             internal_tr = resources.files("py2glua.glua")
 
         except Exception as e:
-            exit_with_code(3, f"Не удалось найти internal-пакет py2glua.glua: {e}")
+            exit_with_code(
+                3,
+                f"Не удалось найти internal-пакет py2glua.glua: {e}",
+            )
             raise AssertionError("unreachable")
 
         return root, internal_tr, project_files
@@ -46,8 +65,12 @@ class Compiler:
         except ValueError:
             return False
 
+    # IR build
     @classmethod
-    def build_from_src(cls, project_root: Path) -> list[PyIRFile]:
+    def build_from_src(
+        cls,
+        project_root: Path,
+    ) -> tuple[list[PyIRFile], list[PyIRFile]]:
         root, internal_tr, project_files = cls._validate_project(project_root)
 
         with resources.as_file(internal_tr) as internal_root:
@@ -76,12 +99,16 @@ class Compiler:
 
                 while frames:
                     path, deps, i, entered = frames.pop()
+
                     if state.get(path) == DONE:
                         continue
 
                     if not entered:
                         if state.get(path) == VISITING:
-                            exit_with_code(3, f"Сбой обхода зависимостей: {path}")
+                            exit_with_code(
+                                3,
+                                f"Сбой обхода зависимостей: {path}",
+                            )
                             raise AssertionError("unreachable")
 
                         state[path] = VISITING
@@ -89,15 +116,16 @@ class Compiler:
                         call_stack.append(path)
 
                         raw = cls._build_one(path)
-                        deps = resolver.collect_deps(ir=raw, current_file=path)
+                        deps = resolver.collect_deps(
+                            ir=raw,
+                            current_file=path,
+                        )
                         ir = cls._run_normalize_passes(raw)
 
                         frames.append((path, deps, 0, True))
 
                         if cls._is_within(path, root):
                             project_ir[path] = ir
-                        elif cls._is_within(path, internal_root):
-                            internal_ir[path] = ir
                         else:
                             internal_ir[path] = ir
 
@@ -113,38 +141,94 @@ class Compiler:
                     frames.append((path, deps, i + 1, True))
 
                     if state.get(dep) == VISITING:
-                        cycle = cls._format_cycle(dep, call_stack, index_in_stack)
+                        cycle = cls._format_cycle(
+                            dep,
+                            call_stack,
+                            index_in_stack,
+                        )
                         exit_with_code(
-                            1, "Обнаружена циклическая зависимость импортов:\n" + cycle
+                            1,
+                            "Обнаружена циклическая зависимость импортов:\n" + cycle,
                         )
                         raise AssertionError("unreachable")
 
                     if dep not in state:
                         frames.append((dep, [], 0, False))
 
-            return list(project_ir.values())
+        return (
+            list(project_ir.values()),
+            list(internal_ir.values()),
+        )
 
     @classmethod
-    def _run_normalize_passes(cls, file: PyIRFile) -> PyIRFile:
+    def _run_normalize_passes(cls, ir: PyIRFile) -> PyIRFile:
         for p in cls.normalize_passes:
             try:
-                file = p.run(file)
+                ir = p.run(ir)
 
             except Exception as e:
                 exit_with_code(
                     3,
-                    f"Ошибка нормализации.\nКласс: {p.__name__}\nОшибка: {e}",
+                    "Ошибка нормализации.",
+                    f"Файл: {ir.path}\n",  # pyright: ignore[reportCallIssue]
+                    f"Pass: {p.__name__}\n",
+                    f"Ошибка: {e}",
                 )
                 raise AssertionError("unreachable")
 
-        return file
+        return ir
 
+    # analysis
+    @classmethod
+    def run_analysis(
+        cls,
+        project_ir: Iterable[PyIRFile],
+        internal_ir: Iterable[PyIRFile],
+    ) -> AnalysisContext:
+        ctx = AnalysisContext()
+
+        for p in cls.analysis_passes:
+            for ir in (*internal_ir, *project_ir):
+                try:
+                    p.run(ir, ctx)
+
+                except Exception as e:
+                    exit_with_code(
+                        3,
+                        f"Ошибка анализа.\n"
+                        f"Файл: {ir.path}\n"
+                        f"Pass: {p.__name__}\n"
+                        f"Ошибка: {e}",
+                    )
+                    raise AssertionError("unreachable")
+
+        return ctx
+
+    # public API
     @classmethod
     def build(cls, project_root: Path) -> list[PyIRFile]:
-        files = cls.build_from_src(project_root)
-        files.sort(key=lambda f: str(f.path))
-        return files
+        project_ir, internal_ir = cls.build_from_src(project_root)
 
+        ctx = cls.run_analysis(
+            project_ir=project_ir,
+            internal_ir=internal_ir,
+        )
+
+        # region debug dump
+        logger.debug("=== SYMBOL TABLES ===")
+        for table in ctx.file_simbol_data.values():
+            logger.debug(table)
+
+        logger.debug("=== GLOBAL SYMBOL INDEX ===")
+        for fq, sid in ctx.symbol_id_by_fqname.items():
+            info = ctx.symbols[sid]
+            logger.debug(f"{sid:03d}: {fq} -> ({info.file})")
+        # endregion
+
+        project_ir.sort(key=lambda f: str(f.path))
+        return project_ir
+
+    # utils
     @staticmethod
     def _read_text(path: Path) -> str:
         try:
@@ -159,13 +243,22 @@ class Compiler:
     def _build_one(cls, path: Path) -> PyIRFile:
         try:
             source = cls._read_text(path)
-            return PyIRBuilder.build_file(source=source, path_to_file=path)
+            return PyIRBuilder.build_file(
+                source=source,
+                path_to_file=path,
+            )
 
         except SyntaxError as e:
-            exit_with_code(1, f"Синтаксическая ошибка\nФайл: {path}\n{e}")
+            exit_with_code(
+                1,
+                f"Синтаксическая ошибка\nФайл: {path}\n{e}",
+            )
 
         except Exception as e:
-            exit_with_code(3, f"Ошибка при построении IR для {path}: {e}")
+            exit_with_code(
+                3,
+                f"Ошибка при построении IR для {path}: {e}",
+            )
 
         raise AssertionError("unreachable")
 
