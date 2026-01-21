@@ -72,12 +72,7 @@ def _clean_build(out: Path) -> None:
 def _build(src: Path, out: Path) -> None:
     logger.info("Начало сборки...")
 
-    src = src.resolve()
-    Py2GluaConfig.source = src
-    out = out.resolve()
-    Py2GluaConfig.output = out
-
-    project_ir = Compiler.build(project_root=src)
+    project_ir = Compiler.build()
 
     _clean_build(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -106,11 +101,18 @@ def main() -> None:
     args = parser.parse_args()
     setup_logging(args.debug)
     Py2GluaConfig.debug = args.debug
+    Py2GluaConfig.source = args.src.resolve()
+    Py2GluaConfig.output = args.out.resolve()
 
-    logger.debug(f"Py2Glua\nVersion: {Py2GluaConfig.version()}")
+    logger.debug(f"""Py2Glua
+Version: {Py2GluaConfig.version()}
+Source : {Py2GluaConfig.source}
+Output : {Py2GluaConfig.output}
+Debug  : {Py2GluaConfig.debug}
+""")
 
     if args.cmd == "build":
-        _build(args.src, args.out)
+        _build(Py2GluaConfig.source, Py2GluaConfig.output)
         exit_with_code(0)
 
     elif args.cmd == "version":

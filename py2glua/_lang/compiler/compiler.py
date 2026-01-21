@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Iterable
 
 from ..._cli.logging_setup import exit_with_code, logger
+from ...config import Py2GluaConfig
 from ..py.ir_builder import PyIRBuilder, PyIRFile
 from .import_resolver import ImportResolver
 from .passes.analysis import (
@@ -30,8 +31,8 @@ class Compiler:
 
     # validation
     @classmethod
-    def _validate_project(cls, project_root: Path):
-        root = project_root.resolve()
+    def _validate_project(cls):
+        root = Py2GluaConfig.source
 
         if not root.exists():
             exit_with_code(1, f"Папка проекта не найдена: {root}")
@@ -67,11 +68,8 @@ class Compiler:
 
     # IR build
     @classmethod
-    def build_from_src(
-        cls,
-        project_root: Path,
-    ) -> tuple[list[PyIRFile], list[PyIRFile]]:
-        root, internal_tr, project_files = cls._validate_project(project_root)
+    def build_from_src(cls) -> tuple[list[PyIRFile], list[PyIRFile]]:
+        root, internal_tr, project_files = cls._validate_project()
 
         with resources.as_file(internal_tr) as internal_root:
             internal_root = Path(internal_root).resolve()
@@ -206,8 +204,8 @@ class Compiler:
 
     # public API
     @classmethod
-    def build(cls, project_root: Path) -> list[PyIRFile]:
-        project_ir, internal_ir = cls.build_from_src(project_root)
+    def build(cls) -> list[PyIRFile]:
+        project_ir, internal_ir = cls.build_from_src()
 
         ctx = cls.run_analysis(
             project_ir=project_ir,
