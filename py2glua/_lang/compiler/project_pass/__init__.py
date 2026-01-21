@@ -1,4 +1,0 @@
-from .lower_class_table import LowerClassTablePass
-from .remove_decorated_class import RemoveDecoratedClassPass
-from .remove_empty_files import RemoveEmptyFilesPass
-from .remove_named_class import RemoveNamedClassPass

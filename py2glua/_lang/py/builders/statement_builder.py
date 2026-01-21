@@ -30,6 +30,33 @@ from ..ir_dataclass import (
 )
 
 
+def _parse_number(text: str):
+    text = text.replace("_", "")
+
+    try:
+        return int(text, 10)
+
+    except ValueError:
+        pass
+
+    try:
+        return float(text)
+
+    except ValueError:
+        raise SyntaxError(f"Некорректный числовой литерал: {text!r}")
+
+
+def _parse_string(token: str) -> str:
+    return bytes(token[1:-1], "utf-8").decode("unicode_escape")
+
+
+_LITERAL_NAMES = {
+    "True": True,
+    "False": False,
+    "None": None,
+}
+
+
 class StatementBuilder:
     @staticmethod
     def _tok_pos(tok: tokenize.TokenInfo | None) -> tuple[int, int] | None:
@@ -679,7 +706,7 @@ class StatementBuilder:
                 break
 
             if used_comparison:
-                StatementBuilder._raise(
+                StatementBuilder._raise(  # TODO:
                     "Цепочные сравнения (a < b < c) не поддерживаются в py2glua",
                     tok,
                 )
@@ -985,11 +1012,35 @@ class StatementBuilder:
             return PyIRVarUse(line=line, offset=col, name=tok2.string)
 
         # Constant
-        if tok.type in (tokenize.NUMBER, tokenize.STRING):
+        # NUMBER
+        if tok.type == tokenize.NUMBER:
             tok2 = stream.advance()
             assert tok2 is not None
             line, col = tok2.start
-            return PyIRConstant(line=line, offset=col, value=tok2.string)
+
+            value = _parse_number(tok2.string)
+            return PyIRConstant(line=line, offset=col, value=value)
+
+        # STRING
+        if tok.type == tokenize.STRING:
+            tok2 = stream.advance()
+            assert tok2 is not None
+            line, col = tok2.start
+
+            value = _parse_string(tok2.string)
+            return PyIRConstant(line=line, offset=col, value=value)
+
+        # NAME literals
+        if tok.type == tokenize.NAME and tok.string in _LITERAL_NAMES:
+            tok2 = stream.advance()
+            assert tok2 is not None
+            line, col = tok2.start
+
+            return PyIRConstant(
+                line=line,
+                offset=col,
+                value=_LITERAL_NAMES[tok2.string],
+            )
 
         # Parenthesized
         if tok.type == tokenize.OP and tok.string == "(":

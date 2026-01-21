@@ -5,43 +5,18 @@ from pathlib import Path
 
 from ..._cli.logging_setup import exit_with_code
 from ..py.ir_builder import PyIRBuilder, PyIRFile
-from .file_pass import (
-    AttachDecoratorsPass,
-    DirectiveStubPass,
-    NormalizeImportsPass,
-    StripDirectivePass,
-)
 from .import_resolver import ImportResolver
-from .project_pass import (
-    LowerClassTablePass,
-    RemoveDecoratedClassPass,
-    RemoveEmptyFilesPass,
-    RemoveNamedClassPass,
-)
+from .passes.normalize import AttachDecoratorsPass, NormalizeImportsPass
 
 
 class Compiler:
-    file_passes: list = [
+    normalize_passes: list = [
         NormalizeImportsPass,
         AttachDecoratorsPass,
-        StripDirectivePass,
-        DirectiveStubPass,
     ]
-    project_passes: list = [
-        RemoveNamedClassPass,
-        RemoveDecoratedClassPass,
-        LowerClassTablePass,
-        RemoveEmptyFilesPass,
-    ]
-
-    _INTERNAL_PREFIX = ("py2glua", "glua")
-    _INTERNAL_PKG = "py2glua.glua"
 
     @classmethod
-    def build_ir_and_run_file_pass(
-        cls,
-        project_root: Path,
-    ) -> list[PyIRFile]:
+    def _validate_project(cls, project_root: Path):
         root = project_root.resolve()
         if not root.exists():
             exit_with_code(1, f"Папка проекта не найдена: {root}")
@@ -54,24 +29,41 @@ class Compiler:
             exit_with_code(1, f"В проекте нет ни одного .py файла: {root}")
 
         try:
-            internal_tr = resources.files(cls._INTERNAL_PKG)
+            internal_tr = resources.files("py2glua.glua")
 
         except Exception as e:
-            exit_with_code(
-                3, f"Не удалось найти internal-пакет {cls._INTERNAL_PKG}: {e}"
-            )
+            exit_with_code(3, f"Не удалось найти internal-пакет py2glua.glua: {e}")
             raise AssertionError("unreachable")
 
+        return root, internal_tr, project_files
+
+    @staticmethod
+    def _is_within(path: Path, root: Path) -> bool:
+        try:
+            path.resolve().relative_to(root.resolve())
+            return True
+
+        except ValueError:
+            return False
+
+    @classmethod
+    def build_from_src(cls, project_root: Path) -> list[PyIRFile]:
+        root, internal_tr, project_files = cls._validate_project(project_root)
+
         with resources.as_file(internal_tr) as internal_root:
+            internal_root = Path(internal_root).resolve()
+
             resolver = ImportResolver(
                 project_root=root,
-                internal_root=Path(internal_root),
-                internal_prefix=cls._INTERNAL_PREFIX,
+                internal_root=internal_root,
             )
 
             VISITING, DONE = 1, 2
             state: dict[Path, int] = {}
-            ir_map: dict[Path, PyIRFile] = {}
+
+            project_ir: dict[Path, PyIRFile] = {}
+            internal_ir: dict[Path, PyIRFile] = {}
+
             index_in_stack: dict[Path, int] = {}
             call_stack: list[Path] = []
             frames: list[tuple[Path, list[Path], int, bool]] = []
@@ -98,10 +90,17 @@ class Compiler:
 
                         raw = cls._build_one(path)
                         deps = resolver.collect_deps(ir=raw, current_file=path)
-                        ir = cls._run_file_passess(raw)
+                        ir = cls._run_normalize_passes(raw)
 
                         frames.append((path, deps, 0, True))
-                        ir_map[path] = ir
+
+                        if cls._is_within(path, root):
+                            project_ir[path] = ir
+                        elif cls._is_within(path, internal_root):
+                            internal_ir[path] = ir
+                        else:
+                            internal_ir[path] = ir
+
                         continue
 
                     if i >= len(deps):
@@ -123,32 +122,26 @@ class Compiler:
                     if dep not in state:
                         frames.append((dep, [], 0, False))
 
-            return list(ir_map.values())
+            return list(project_ir.values())
 
     @classmethod
-    def _run_file_passess(cls, ir: PyIRFile) -> PyIRFile:
-        for p in cls.file_passes:
+    def _run_normalize_passes(cls, file: PyIRFile) -> PyIRFile:
+        for p in cls.normalize_passes:
             try:
-                ir = p.run(ir)
-            except Exception as e:
-                exit_with_code(3, f"Ошибка file-pass {p.__class__.__name__}: {e}")
-                raise AssertionError("unreachable")
-        return ir
+                file = p.run(file)
 
-    @classmethod
-    def run_project_passes(cls, files: list[PyIRFile]) -> list[PyIRFile]:
-        for p in cls.project_passes:
-            try:
-                files = p.run(files)
             except Exception as e:
-                exit_with_code(3, f"Ошибка project-pass {p.__class__.__name__}: {e}")
+                exit_with_code(
+                    3,
+                    f"Ошибка нормализации.\nКласс: {p.__name__}\nОшибка: {e}",
+                )
                 raise AssertionError("unreachable")
-        return files
+
+        return file
 
     @classmethod
     def build(cls, project_root: Path) -> list[PyIRFile]:
-        files = cls.build_ir_and_run_file_pass(project_root)
-        files = cls.run_project_passes(files)
+        files = cls.build_from_src(project_root)
         files.sort(key=lambda f: str(f.path))
         return files
 

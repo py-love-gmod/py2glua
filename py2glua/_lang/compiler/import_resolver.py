@@ -74,16 +74,16 @@ class _InternalSymbolIndex:
 
 
 class ImportResolver:
+    _INTERNAL_PREFIX = ("py2glua", "glua")
+
     def __init__(
         self,
         *,
         project_root: Path,
         internal_root: Path,
-        internal_prefix: tuple[str, str],
     ):
         self.project_root = project_root.resolve()
         self.internal_root = internal_root.resolve()
-        self.internal_prefix = internal_prefix
         self._internal_index = _InternalSymbolIndex(self.internal_root)
 
     def _fmt_file(self, path: Path) -> str:
@@ -314,7 +314,7 @@ class ImportResolver:
                 raise AssertionError("unreachable")
 
     def _is_internal_namespace(self, modules: list[str]) -> bool:
-        return len(modules) >= 2 and (modules[0], modules[1]) == self.internal_prefix
+        return len(modules) >= 2 and (modules[0], modules[1]) == self._INTERNAL_PREFIX
 
     @staticmethod
     def _is_within(path: Path, root: Path) -> bool:

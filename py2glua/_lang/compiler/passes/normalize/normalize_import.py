@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import fields, is_dataclass
 from typing import Any
 
-from ...py.ir_builder import PyIRFile
-from ...py.ir_dataclass import (
+from ....py.ir_builder import PyIRFile
+from ....py.ir_dataclass import (
     PyIRAttribute,
     PyIRImport,
     PyIRNode,

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ...._cli.logging_setup import exit_with_code
-from ...py.ir_builder import PyIRFile
-from ...py.ir_dataclass import (
+from ....._cli.logging_setup import exit_with_code
+from ....py.ir_builder import PyIRFile
+from ....py.ir_dataclass import (
     PyIRClassDef,
     PyIRDecorator,
     PyIRFunctionDef,

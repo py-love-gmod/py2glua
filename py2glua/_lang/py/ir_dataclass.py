@@ -45,6 +45,18 @@ class PyIRDecorator(PyIRNode):
         for a in self.args_kw.values():
             yield from a.walk()
 
+    def __str__(self) -> str:
+        parts: list[str] = []
+
+        if self.args_p:
+            parts.append(", ".join(str(a) for a in self.args_p))
+
+        if self.args_kw:
+            parts.append(", ".join(f"{k}={v}" for k, v in self.args_kw.items()))
+
+        args = ", ".join(parts)
+        return f"-- <PYTHON @{self.name}({args})>"
+
 
 # Import
 class PyIRImportType(IntEnum):
@@ -66,6 +78,28 @@ class PyIRImport(PyIRNode):
     def walk(self):
         yield self
 
+    def __str__(self) -> str:
+        prefix = "." * self.level if self.level > 0 else ""
+
+        if self.if_from:
+            mods = prefix + ".".join(self.modules)
+
+            if not self.names:
+                return f"-- <PYTHON from {mods} import * >"
+
+            parts: list[str] = []
+            for n in self.names:
+                if isinstance(n, tuple):
+                    src, alias = n
+                    parts.append(f"{src} as {alias}")
+                else:
+                    parts.append(n)
+
+            return f"-- <PYTHON from {mods} import {', '.join(parts)} >"
+
+        mods = prefix + ".".join(self.modules)
+        return f"-- <PYTHON import {mods} >"
+
 
 # Constants / Names
 @dataclass
@@ -75,6 +109,23 @@ class PyIRConstant(PyIRNode):
     def walk(self):
         yield self
 
+    def __str__(self) -> str:
+        v = self.value
+
+        if v is nil:
+            return "nil"
+
+        if isinstance(v, bool):
+            return "true" if v else "false"
+
+        if isinstance(v, str):
+            return repr(v)
+
+        if isinstance(v, (int, float)):
+            return str(v)
+
+        raise AssertionError(f"unsupported constant type: {type(v).__name__}")
+
 
 @dataclass
 class PyIRVarUse(PyIRNode):
@@ -83,16 +134,31 @@ class PyIRVarUse(PyIRNode):
     def walk(self):
         yield self
 
+    def __str__(self) -> str:
+        return self.name
+
 
 @dataclass
 class PyIRVarCreate(PyIRNode):
+    """
+    Statement-only node.
+
+    Contract:
+    - Must not appear inside expressions.
+    - Emit uses `local <name>` unless is_global=True.
+    """
+
     name: str
     is_global: bool = False
 
     def walk(self):
         yield self
 
+    def __str__(self) -> str:
+        return self.name if self.is_global else f"local {self.name}"
 
+
+# FString (must be lowered)
 @dataclass
 class PyIRFString(PyIRNode):
     parts: list["PyIRNode | str"]
@@ -103,26 +169,44 @@ class PyIRFString(PyIRNode):
             if isinstance(p, PyIRNode):
                 yield from p.walk()
 
+    def __str__(self) -> str:
+        raise AssertionError("PyIRFString must be lowered before emit")
 
-# Annotation
+
+# Annotation (Python-only; must be stripped)
 @dataclass
-class PyIRAnnotation(PyIRNode):
-    name: str
-    annotation: str
+class PyIRAnnotation(PyIRVarCreate):
+    """
+    Python-only annotation-only statement: `x: T`
+    Must be stripped before emit.
+    """
+
+    annotation: str = ""
 
     def walk(self):
         yield self
 
+    def __str__(self) -> str:
+        # If this reaches emit - it's a pipeline bug.
+        raise AssertionError("PyIRAnnotation must be stripped before emit")
+
 
 @dataclass
-class PyIRAnnotatedAssign(PyIRNode):
-    name: str
-    annotation: str
-    value: PyIRNode
+class PyIRAnnotatedAssign(PyIRVarCreate):
+    """
+    Python-only annotated assignment: `x: T = expr`
+    Must be lowered/stripped before emit (depending on your design).
+    """
+
+    annotation: str = ""
+    value: PyIRNode = field(default_factory=lambda: PyIRPass(line=None, offset=None))
 
     def walk(self):
         yield self
         yield from self.value.walk()
+
+    def __str__(self) -> str:
+        raise AssertionError("PyIRAnnotatedAssign must be lowered before emit")
 
 
 # Attribute / Subscript / Collections
@@ -135,6 +219,9 @@ class PyIRAttribute(PyIRNode):
         yield self
         yield from self.value.walk()
 
+    def __str__(self) -> str:
+        return f"{self.value}.{self.attr}"
+
 
 @dataclass
 class PyIRSubscript(PyIRNode):
@@ -146,6 +233,9 @@ class PyIRSubscript(PyIRNode):
         yield from self.value.walk()
         yield from self.index.walk()
 
+    def __str__(self) -> str:
+        return f"{self.value}[{self.index}]"
+
 
 @dataclass
 class PyIRList(PyIRNode):
@@ -155,6 +245,9 @@ class PyIRList(PyIRNode):
         yield self
         for e in self.elements:
             yield from e.walk()
+
+    def __str__(self) -> str:
+        raise AssertionError("PyIRList must be lowered before emit")
 
 
 @dataclass
@@ -166,6 +259,9 @@ class PyIRTuple(PyIRNode):
         for e in self.elements:
             yield from e.walk()
 
+    def __str__(self) -> str:
+        raise AssertionError("PyIRTuple must be lowered before emit")
+
 
 @dataclass
 class PyIRSet(PyIRNode):
@@ -175,6 +271,9 @@ class PyIRSet(PyIRNode):
         yield self
         for e in self.elements:
             yield from e.walk()
+
+    def __str__(self) -> str:
+        raise AssertionError("PyIRSet must be lowered before emit")
 
 
 @dataclass
@@ -196,6 +295,9 @@ class PyIRDict(PyIRNode):
         yield self
         for i in self.items:
             yield from i.walk()
+
+    def __str__(self) -> str:
+        raise AssertionError("PyIRDict must be lowered before emit")
 
 
 # Operations
@@ -244,6 +346,9 @@ class PyIRBinOP(PyIRNode):
         yield from self.left.walk()
         yield from self.right.walk()
 
+    def __str__(self) -> str:
+        raise AssertionError("PyIRBinOP must be lowered before emit")
+
 
 @dataclass
 class PyIRUnaryOP(PyIRNode):
@@ -253,6 +358,9 @@ class PyIRUnaryOP(PyIRNode):
     def walk(self):
         yield self
         yield from self.value.walk()
+
+    def __str__(self) -> str:
+        raise AssertionError("PyIRUnaryOP must be lowered before emit")
 
 
 # Assignment
@@ -283,6 +391,9 @@ class PyIRAssign(PyIRNode):
 
         yield from self.value.walk()
 
+    def __str__(self) -> str:
+        raise AssertionError("PyIRAssign must be emitted by a statement emitter")
+
 
 @dataclass
 class PyIRAugAssign(PyIRNode):
@@ -294,6 +405,9 @@ class PyIRAugAssign(PyIRNode):
         yield self
         yield from self.target.walk()
         yield from self.value.walk()
+
+    def __str__(self) -> str:
+        raise AssertionError("PyIRAugAssign must be lowered before emit")
 
 
 # Call / Function / Class
@@ -312,6 +426,9 @@ class PyIRCall(PyIRNode):
         for a in self.args_kw.values():
             yield from a.walk()
 
+    def __str__(self) -> str:
+        raise AssertionError("PyIRCall must be lowered before emit")
+
 
 @dataclass
 class PyIRFunctionDef(PyIRNode):
@@ -324,7 +441,6 @@ class PyIRFunctionDef(PyIRNode):
         yield self
         for d in self.decorators:
             yield from d.walk()
-
         for n in self.body:
             yield from n.walk()
 
@@ -339,7 +455,6 @@ class PyIRClassDef(PyIRNode):
         yield self
         for d in self.decorators:
             yield from d.walk()
-
         for n in self.body:
             yield from n.walk()
 
@@ -430,12 +545,11 @@ class PyIRWith(PyIRNode):
         yield self
         for item in self.items:
             yield from item.walk()
-
         for node in self.body:
             yield from node.walk()
 
 
-# Comment
+# Comment / Pass
 @dataclass
 class PyIRComment(PyIRNode):
     value: str
@@ -444,15 +558,14 @@ class PyIRComment(PyIRNode):
         yield self
 
 
-# Pass
 @dataclass
 class PyIRPass(PyIRNode):
     def walk(self):
         yield self
 
 
-# Backend escape hatch
-class PyIRBackendKind(IntEnum):
+# Emit escape hatch
+class PyIREmitKind(IntEnum):
     GLOBAL = auto()
     CALL = auto()
     ATTR = auto()
@@ -461,8 +574,16 @@ class PyIRBackendKind(IntEnum):
 
 
 @dataclass
-class PyIRBackendExpr(PyIRNode):
-    kind: PyIRBackendKind
+class PyIREmitExpr(PyIRNode):
+    """
+    Emit-only node.
+
+    Contract:
+    - Must only be produced after lowering.
+    - __str__ is allowed and should be deterministic.
+    """
+
+    kind: PyIREmitKind
     name: str
     args_p: list[PyIRNode] = field(default_factory=list)
     args_kw: dict[str, PyIRNode] = field(default_factory=dict)
@@ -474,3 +595,33 @@ class PyIRBackendExpr(PyIRNode):
 
         for a in self.args_kw.values():
             yield from a.walk()
+
+    def __str__(self) -> str:
+        if self.kind == PyIREmitKind.GLOBAL:
+            return self.name
+
+        if self.kind == PyIREmitKind.RAW:
+            return self.name
+
+        if self.kind == PyIREmitKind.ATTR:
+            if len(self.args_p) != 1:
+                raise AssertionError("ATTR expects exactly 1 positional arg (base)")
+
+            return f"{self.args_p[0]}.{self.name}"
+
+        if self.kind == PyIREmitKind.INDEX:
+            if len(self.args_p) != 2:
+                raise AssertionError(
+                    "INDEX expects exactly 2 positional args (base, index)"
+                )
+
+            return f"{self.args_p[0]}[{self.args_p[1]}]"
+
+        if self.kind == PyIREmitKind.CALL:
+            args = ", ".join(str(a) for a in self.args_p)
+            if self.args_kw:
+                raise AssertionError("CALL does not support keyword args in emit expr")
+
+            return f"{self.name}({args})"
+
+        raise AssertionError("unknown emit kind")
