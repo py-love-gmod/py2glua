@@ -73,7 +73,9 @@ def _build(src: Path, out: Path) -> None:
     logger.info("Начало сборки...")
 
     src = src.resolve()
+    Py2GluaConfig.source = src
     out = out.resolve()
+    Py2GluaConfig.output = out
 
     project_ir = Compiler.build(project_root=src)
 
@@ -103,6 +105,7 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
     setup_logging(args.debug)
+    Py2GluaConfig.debug = args.debug
 
     logger.debug(f"Py2Glua\nVersion: {Py2GluaConfig.version()}")
 

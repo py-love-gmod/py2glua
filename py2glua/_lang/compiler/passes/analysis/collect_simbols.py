@@ -81,9 +81,6 @@ class FileSymbolCollector:
 
         for node in ir.body:
             if isinstance(node, PyIRFunctionDef):
-                if node.name.startswith("_"):
-                    continue
-
                 symbols.append(
                     FileSymbol(
                         name=node.name,
@@ -97,9 +94,6 @@ class FileSymbolCollector:
                 continue
 
             if isinstance(node, PyIRClassDef):
-                if node.name.startswith("_"):
-                    continue
-
                 symbols.append(
                     FileSymbol(
                         name=node.name,
@@ -112,7 +106,7 @@ class FileSymbolCollector:
 
             if isinstance(node, PyIRAssign):
                 for tgt in node.targets:
-                    if isinstance(tgt, PyIRVarUse) and not tgt.name.startswith("_"):
+                    if isinstance(tgt, PyIRVarUse):
                         symbols.append(
                             FileSymbol(
                                 name=tgt.name,

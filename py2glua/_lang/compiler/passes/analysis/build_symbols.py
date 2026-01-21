@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .....config import Py2GluaConfig
 from ....py.ir_builder import PyIRFile
 from .ctx import AnalysisContext, AnalysisPass, SymbolInfo
 
@@ -38,17 +39,35 @@ class BuildSymbolIndexPass(AnalysisPass):
 
         return f"{module}.{name}"
 
-    @staticmethod
-    def _module_name_from_path(path: Path) -> str | None:
-        parts = path.parts
+    @classmethod
+    def _module_name_from_path(cls, path: Path) -> str | None:
+        p = path.resolve()
+
+        parts = p.parts
+        last_py2glua = cls._rindex(parts, "py2glua")
+        if last_py2glua is not None:
+            tail = list(parts[last_py2glua:])
+            return cls._normalize_tail(tail)
 
         try:
-            i = len(parts) - 1 - list(reversed(parts)).index("py2glua")
+            src_root = Py2GluaConfig.source.resolve()
+            rel = p.relative_to(src_root)
 
-        except ValueError:
+        except Exception:
             return None
 
-        tail = list(parts[i:])
+        return cls._normalize_tail(list(rel.parts))
+
+    @staticmethod
+    def _rindex(parts: tuple[str, ...], value: str) -> int | None:
+        for i in range(len(parts) - 1, -1, -1):
+            if parts[i] == value:
+                return i
+
+        return None
+
+    @staticmethod
+    def _normalize_tail(tail: list[str]) -> str | None:
         if not tail:
             return None
 
@@ -57,7 +76,6 @@ class BuildSymbolIndexPass(AnalysisPass):
             name = last[:-3]
             if name == "__init__":
                 tail = tail[:-1]
-                
             else:
                 tail[-1] = name
 

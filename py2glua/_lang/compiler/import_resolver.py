@@ -23,9 +23,9 @@ class _Resolved:
     deps: tuple[Path, ...]
 
 
-class _InternalSymbolIndex:
-    def __init__(self, internal_root: Path):
-        self._root = internal_root.resolve()
+class _SymbolIndex:
+    def __init__(self, root: Path):
+        self._root = root.resolve()
         self._built = False
         self._sym2path: dict[str, Path] = {}
 
@@ -38,7 +38,7 @@ class _InternalSymbolIndex:
             return
 
         for path in self._root.rglob("*.py"):
-            if not path.is_file() or path.name == "__init__.py":
+            if not path.is_file():
                 continue
 
             try:
@@ -84,14 +84,9 @@ class ImportResolver:
     ):
         self.project_root = project_root.resolve()
         self.internal_root = internal_root.resolve()
-        self._internal_index = _InternalSymbolIndex(self.internal_root)
 
-    def _fmt_file(self, path: Path) -> str:
-        try:
-            return str(path.resolve().relative_to(self.project_root))
-
-        except Exception:
-            return str(path)
+        self._project_index = _SymbolIndex(self.project_root)
+        self._internal_index = _SymbolIndex(self.internal_root)
 
     def collect_deps(self, *, ir: PyIRFile, current_file: Path) -> list[Path]:
         deps: set[Path] = set()
@@ -105,7 +100,7 @@ class ImportResolver:
                     1,
                     "Внешний импорт не поддерживается\n"
                     f"Импорт: {'.'.join(imp.modules or [])}\n"
-                    f"Файл: {self._fmt_file(current_file)}",
+                    f"Файл: {current_file}",
                 )
                 raise AssertionError("unreachable")
 
@@ -126,7 +121,7 @@ class ImportResolver:
                     1,
                     "Не удалось разрешить относительный импорт\n"
                     f"Импорт: {'.'.join(modules)}\n"
-                    f"Файл: {self._fmt_file(current_file)}",
+                    f"Файл: {current_file}",
                 )
                 raise AssertionError("unreachable")
 
@@ -180,9 +175,7 @@ class ImportResolver:
 
             exit_with_code(
                 1,
-                "Не удалось разрешить internal-символ\n"
-                f"Импорт: from {'.'.join(modules)} import {name}\n"
-                f"Файл: {self._fmt_file(current_file)}",
+                f"Не удалось разрешить internal-символ {name}\nФайл: {current_file}",
             )
             raise AssertionError("unreachable")
 
@@ -213,16 +206,20 @@ class ImportResolver:
 
         for name in self._iter_imported_names(imp):
             p = self._resolve_module_or_package(pkg_dir, [name])
-            if not p:
-                exit_with_code(
-                    1,
-                    "Не удалось разрешить импорт\n"
-                    f"Импорт: from {pkg_dir.name} import {name}\n"
-                    f"Файл: {self._fmt_file(parent)}",
-                )
-                raise AssertionError("unreachable")
+            if p:
+                deps.add(p)
+                continue
 
-            deps.add(p)
+            p2 = self._project_index.resolve(name)
+            if p2:
+                deps.add(p2)
+                continue
+
+            exit_with_code(
+                1,
+                f"Не удалось разрешить импорт {name}\nФайл: {parent}",
+            )
+            raise AssertionError("unreachable")
 
         return sorted(deps)
 
@@ -231,12 +228,6 @@ class ImportResolver:
         imp: PyIRImport,
         current_file: Path,
     ) -> list[Path]:
-        if self._is_within(current_file, self.internal_root):
-            base_root = self.internal_root
-
-        else:
-            base_root = self.project_root
-
         base = current_file.parent
         for _ in range(imp.level - 1):
             base = base.parent
@@ -259,22 +250,26 @@ class ImportResolver:
 
         for name in self._iter_imported_names(imp):
             p = self._resolve_module_or_package(pkg_dir, [name])
-            if not p:
-                if self._is_within(base_root, self.internal_root):
-                    p2 = self._internal_index.resolve(name)
-                    if p2:
-                        deps.add(p2)
-                        continue
+            if p:
+                deps.add(p)
+                continue
 
-                exit_with_code(
-                    1,
-                    "Не удалось разрешить относительный импорт\n"
-                    f"Импорт: {name}\n"
-                    f"Файл: {self._fmt_file(current_file)}",
-                )
-                raise AssertionError("unreachable")
+            p2 = self._internal_index.resolve(name)
+            if p2:
+                deps.add(p2)
+                continue
 
-            deps.add(p)
+            p3 = self._project_index.resolve(name)
+            if p3:
+                deps.add(p3)
+                continue
+
+            exit_with_code(
+                1,
+                f"Не удалось разрешить относительный импорт {name}\n"
+                f"Файл: {current_file}",
+            )
+            raise AssertionError("unreachable")
 
         return sorted(deps)
 
@@ -290,26 +285,27 @@ class ImportResolver:
     @staticmethod
     def _resolve_module_or_package(base: Path, parts: list[str]) -> Path | None:
         if not parts:
-            init_py = base / "__init__.py"
-            return init_py.resolve() if init_py.exists() else None
+            p = base / "__init__.py"
+            return p if p.exists() else None
 
         mod = base.joinpath(*parts).with_suffix(".py")
         if mod.exists():
-            return mod.resolve()
+            return mod
 
         pkg = base.joinpath(*parts, "__init__.py")
         if pkg.exists():
-            return pkg.resolve()
+            return pkg
 
         return None
 
-    def _reject_star_import(self, imp: PyIRImport, current_file: Path) -> None:
-        for name in self._iter_imported_names(imp):
-            if name == "*":
+    @staticmethod
+    def _reject_star_import(imp: PyIRImport, current_file: Path) -> None:
+        for name in imp.names or []:
+            n = name[0] if isinstance(name, tuple) else name
+            if n == "*":
                 exit_with_code(
                     1,
-                    "import * не поддерживается в py2glua\n"
-                    f"Файл: {self._fmt_file(current_file)}",
+                    f"import * не поддерживается\nФайл: {current_file}",
                 )
                 raise AssertionError("unreachable")
 

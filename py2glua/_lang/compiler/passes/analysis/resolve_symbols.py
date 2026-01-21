@@ -16,7 +16,7 @@ from .ctx import AnalysisContext, AnalysisPass
 class ResolveSymbolsPass(AnalysisPass):
     @classmethod
     def run(cls, ir: PyIRFile, ctx: AnalysisContext) -> None:
-        if not ctx.symbol_id_by_fqname:
+        if not ctx.symbol_id_by_fqname and not ctx.symbol_ids_by_name:
             return
 
         ir.body = cls._rewrite_block(ir.body, ctx)
@@ -62,7 +62,7 @@ class ResolveSymbolsPass(AnalysisPass):
                 nx = cls._rewrite_value(x, ctx)
                 changed = changed or (nx is not x)
                 out.append(nx)
-                
+
             return out if changed else val
 
         if isinstance(val, dict):

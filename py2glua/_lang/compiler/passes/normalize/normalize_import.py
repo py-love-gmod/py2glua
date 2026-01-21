@@ -6,6 +6,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
+from .....config import Py2GluaConfig
 from ....py.ir_builder import PyIRFile
 from ....py.ir_dataclass import (
     PyIRAttribute,
@@ -29,7 +30,7 @@ class NormalizeImportsPass:
     """
 
     _reexport_cache: dict[
-        tuple[str, ...],
+        tuple[int, tuple[str, ...]],
         dict[str, tuple[tuple[str, ...], str]],
     ] = {}
 
@@ -179,8 +180,8 @@ class NormalizeImportsPass:
         head = imported_parts[0]
         tail = imported_parts[1:]
 
-        if itype == PyIRImportType.INTERNAL:
-            exp = cls._read_reexports_for_package(abs_modules)
+        if itype in (PyIRImportType.INTERNAL, PyIRImportType.LOCAL):
+            exp = cls._read_reexports_for_package(abs_modules, itype=itype)
             hit = exp.get(head)
             if hit is not None:
                 target_mod, target_attr = hit
@@ -192,40 +193,53 @@ class NormalizeImportsPass:
     def _read_reexports_for_package(
         cls,
         pkg_modules: tuple[str, ...],
+        *,
+        itype: PyIRImportType,
     ) -> dict[str, tuple[tuple[str, ...], str]]:
-        cached = cls._reexport_cache.get(pkg_modules)
+        key = (int(itype), pkg_modules)
+        cached = cls._reexport_cache.get(key)
         if cached is not None:
             return cached
 
         out: dict[str, tuple[tuple[str, ...], str]] = {}
 
-        pkg_name = ".".join(pkg_modules)
+        init_py: Path | None = None
+        text: str | None = None
 
-        try:
-            tr = resources.files(pkg_name)
+        if itype == PyIRImportType.INTERNAL:
+            pkg_name = ".".join(pkg_modules)
+            try:
+                tr = resources.files(pkg_name)
+                with resources.as_file(tr) as pkg_root:
+                    p = Path(pkg_root) / "__init__.py"
+                    if p.exists():
+                        init_py = p
+                        text = p.read_text(encoding="utf-8")
 
-        except Exception:
-            cls._reexport_cache[pkg_modules] = out
-            return out
+            except Exception:
+                init_py = None
+                text = None
 
-        try:
-            with resources.as_file(tr) as pkg_root:
-                init_py = Path(pkg_root) / "__init__.py"
-                if not init_py.exists():
-                    cls._reexport_cache[pkg_modules] = out
-                    return out
+        elif itype == PyIRImportType.LOCAL:
+            src_root = Py2GluaConfig.source.resolve()
+            p = src_root.joinpath(*pkg_modules, "__init__.py")
+            if p.exists():
+                try:
+                    init_py = p
+                    text = p.read_text(encoding="utf-8")
+                except Exception:
+                    init_py = None
+                    text = None
 
-                text = init_py.read_text(encoding="utf-8")
-
-        except Exception:
-            cls._reexport_cache[pkg_modules] = out
+        if init_py is None or text is None:
+            cls._reexport_cache[key] = out
             return out
 
         try:
             tree = ast.parse(text, filename=str(init_py))
 
         except SyntaxError:
-            cls._reexport_cache[pkg_modules] = out
+            cls._reexport_cache[key] = out
             return out
 
         base_pkg = pkg_modules
@@ -247,7 +261,7 @@ class NormalizeImportsPass:
                 exported_name = a.asname or a.name
                 out[exported_name] = (target_mod, src_name)
 
-        cls._reexport_cache[pkg_modules] = out
+        cls._reexport_cache[key] = out
         return out
 
     @staticmethod
@@ -305,15 +319,33 @@ class NormalizeImportsPass:
 
     @staticmethod
     def _module_parts_from_path(path: Path) -> tuple[str, ...] | None:
-        parts = path.parts
+        p = path.resolve()
+
+        parts = p.parts
         try:
             i = parts.index("py2glua")
+            tail = list(parts[i:])
+            if tail:
+                last = tail[-1]
+                if last.endswith(".py"):
+                    name = last[:-3]
+                    if name == "__init__":
+                        tail = tail[:-1]
+                    else:
+                        tail[-1] = name
+
+                return tuple(tail)
 
         except ValueError:
+            pass
+
+        try:
+            src_root = Py2GluaConfig.source.resolve()
+            rel = p.relative_to(src_root)
+        except Exception:
             return None
 
-        tail = list(parts[i:])
-
+        tail = list(rel.parts)
         if not tail:
             return None
 
@@ -322,7 +354,6 @@ class NormalizeImportsPass:
             name = last[:-3]
             if name == "__init__":
                 tail = tail[:-1]
-
             else:
                 tail[-1] = name
 
