@@ -1,7 +1,8 @@
 from pathlib import Path
 
+from ..etc import TokenStream
 from ..parse import PyLogicBlockBuilder, PyLogicKind, PyLogicNode
-from .build_context import set_build_block
+from .build_context import set_build_block, set_build_expr
 from .builders import (
     BranchBuilder,
     ClassBuilder,
@@ -38,6 +39,7 @@ class PyIRBuilder:
     @classmethod
     def build_file(cls, source: str, path_to_file: Path | None = None) -> PyIRFile:
         set_build_block(cls._build_ir_block)
+        set_build_expr(cls._build_expr_impl)
         logic_blocks = PyLogicBlockBuilder.build(source)
 
         py_ir_file = PyIRFile(
@@ -66,3 +68,15 @@ class PyIRBuilder:
             out.extend(result_nodes)
 
         return out
+
+    @classmethod
+    def _build_expr_impl(cls, tokens):
+        stream = TokenStream(tokens)
+        expr = StatementBuilder._parse_expression(stream, stop_ops=set())
+        if not stream.eof():
+            StatementBuilder._raise(
+                "Некорректное выражение в списке базового класса",
+                stream.peek(),
+            )
+
+        return expr

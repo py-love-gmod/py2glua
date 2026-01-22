@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ....py.ir_builder import PyIRFile
+from ....py.ir_dataclass import PyIRNode
 
 if TYPE_CHECKING:
     from .collect_simbols import CollectedSymbol, FileSymbolTable
@@ -30,6 +31,10 @@ class AnalysisContext:
         self.symbol_ids_by_name: dict[str, list[int]] = {}
 
         self._next_symbol_id: int = 1
+
+        self.enum_map: dict[int, dict[str, PyIRNode]] = {}
+        self.with_map: dict[int, Any] = {}
+        self.api_map: dict[int, Any] = {}
 
     def new_symbol_id(self) -> int:
         sid = self._next_symbol_id

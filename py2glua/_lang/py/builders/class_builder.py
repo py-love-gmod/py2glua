@@ -2,8 +2,49 @@ import tokenize
 from typing import Sequence
 
 from ...parse import PyLogicKind, PyLogicNode
-from ..build_context import build_block
+from ..build_context import build_block, build_expr
 from ..ir_dataclass import PyIRClassDef, PyIRNode
+
+
+def parse_bases(tokens: list[tokenize.TokenInfo]) -> list[list[tokenize.TokenInfo]]:
+    bases: list[list[tokenize.TokenInfo]] = []
+
+    depth = 0
+    current: list[tokenize.TokenInfo] = []
+
+    for t in tokens:
+        if t.type == tokenize.OP and t.string == "(":
+            depth = 1
+            continue
+
+        if depth == 0:
+            continue
+
+        if t.type == tokenize.OP and t.string == "(":
+            depth += 1
+            current.append(t)
+            continue
+
+        if t.type == tokenize.OP and t.string == ")":
+            depth -= 1
+            if depth == 0:
+                if current:
+                    bases.append(current)
+                break
+            current.append(t)
+            continue
+
+        if t.type == tokenize.OP and t.string == "," and depth == 1:
+            bases.append(current)
+            current = []
+            continue
+
+        current.append(t)
+
+    if depth != 0:
+        raise SyntaxError("Unclosed base class list")
+
+    return bases
 
 
 class ClassBuilder:
@@ -30,26 +71,21 @@ class ClassBuilder:
             )
         ]
 
-        if not tokens:
-            raise SyntaxError("Empty class header")
-
-        if tokens[0].type != tokenize.NAME or tokens[0].string != "class":
+        if len(tokens) < 2 or tokens[0].string != "class":
             raise SyntaxError("Invalid class declaration")
 
-        if len(tokens) < 2 or tokens[1].type != tokenize.NAME:
+        name_tok = tokens[1]
+        if name_tok.type != tokenize.NAME:
             raise SyntaxError("Expected class name")
 
-        name_tok = tokens[1]
         class_name = name_tok.string
+        bases: list[PyIRNode] = []
 
-        for t in tokens:
-            if t.type == tokenize.OP and t.string == "(":
-                raise SyntaxError("Наследование классов не поддерживается в py2glua")
+        if any(t.type == tokenize.OP and t.string == "(" for t in tokens):
+            for group in parse_bases(tokens):
+                bases.append(build_expr(group))
 
-        body_children = list(node.children)
-
-        body = build_block(body_children)
-
+        body = build_block(list(node.children))
         line, col = name_tok.start
 
         return [
@@ -57,6 +93,7 @@ class ClassBuilder:
                 line=line,
                 offset=col,
                 name=class_name,
+                bases=bases,
                 decorators=[],
                 body=body,
             )

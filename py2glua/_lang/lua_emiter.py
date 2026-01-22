@@ -12,6 +12,7 @@ from .py.ir_dataclass import (
     PyIRBinOP,
     PyIRBreak,
     PyIRCall,
+    PyIRClassDef,
     PyIRComment,
     PyIRConstant,
     PyIRContinue,
@@ -177,8 +178,45 @@ class LuaEmitter:
             self._wl(self._expr(node))
             return
 
+        if isinstance(node, PyIRClassDef):
+            self._maybe_blankline_before("class", top_level=top_level)
+            self._emit_class(node)
+            self._blankline_after_block()
+            return
+
         self._maybe_blankline_before("misc", top_level=top_level)
         self._wl(self._leak(type(node).__name__))
+
+    def _emit_class(self, node: PyIRClassDef) -> None:
+        if node.bases:
+            bases = ", ".join(self._expr(b) for b in node.bases)
+            self._wl(f"-- class {node.name}({bases})")
+        else:
+            self._wl(f"-- class {node.name}")
+
+        self._wl(f"{node.name} = {{}}")
+        self._wl(f"{node.name}.__index = {node.name}")
+
+        for item in node.body:
+            if isinstance(item, PyIRFunctionDef):
+                self._emit_class_method(node.name, item)
+
+            else:
+                self._wl(self._leak(type(item).__name__))
+
+    def _emit_class_method(self, class_name: str, fn: PyIRFunctionDef) -> None:
+        args = ", ".join(fn.signature.keys())
+        self._wl(f"function {class_name}.{fn.name}({args})")
+        self._indent_push()
+
+        if not fn.body:
+            self._wl("-- pass")
+        else:
+            for st in fn.body:
+                self._stmt(st, top_level=False)
+
+        self._indent_pop()
+        self._wl("end")
 
     def _emit_comment(self, node: PyIRComment) -> None:
         for line in (node.value or "").splitlines() or [""]:

@@ -449,13 +449,18 @@ class PyIRFunctionDef(PyIRNode):
 @dataclass
 class PyIRClassDef(PyIRNode):
     name: str
+    bases: list[PyIRNode] = field(default_factory=list)
     decorators: list[PyIRDecorator] = field(default_factory=list)
     body: list[PyIRNode] = field(default_factory=list)
 
     def walk(self):
         yield self
+        for b in self.bases:
+            yield from b.walk()
+
         for d in self.decorators:
             yield from d.walk()
+
         for n in self.body:
             yield from n.walk()
 
