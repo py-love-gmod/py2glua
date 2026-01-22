@@ -119,3 +119,8 @@ class CompilerDirective:
     contextmanager_body = object()
     """Указание компилятору что в данном месте для конструкции with необходимо подставить само тело блока"""
     # endregion
+
+    @staticmethod
+    def raw(lua_code: str) -> None:
+        """Позволяет сказать компилятору "вставь голый луа сюдa". Что либо возвращать из этого блока нельзя"""
+        pass
