@@ -173,7 +173,17 @@ class LuaEmitter:
             self._wl(self._leak("with-statement"))
             return
 
-        if isinstance(node, (PyIRCall, PyIRAttribute, PyIRSymbolRef, PyIRLocalRef)):
+        if isinstance(
+            node,
+            (
+                PyIRCall,
+                PyIRAttribute,
+                PyIRSymbolRef,
+                PyIRLocalRef,
+                PyIREmitExpr,
+                PyIRConstant,
+            ),
+        ):
             self._maybe_blankline_before("stmt", top_level=top_level)
             self._wl(self._expr(node))
             return
@@ -292,6 +302,7 @@ class LuaEmitter:
                 PyIRSymbolRef,
                 PyIREmitExpr,
                 PyIRLocalRef,
+                PyIREmitExpr,
             ),
         ):
             return str(node)

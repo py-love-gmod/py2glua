@@ -581,14 +581,6 @@ class PyIREmitKind(IntEnum):
 
 @dataclass
 class PyIREmitExpr(PyIRNode):
-    """
-    Emit-only node.
-
-    Contract:
-    - Must only be produced after lowering.
-    - __str__ is allowed and should be deterministic.
-    """
-
     kind: PyIREmitKind
     name: str
     args_p: list[PyIRNode] = field(default_factory=list)

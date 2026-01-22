@@ -147,7 +147,7 @@ class PyParser:
                 "lambda",
             }:
                 raise SyntaxError(
-                    f"{tok_string} keyword is not supported in py2glua\n"
+                    f"{tok_string} как ключевое слово не поддерживается\n"
                     f"LINE|OFFSET: {tok.start[0]}|{tok.start[1]}"
                 )
 

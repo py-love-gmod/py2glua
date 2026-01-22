@@ -4,16 +4,21 @@ from importlib import resources
 from pathlib import Path
 from typing import Iterable
 
-from ..._cli.logging_setup import exit_with_code, logger
+from ..._cli.logging_setup import exit_with_code
 from ...config import Py2GluaConfig
 from ..py.ir_builder import PyIRBuilder, PyIRFile
 from .import_resolver import ImportResolver
 from .passes.analysis import (
     AnalysisContext,
     BuildSymbolIndexPass,
+    CollectEnumsPass,
     CollectSymbolsPass,
     ResolveGlobalSymbolsPass,
     ResolveLocalSymbolsPass,
+)
+from .passes.lowering import (
+    EnumUsagePass,
+    StripEnumClassesPass,
 )
 from .passes.normalize import (
     AttachDecoratorsPass,
@@ -32,10 +37,18 @@ class Compiler:
     ]
 
     analysis_passes = [
+        # Символические ссылки
         CollectSymbolsPass,
         BuildSymbolIndexPass,
         ResolveLocalSymbolsPass,
         ResolveGlobalSymbolsPass,
+        # ===
+        CollectEnumsPass,  # Ресолв енумов
+    ]
+
+    lowering_passes = [
+        StripEnumClassesPass,
+        EnumUsagePass,
     ]
 
     # validation
@@ -211,6 +224,28 @@ class Compiler:
 
         return ctx
 
+    @classmethod
+    def run_lowering(
+        cls,
+        project_ir: Iterable[PyIRFile],
+        internal_ir: Iterable[PyIRFile],
+        ctx: AnalysisContext,
+    ) -> None:
+        for p in cls.lowering_passes:
+            for ir in (*internal_ir, *project_ir):
+                try:
+                    p.run(ir, ctx)
+
+                except Exception as e:
+                    exit_with_code(
+                        3,
+                        f"Ошибка lowering.\n"
+                        f"Файл: {ir.path}\n"
+                        f"Pass: {p.__name__}\n"
+                        f"Ошибка: {e}",
+                    )
+                    raise AssertionError("unreachable")
+
     # public API
     @classmethod
     def build(cls) -> list[PyIRFile]:
@@ -220,9 +255,12 @@ class Compiler:
             project_ir=project_ir,
             internal_ir=internal_ir,
         )
-        logger.debug("=== SYMBOL TABLES ===")
-        for table in ctx.file_simbol_data.values():
-            logger.debug(table)
+
+        cls.run_lowering(
+            project_ir=project_ir,
+            internal_ir=internal_ir,
+            ctx=ctx,
+        )
 
         project_ir.sort(key=lambda f: str(f.path))
         return project_ir

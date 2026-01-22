@@ -1,4 +1,5 @@
 from .build_symbols import BuildSymbolIndexPass
+from .collect_enums import CollectEnumsPass
 from .collect_simbols import CollectSymbolsPass
 from .ctx import AnalysisContext
 from .resolve_global_symbols import ResolveGlobalSymbolsPass

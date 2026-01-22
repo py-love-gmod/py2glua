@@ -2,13 +2,30 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
 
 from ....py.ir_builder import PyIRFile
-from ....py.ir_dataclass import PyIRNode
 
 if TYPE_CHECKING:
     from .collect_simbols import CollectedSymbol, FileSymbolTable
+
+
+EnumValueKind = Literal["int", "str", "bool", "global"]
+
+
+@dataclass(frozen=True)
+class EnumValue:
+    name: str
+    kind: EnumValueKind
+    value: str | int | bool
+
+
+@dataclass
+class EnumInfo:
+    class_symbol_id: int
+    fqname: str
+    values: dict[str, EnumValue]
+    origin: Literal["python_enum", "gmod_special_enum"]
 
 
 @dataclass(frozen=True)
@@ -32,9 +49,7 @@ class AnalysisContext:
 
         self._next_symbol_id: int = 1
 
-        self.enum_map: dict[int, dict[str, PyIRNode]] = {}
-        self.with_map: dict[int, Any] = {}
-        self.api_map: dict[int, Any] = {}
+        self.enums: dict[int, EnumInfo] = {}
 
     def new_symbol_id(self) -> int:
         sid = self._next_symbol_id
