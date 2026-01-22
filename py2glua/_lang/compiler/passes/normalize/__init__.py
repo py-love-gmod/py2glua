@@ -1,2 +1,4 @@
 from .attach_decorators import AttachDecoratorsPass
 from .normalize_import import NormalizeImportsPass
+from .strip_bodies import StripBodiesByDecoratorPass
+from .strip_internal_classes import StripInternalClassesPass

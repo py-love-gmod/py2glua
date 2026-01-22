@@ -12,21 +12,30 @@ from .passes.analysis import (
     AnalysisContext,
     BuildSymbolIndexPass,
     CollectSymbolsPass,
-    ResolveSymbolsPass,
+    ResolveGlobalSymbolsPass,
+    ResolveLocalSymbolsPass,
 )
-from .passes.normalize import AttachDecoratorsPass, NormalizeImportsPass
+from .passes.normalize import (
+    AttachDecoratorsPass,
+    NormalizeImportsPass,
+    StripBodiesByDecoratorPass,
+    StripInternalClassesPass,
+)
 
 
 class Compiler:
     normalize_passes: list = [
         NormalizeImportsPass,
         AttachDecoratorsPass,
+        StripInternalClassesPass,
+        StripBodiesByDecoratorPass,
     ]
 
     analysis_passes = [
         CollectSymbolsPass,
         BuildSymbolIndexPass,
-        ResolveSymbolsPass,
+        ResolveLocalSymbolsPass,
+        ResolveGlobalSymbolsPass,
     ]
 
     # validation
@@ -211,17 +220,9 @@ class Compiler:
             project_ir=project_ir,
             internal_ir=internal_ir,
         )
-
-        # region debug dump
         logger.debug("=== SYMBOL TABLES ===")
         for table in ctx.file_simbol_data.values():
             logger.debug(table)
-
-        logger.debug("=== GLOBAL SYMBOL INDEX ===")
-        for fq, sid in ctx.symbol_id_by_fqname.items():
-            info = ctx.symbols[sid]
-            logger.debug(f"{sid:03d}: {fq} -> ({info.file})")
-        # endregion
 
         project_ir.sort(key=lambda f: str(f.path))
         return project_ir

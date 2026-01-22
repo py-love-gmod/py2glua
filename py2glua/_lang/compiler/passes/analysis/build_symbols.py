@@ -17,20 +17,29 @@ class BuildSymbolIndexPass(AnalysisPass):
             module = cls._module_name_from_path(table.file)
 
             for sym in table.symbols:
-                fq = cls._make_fqname(module, table.file, sym.name)
-                sid = ctx.symbol_id_by_fqname.get(fq)
-                if sid is None:
-                    sid = ctx._next_symbol_id
-                    ctx._next_symbol_id += 1
+                if sym.scope != "module":
+                    continue
 
-                    ctx.symbol_id_by_fqname[fq] = sid
-                    ctx.symbol_ids_by_name.setdefault(sym.name, []).append(sid)
-                    ctx.symbols[sid] = SymbolInfo(
-                        id=sid,
-                        fqname=fq,
-                        symbol=sym,
-                        file=table.file,
-                    )
+                if sym.kind in ("arg",):
+                    continue
+
+                fq = cls._make_fqname(module, table.file, sym.name)
+
+                if fq in ctx.symbol_id_by_fqname:
+                    continue
+
+                sid = ctx._next_symbol_id
+                ctx._next_symbol_id += 1
+
+                ctx.symbol_id_by_fqname[fq] = sid
+                ctx.symbol_ids_by_name.setdefault(sym.name, []).append(sid)
+
+                ctx.symbols[sid] = SymbolInfo(
+                    id=sid,
+                    fqname=fq,
+                    symbol=sym,
+                    file=table.file,
+                )
 
     @staticmethod
     def _make_fqname(module: str | None, file: Path, name: str) -> str:
@@ -50,7 +59,7 @@ class BuildSymbolIndexPass(AnalysisPass):
             return cls._normalize_tail(tail)
 
         try:
-            src_root = Py2GluaConfig.source.resolve()
+            src_root = Py2GluaConfig.source
             rel = p.relative_to(src_root)
 
         except Exception:

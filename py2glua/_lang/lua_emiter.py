@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
-from .compiler.ir_compiler import PyIRSymbolRef
+from .compiler.ir_compiler import PyIRLocalRef, PyIRSymbolRef
 from .py.ir_dataclass import (
     PyAugAssignType,
     PyIRAssign,
@@ -172,7 +172,7 @@ class LuaEmitter:
             self._wl(self._leak("with-statement"))
             return
 
-        if isinstance(node, (PyIRCall, PyIRAttribute, PyIRSymbolRef)):
+        if isinstance(node, (PyIRCall, PyIRAttribute, PyIRSymbolRef, PyIRLocalRef)):
             self._maybe_blankline_before("stmt", top_level=top_level)
             self._wl(self._expr(node))
             return
@@ -253,6 +253,7 @@ class LuaEmitter:
                 PyIRSubscript,
                 PyIRSymbolRef,
                 PyIREmitExpr,
+                PyIRLocalRef,
             ),
         ):
             return str(node)

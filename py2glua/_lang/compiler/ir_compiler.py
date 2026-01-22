@@ -19,3 +19,15 @@ class PyIRSymbolRef(PyIRNode):
 
     def __str__(self) -> str:
         return f"<SYM#{self.sym_id}>"
+
+
+@dataclass
+class PyIRLocalRef(PyIRNode):
+    local_id: int
+    name: str
+
+    def walk(self):
+        yield self
+
+    def __str__(self) -> str:
+        return f"<L_SYM#{self.local_id}>"

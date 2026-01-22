@@ -82,8 +82,6 @@ class FunctionBuilder:
                 raise SyntaxError("Empty return annotation")
 
         signature = FunctionBuilder._parse_params(params_tokens)
-        if return_ann_str is not None:
-            signature["__return__"] = (return_ann_str, None)
 
         body_children = list(node.children)
 
@@ -97,6 +95,7 @@ class FunctionBuilder:
                 offset=col,
                 name=func_name,
                 signature=signature,
+                returns=return_ann_str,
                 decorators=[],
                 body=body,
             )

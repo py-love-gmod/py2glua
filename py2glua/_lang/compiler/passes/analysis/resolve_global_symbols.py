@@ -13,17 +13,19 @@ from ...ir_compiler import PyIRSymbolRef
 from .ctx import AnalysisContext, AnalysisPass
 
 
-class ResolveSymbolsPass(AnalysisPass):
+class ResolveGlobalSymbolsPass(AnalysisPass):
     @classmethod
     def run(cls, ir: PyIRFile, ctx: AnalysisContext) -> None:
-        if not ctx.symbol_id_by_fqname and not ctx.symbol_ids_by_name:
+        if not ctx.symbol_id_by_fqname:
             return
 
         ir.body = cls._rewrite_block(ir.body, ctx)
 
     @classmethod
     def _rewrite_block(
-        cls, body: list[PyIRNode], ctx: AnalysisContext
+        cls,
+        body: list[PyIRNode],
+        ctx: AnalysisContext,
     ) -> list[PyIRNode]:
         return [cls._rewrite_node(n, ctx) for n in body]
 
@@ -33,10 +35,13 @@ class ResolveSymbolsPass(AnalysisPass):
             return cls._rewrite_attribute_chain(node, ctx)
 
         if isinstance(node, PyIRVarUse):
-            ids = ctx.symbol_ids_by_name.get(node.name)
-            if ids and len(ids) == 1:
-                return PyIRSymbolRef(line=node.line, offset=node.offset, sym_id=ids[0])
-
+            sid = cls._resolve_global_name(node.name, ctx)
+            if sid is not None:
+                return PyIRSymbolRef(
+                    line=node.line,
+                    offset=node.offset,
+                    sym_id=sid,
+                )
             return node
 
         if not is_dataclass(node):
@@ -57,40 +62,53 @@ class ResolveSymbolsPass(AnalysisPass):
 
         if isinstance(val, list):
             changed = False
-            out: list[Any] = []
+            out_2: list[Any] = []
             for x in val:
                 nx = cls._rewrite_value(x, ctx)
-                changed = changed or (nx is not x)
-                out.append(nx)
+                changed |= nx is not x
+                out_2.append(nx)
 
-            return out if changed else val
-
-        if isinstance(val, dict):
-            changed = False
-            out_1: dict[Any, Any] = {}
-            for k, v in val.items():
-                nk = cls._rewrite_value(k, ctx)
-                nv = cls._rewrite_value(v, ctx)
-                changed = changed or (nk is not k) or (nv is not v)
-                out_1[nk] = nv
-
-            return out_1 if changed else val
+            return out_2 if changed else val
 
         if isinstance(val, tuple):
             changed = False
-            out: list[Any] = []
+            out_1: list[Any] = []
             for x in val:
                 nx = cls._rewrite_value(x, ctx)
-                changed = changed or (nx is not x)
-                out.append(nx)
+                changed |= nx is not x
+                out_1.append(nx)
 
-            return tuple(out) if changed else val
+            return tuple(out_1) if changed else val
+
+        if isinstance(val, dict):
+            changed = False
+            out: dict[Any, Any] = {}
+            for k, v in val.items():
+                nk = cls._rewrite_value(k, ctx)
+                nv = cls._rewrite_value(v, ctx)
+                changed |= (nk is not k) or (nv is not v)
+                out[nk] = nv
+
+            return out if changed else val
 
         return val
 
     @classmethod
+    def _resolve_global_name(
+        cls,
+        name: str,
+        ctx: AnalysisContext,
+    ) -> int | None:
+        ids = ctx.symbol_ids_by_name.get(name)
+        if not ids or len(ids) != 1:
+            return None
+        return ids[0]
+
+    @classmethod
     def _rewrite_attribute_chain(
-        cls, node: PyIRAttribute, ctx: AnalysisContext
+        cls,
+        node: PyIRAttribute,
+        ctx: AnalysisContext,
     ) -> PyIRNode:
         parts = cls._collect_dotted_parts(node)
         if parts is None:
@@ -102,13 +120,20 @@ class ResolveSymbolsPass(AnalysisPass):
             node.value = cls._rewrite_node(node.value, ctx)  # type: ignore[assignment]
             return node
 
-        base = PyIRSymbolRef(line=node.line, offset=node.offset, sym_id=sid)
+        base = PyIRSymbolRef(
+            line=node.line,
+            offset=node.offset,
+            sym_id=sid,
+        )
 
         rest = parts[used_len:]
         expr: PyIRNode = base
         for attr in rest:
             expr = PyIRAttribute(
-                line=node.line, offset=node.offset, value=expr, attr=attr
+                line=node.line,
+                offset=node.offset,
+                value=expr,
+                attr=attr,
             )
 
         return expr
@@ -127,14 +152,12 @@ class ResolveSymbolsPass(AnalysisPass):
             parts.reverse()
             return parts
 
-        if isinstance(cur, PyIRSymbolRef):
-            return None
-
         return None
 
     @staticmethod
     def _find_longest_symbol_prefix(
-        parts: list[str], ctx: AnalysisContext
+        parts: list[str],
+        ctx: AnalysisContext,
     ) -> tuple[int | None, int]:
         for k in range(len(parts), 0, -1):
             fq = ".".join(parts[:k])

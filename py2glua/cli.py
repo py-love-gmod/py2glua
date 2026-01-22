@@ -60,7 +60,11 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _clean_build(out: Path) -> None:
+def _build(src: Path, out: Path) -> None:
+    logger.info("Начало сборки...")
+
+    project_ir = Compiler.build()
+
     if out.exists():
         if not out.is_dir():
             exit_with_code(2, f"Путь build не является директорией: {out}")
@@ -68,13 +72,6 @@ def _clean_build(out: Path) -> None:
         logger.debug("Очистка build директории...")
         shutil.rmtree(out)
 
-
-def _build(src: Path, out: Path) -> None:
-    logger.info("Начало сборки...")
-
-    project_ir = Compiler.build()
-
-    _clean_build(out)
     out.mkdir(parents=True, exist_ok=True)
 
     emitter = LuaEmitter()
@@ -111,15 +108,16 @@ Output : {Py2GluaConfig.output}
 Debug  : {Py2GluaConfig.debug}
 """)
 
-    if args.cmd == "build":
-        _build(Py2GluaConfig.source, Py2GluaConfig.output)
-        exit_with_code(0)
+    match args.cmd:
+        case "build":
+            _build(Py2GluaConfig.source, Py2GluaConfig.output)
+            exit_with_code(0)
 
-    elif args.cmd == "version":
-        print(Py2GluaConfig.version())
-        exit_with_code(0)
+        case "version":
+            print(Py2GluaConfig.version())
+            exit_with_code(0)
 
-    else:
-        exit_with_code(1, "Неизвестный параметр консоли")
+        case _:
+            exit_with_code(1, "Неизвестный параметр консоли")
 
     exit_with_code(3)

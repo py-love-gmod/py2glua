@@ -434,6 +434,7 @@ class PyIRCall(PyIRNode):
 class PyIRFunctionDef(PyIRNode):
     name: str
     signature: dict[str, tuple[str | None, str | None]]
+    returns: str | None
     decorators: list[PyIRDecorator] = field(default_factory=list)
     body: list[PyIRNode] = field(default_factory=list)
 
