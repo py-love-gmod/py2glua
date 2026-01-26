@@ -34,7 +34,7 @@ def _parse_number(text: str):
     text = text.replace("_", "")
 
     try:
-        return int(text, 10)
+        return int(text, 0)
 
     except ValueError:
         pass
