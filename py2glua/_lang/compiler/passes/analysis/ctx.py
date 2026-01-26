@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -8,7 +8,6 @@ from ....py.ir_builder import PyIRFile
 
 if TYPE_CHECKING:
     from .collect_simbols import CollectedSymbol, FileSymbolTable
-
 
 EnumValueKind = Literal["int", "str", "bool", "global"]
 
@@ -39,6 +38,17 @@ class SymbolInfo:
         return f"<SymbolInfo {self.id:03d} {self.fqname} ({self.file})>"
 
 
+@dataclass
+class InlineRecursionState:
+    done: bool = False
+    processed_files: set[Path] = field(default_factory=set)
+    inline_funcs: set[int] = field(default_factory=set)
+    raw_edges: dict[int, set[int]] = field(default_factory=dict)
+    locations: dict[int, tuple[Path, int | None, int | None]] = field(
+        default_factory=dict
+    )
+
+
 class AnalysisContext:
     def __init__(self) -> None:
         self.file_simbol_data: dict[Path, FileSymbolTable] = {}
@@ -50,6 +60,8 @@ class AnalysisContext:
         self._next_symbol_id: int = 1
 
         self.enums: dict[int, EnumInfo] = {}
+
+        self.inline_recursion_state: InlineRecursionState = InlineRecursionState()
 
     def new_symbol_id(self) -> int:
         sid = self._next_symbol_id

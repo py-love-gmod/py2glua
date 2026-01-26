@@ -10,6 +10,7 @@ from ..py.ir_builder import PyIRBuilder, PyIRFile
 from .import_resolver import ImportResolver
 from .passes.analysis import (
     AnalysisContext,
+    AnalyzeInlineRecursionPass,
     BuildSymbolIndexPass,
     CollectEnumsPass,
     CollectSymbolsPass,
@@ -42,6 +43,8 @@ class Compiler:
         BuildSymbolIndexPass,
         ResolveLocalSymbolsPass,
         ResolveGlobalSymbolsPass,
+        # ===
+        AnalyzeInlineRecursionPass,  # ломаем билд если у нас рекурсия в inline/with
         # ===
         CollectEnumsPass,  # Ресолв енумов
     ]
