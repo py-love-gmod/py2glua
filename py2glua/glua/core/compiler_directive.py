@@ -27,7 +27,11 @@ class CompilerDirective:
     class RealmMarker:
         """Маркер обозначающий что данная переменная отвечает за реалм"""
 
-        pass
+        def __enter__(self):
+            pass
+
+        def __exit__(self, exc_type, exc, tb):
+            pass
 
     # region compile func type
     @staticmethod
@@ -99,6 +103,26 @@ class CompilerDirective:
         "Поле": ["тип поля", значение]
 
         Для примера использования смотрите glua.realm
+        """
+
+        def decorator(fn):
+            return fn
+
+        return decorator
+
+    @staticmethod
+    def with_condition() -> Callable:
+        """
+        Помечает класс как источник условных with-блоков.
+
+        Конструкция:
+            with Class.attr:
+                body
+
+        Интерпретируется компилятором как:
+            if Class.attr:
+                body
+
         """
 
         def decorator(fn):

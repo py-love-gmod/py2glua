@@ -12,13 +12,17 @@ from .passes.analysis import (
     AnalysisContext,
     AnalyzeInlineRecursionPass,
     BuildSymbolIndexPass,
+    CollectContextManagersPass,
     CollectEnumsPass,
     CollectSymbolsPass,
+    CollectWithConditionClassesPass,
     ResolveGlobalSymbolsPass,
     ResolveLocalSymbolsPass,
 )
 from .passes.lowering import (
     EnumUsagePass,
+    LowerContextManagersPass,
+    LowerWithConditionPass,
     StripEnumClassesPass,
 )
 from .passes.normalize import (
@@ -47,11 +51,15 @@ class Compiler:
         AnalyzeInlineRecursionPass,  # ломаем билд если у нас рекурсия в inline/with
         # ===
         CollectEnumsPass,  # Ресолв енумов
+        CollectContextManagersPass,  # with блоки обычные
+        CollectWithConditionClassesPass,  # Сборка with_condition
     ]
 
     lowering_passes = [
+        LowerWithConditionPass,  # Сначала заменяем with на if
         StripEnumClassesPass,
-        EnumUsagePass,
+        EnumUsagePass,  # Толко потом инлайн
+        LowerContextManagersPass,  # Должно быть после вообще всех блоков with ловеринга, ибо тригерит сайд по убийству билда
     ]
 
     # validation

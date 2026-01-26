@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from ....py.ir_builder import PyIRFile
+from ....py.ir_dataclass import PyIRFile, PyIRNode
 
 if TYPE_CHECKING:
     from .collect_simbols import CollectedSymbol, FileSymbolTable
@@ -49,6 +49,17 @@ class InlineRecursionState:
     )
 
 
+@dataclass
+class ContextManagerInfo:
+    function_symbol_id: int
+    fqname: str
+    file: Path
+    line: int | None
+    offset: int | None
+    pre_body: list[PyIRNode]
+    post_body: list[PyIRNode]
+
+
 class AnalysisContext:
     def __init__(self) -> None:
         self.file_simbol_data: dict[Path, FileSymbolTable] = {}
@@ -62,6 +73,10 @@ class AnalysisContext:
         self.enums: dict[int, EnumInfo] = {}
 
         self.inline_recursion_state: InlineRecursionState = InlineRecursionState()
+
+        self.with_condition_classes: set[int] = set()
+
+        self.context_managers: dict[int, ContextManagerInfo] = {}
 
     def new_symbol_id(self) -> int:
         sid = self._next_symbol_id
