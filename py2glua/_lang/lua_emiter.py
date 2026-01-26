@@ -6,6 +6,7 @@ from typing import Final
 from .compiler.ir_compiler import PyIRLocalRef, PyIRSymbolRef
 from .py.ir_dataclass import (
     PyAugAssignType,
+    PyBinOPType,
     PyIRAssign,
     PyIRAttribute,
     PyIRAugAssign,
@@ -17,23 +18,27 @@ from .py.ir_dataclass import (
     PyIRConstant,
     PyIRContinue,
     PyIRDict,
+    PyIRDictItem,
     PyIREmitExpr,
     PyIRFile,
     PyIRFor,
     PyIRFunctionDef,
     PyIRIf,
     PyIRImport,
+    PyIRList,
     PyIRNode,
     PyIRPass,
     PyIRReturn,
     PyIRSet,
     PyIRSubscript,
+    PyIRTuple,
     PyIRUnaryOP,
     PyIRVarCreate,
     PyIRVarUse,
     PyIRWhile,
     PyIRWith,
     PyIRWithItem,
+    PyUnaryOPType,
 )
 
 
@@ -46,6 +51,37 @@ class LuaEmitter:
     _INDENT: Final[str] = "    "
     _LEAK_PREFIX: Final[str] = "<PYTHON_LEAK:"
     _LEAK_SUFFIX: Final[str] = ">"
+
+    _BIN_OP: Final[dict[PyBinOPType, str]] = {
+        PyBinOPType.OR: "or",
+        PyBinOPType.AND: "and",
+        PyBinOPType.EQ: "==",
+        PyBinOPType.NE: "~=",
+        PyBinOPType.LT: "<",
+        PyBinOPType.GT: ">",
+        PyBinOPType.LE: "<=",
+        PyBinOPType.GE: ">=",
+        PyBinOPType.BIT_OR: "|",
+        PyBinOPType.BIT_XOR: "~",
+        PyBinOPType.BIT_AND: "&",
+        PyBinOPType.BIT_LSHIFT: "<<",
+        PyBinOPType.BIT_RSHIFT: ">>",
+        PyBinOPType.ADD: "+",
+        PyBinOPType.SUB: "-",
+        PyBinOPType.MUL: "*",
+        PyBinOPType.DIV: "/",
+        PyBinOPType.FLOORDIV: "//",
+        PyBinOPType.MOD: "%",
+        PyBinOPType.POW: "^",
+        # IN / NOT_IN / IS / IS_NOT
+    }
+
+    _UNARY_OP: Final[dict[PyUnaryOPType, str]] = {
+        PyUnaryOPType.PLUS: "+",
+        PyUnaryOPType.MINUS: "-",
+        PyUnaryOPType.NOT: "not",
+        PyUnaryOPType.BIT_INV: "~",
+    }
 
     def __init__(self) -> None:
         self._buf: list[str] = []
@@ -182,6 +218,8 @@ class LuaEmitter:
                 PyIRLocalRef,
                 PyIREmitExpr,
                 PyIRConstant,
+                PyIRBinOP,
+                PyIRUnaryOP,
             ),
         ):
             self._maybe_blankline_before("stmt", top_level=top_level)
@@ -210,7 +248,6 @@ class LuaEmitter:
         for item in node.body:
             if isinstance(item, PyIRFunctionDef):
                 self._emit_class_method(node.name, item)
-
             else:
                 self._wl(self._leak(type(item).__name__))
 
@@ -302,7 +339,6 @@ class LuaEmitter:
                 PyIRSymbolRef,
                 PyIREmitExpr,
                 PyIRLocalRef,
-                PyIREmitExpr,
             ),
         ):
             return str(node)
@@ -310,8 +346,29 @@ class LuaEmitter:
         if isinstance(node, PyIRCall):
             return self._call(node)
 
-        if isinstance(node, (PyIRDict, PyIRSet, PyIRBinOP, PyIRUnaryOP)):
-            return self._leak(type(node).__name__)
+        if isinstance(node, PyIRBinOP):
+            op = self._BIN_OP.get(node.op)
+            if op is None:
+                return self._leak(f"binop {node.op.name}")
+
+            return f"({self._expr(node.left)} {op} {self._expr(node.right)})"
+
+        if isinstance(node, PyIRUnaryOP):
+            op = self._UNARY_OP.get(node.op)
+            if op is None:
+                return self._leak(f"unary {node.op.name}")
+
+            v = self._expr(node.value)
+            return f"(not {v})" if op == "not" else f"({op}{v})"
+
+        if isinstance(node, PyIRList):
+            return self._emit_list(node)
+
+        if isinstance(node, PyIRDict):
+            return self._emit_dict(node)
+
+        if isinstance(node, PyIRTuple):
+            return self._emit_tuple(node)
 
         return self._leak(type(node).__name__)
 
@@ -321,6 +378,42 @@ class LuaEmitter:
 
         args = ", ".join(self._expr(a) for a in node.args_p)
         return f"{self._expr(node.func)}({args})"
+
+    def _emit_list(self, node: PyIRList) -> str:
+        if not node.elements:
+            return "{}"
+
+        items = ", ".join(self._expr(e) for e in node.elements)
+        return f"{{ {items} }}"
+
+    def _emit_dict(self, node: PyIRDict) -> str:
+        if not node.items:
+            return "{}"
+
+        parts: list[str] = []
+
+        for item in node.items:
+            key = item.key
+            val = item.value
+
+            if isinstance(key, PyIRConstant) and isinstance(key.value, str):
+                k = f"[{repr(key.value)}]"
+
+            elif isinstance(key, PyIRConstant) and isinstance(key.value, (int, float)):
+                k = f"[{key.value}]"
+
+            else:
+                k = f"[{self._expr(key)}]"
+
+            parts.append(f"{k} = {self._expr(val)}")
+
+        return "{ " + ", ".join(parts) + " }"
+
+    def _emit_tuple(self, node: PyIRTuple) -> str:
+        if not node.elements:
+            return ""
+
+        return ", ".join(self._expr(e) for e in node.elements)
 
     @staticmethod
     def _augassign_op(op: PyAugAssignType) -> str | None:

@@ -20,6 +20,7 @@ from .passes.analysis import (
     ResolveLocalSymbolsPass,
 )
 from .passes.lowering import (
+    ConstFoldingPass,
     EnumUsagePass,
     LowerContextManagersPass,
     LowerWithConditionPass,
@@ -60,6 +61,7 @@ class Compiler:
         StripEnumClassesPass,
         EnumUsagePass,  # Толко потом инлайн
         LowerContextManagersPass,  # Должно быть после вообще всех блоков with ловеринга, ибо тригерит сайд по убийству билда
+        ConstFoldingPass,  # магия конст фолдинга
     ]
 
     # validation
