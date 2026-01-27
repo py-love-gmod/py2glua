@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
+from .._lang.compiler.passes.analysis.symlinks import PyIRSymLink
 from .py.ir_dataclass import (
     PyAugAssignType,
     PyBinOPType,
@@ -215,6 +216,7 @@ class LuaEmitter:
                 PyIRConstant,
                 PyIRBinOP,
                 PyIRUnaryOP,
+                PyIRSymLink,
             ),
         ):
             self._maybe_blankline_before("stmt", top_level=top_level)
@@ -332,6 +334,7 @@ class LuaEmitter:
                 PyIRVarCreate,
                 PyIRSubscript,
                 PyIREmitExpr,
+                PyIRSymLink,
             ),
         ):
             return str(node)

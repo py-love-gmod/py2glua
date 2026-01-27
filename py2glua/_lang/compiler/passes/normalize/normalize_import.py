@@ -34,6 +34,59 @@ class NormalizeImportsPass:
         dict[str, tuple[tuple[str, ...], str]],
     ] = {}
 
+    @staticmethod
+    def _local_module_exists(mod_parts: tuple[str, ...]) -> bool:
+        src_root = Py2GluaConfig.source.resolve()
+        base = src_root.joinpath(*mod_parts)
+
+        if base.with_suffix(".py").exists():
+            return True
+
+        if base.is_dir():
+            return True
+
+        return False
+
+    @staticmethod
+    def _internal_module_exists(mod_parts: tuple[str, ...]) -> bool:
+        """
+        Best-effort для internal:
+        пытаемся открыть как package/module через importlib.resources.
+        """
+        pkg_name = ".".join(mod_parts)
+        try:
+            resources.files(pkg_name)
+            return True
+
+        except Exception:
+            return False
+
+    @classmethod
+    def _should_try_reexports(
+        cls,
+        abs_modules: tuple[str, ...],
+        itype: PyIRImportType,
+    ) -> PyIRImportType | None:
+        """
+        Если itype UNKNOWN, но пакет явно локальный/интернал — всё равно пробуем reexports.
+        """
+        if itype in (PyIRImportType.LOCAL, PyIRImportType.INTERNAL):
+            return itype
+
+        if itype == PyIRImportType.UNKNOWN:
+            # локальный пакет?
+            src_root = Py2GluaConfig.source.resolve()
+            pkg_dir = src_root.joinpath(*abs_modules)
+            if pkg_dir.is_dir():
+                return PyIRImportType.LOCAL
+
+            # internal пакет?
+            if cls._internal_module_exists(abs_modules):
+                return PyIRImportType.INTERNAL
+
+        return None
+
+    # main entry
     @classmethod
     def run(cls, ir: PyIRFile) -> PyIRFile:
         mapping: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {}
@@ -94,6 +147,7 @@ class NormalizeImportsPass:
 
         return ir
 
+    # rewrite
     @classmethod
     def _rewrite_block(
         cls,
@@ -169,6 +223,7 @@ class NormalizeImportsPass:
 
         return val
 
+    # RESOLUTION: reexport first, then submodule, then attribute
     @classmethod
     def _resolve_export_if_needed(
         cls,
@@ -180,15 +235,34 @@ class NormalizeImportsPass:
         head = imported_parts[0]
         tail = imported_parts[1:]
 
-        if itype in (PyIRImportType.INTERNAL, PyIRImportType.LOCAL):
-            exp = cls._read_reexports_for_package(abs_modules, itype=itype)
+        # (1) reexports (pkg/__init__.py)
+        reexp_itype = cls._should_try_reexports(abs_modules, itype)
+        if reexp_itype is not None:
+            exp = cls._read_reexports_for_package(abs_modules, itype=reexp_itype)
             hit = exp.get(head)
             if hit is not None:
                 target_mod, target_attr = hit
                 return target_mod, (target_attr, *tail)
 
+        # (2) submodule import: from pkg import submodule
+        candidate_mod = (*abs_modules, head)
+
+        if itype in (PyIRImportType.LOCAL, PyIRImportType.UNKNOWN):
+            if cls._local_module_exists(candidate_mod):
+                return candidate_mod, tail
+
+        if itype == PyIRImportType.INTERNAL:
+            if cls._internal_module_exists(candidate_mod):
+                return candidate_mod, tail
+
+        if itype == PyIRImportType.UNKNOWN:
+            if cls._internal_module_exists(candidate_mod):
+                return candidate_mod, tail
+
+        # (3) обычный атрибут
         return abs_modules, imported_parts
 
+    # reexports reader
     @classmethod
     def _read_reexports_for_package(
         cls,
@@ -227,7 +301,7 @@ class NormalizeImportsPass:
                 try:
                     init_py = p
                     text = p.read_text(encoding="utf-8")
-                    
+
                 except Exception:
                     init_py = None
                     text = None
@@ -286,6 +360,7 @@ class NormalizeImportsPass:
         base = base_pkg[: len(base_pkg) - up]
         return (*base, *mod_parts)
 
+    # relativize "from .x import y"
     @classmethod
     def _absolutize_from_module(
         cls,
@@ -304,12 +379,13 @@ class NormalizeImportsPass:
         if cur_mod is None:
             return mods
 
-        cur_pkg = cur_mod if cur_mod and cur_mod[-1] != "__init__" else cur_mod
-        if cur_pkg and cur_pkg[-1] != "__init__":
+        # cur_mod: module parts including filename stem; treat __init__ as package
+        cur_pkg = cur_mod
+        if cur_pkg and cur_pkg[-1] == "__init__":
             cur_pkg = cur_pkg[:-1]
-
         else:
-            cur_pkg = tuple(p for p in cur_pkg if p != "__init__")
+            # file module => package is parent
+            cur_pkg = cur_pkg[:-1]
 
         up = level - 1
         if up > len(cur_pkg):
@@ -324,29 +400,22 @@ class NormalizeImportsPass:
 
         parts = p.parts
         try:
-            i = parts.index("py2glua")
-            tail = list(parts[i:])
-            if tail:
-                last = tail[-1]
-                if last.endswith(".py"):
-                    name = last[:-3]
-                    if name == "__init__":
-                        tail = tail[:-1]
-                    else:
-                        tail[-1] = name
-
-                return tuple(tail)
-
-        except ValueError:
-            pass
-
-        try:
             src_root = Py2GluaConfig.source.resolve()
             rel = p.relative_to(src_root)
         except Exception:
-            return None
+            rel = None
 
-        tail = list(rel.parts)
+        if rel is None:
+            # internal fallback: try detect py2glua package in filesystem path
+            try:
+                i = parts.index("py2glua")
+                tail = list(parts[i:])
+
+            except ValueError:
+                return None
+        else:
+            tail = list(rel.parts)
+
         if not tail:
             return None
 
@@ -354,16 +423,18 @@ class NormalizeImportsPass:
         if last.endswith(".py"):
             name = last[:-3]
             if name == "__init__":
-                tail = tail[:-1]
+                tail[-1] = "__init__"
             else:
                 tail[-1] = name
 
         return tuple(tail)
 
+    # small helpers
     @staticmethod
     def _orig_and_alias(name: str | tuple[str, str]) -> tuple[str, str | None]:
         if isinstance(name, tuple):
             return name[0], name[1]
+
         return name, None
 
     @staticmethod
@@ -398,13 +469,25 @@ class NormalizeImportsPass:
             return src
 
         expr: PyIRNode = PyIRVarUse(
-            line=src.line, offset=src.offset, name=module_parts[0]
+            line=src.line,
+            offset=src.offset,
+            name=module_parts[0],
         )
 
         for p in module_parts[1:]:
-            expr = PyIRAttribute(line=src.line, offset=src.offset, value=expr, attr=p)
+            expr = PyIRAttribute(
+                line=src.line,
+                offset=src.offset,
+                value=expr,
+                attr=p,
+            )
 
         for a in attr_parts:
-            expr = PyIRAttribute(line=src.line, offset=src.offset, value=expr, attr=a)
+            expr = PyIRAttribute(
+                line=src.line,
+                offset=src.offset,
+                value=expr,
+                attr=a,
+            )
 
         return expr

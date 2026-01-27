@@ -108,6 +108,9 @@ class PyIRConstant(PyIRNode):
         if v is nil:
             return "nil"
 
+        if v is None:
+            return "TODO: None"
+
         if isinstance(v, bool):
             return "true" if v else "false"
 
@@ -117,7 +120,12 @@ class PyIRConstant(PyIRNode):
         if isinstance(v, (int, float)):
             return str(v)
 
-        raise AssertionError(f"unsupported constant type: {type(v).__name__}")
+        raise AssertionError(
+            "Неподдерживаемый тип константы в PyIRConstant.\n"
+            f"Тип: {type(v).__name__}\n"
+            f"Значение: {v!r}\n"
+            f"Позиция: line={self.line}, offset={self.offset}"
+        )
 
 
 @dataclass

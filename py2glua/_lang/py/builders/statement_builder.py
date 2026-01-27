@@ -993,7 +993,7 @@ class StatementBuilder:
         return node
 
     @staticmethod
-    def _parse_atom(stream: TokenStream) -> PyIRNode:  # pyright: ignore[reportReturnType]
+    def _parse_atom(stream: TokenStream) -> PyIRNode:  # type: ignore
         tok = stream.peek()
         if tok is None:
             StatementBuilder._raise("Неожиданный конец ввода в выражении", tok)
@@ -1004,33 +1004,7 @@ class StatementBuilder:
         if tok.type == tokenize.STRING and tok.string and tok.string[0] in ("f", "F"):
             return StatementBuilder._parse_fstring(stream)
 
-        # Name / keywords treated as names at this stage
-        if tok.type == tokenize.NAME:
-            tok2 = stream.advance()
-            assert tok2 is not None
-            line, col = tok2.start
-            return PyIRVarUse(line=line, offset=col, name=tok2.string)
-
-        # Constant
-        # NUMBER
-        if tok.type == tokenize.NUMBER:
-            tok2 = stream.advance()
-            assert tok2 is not None
-            line, col = tok2.start
-
-            value = _parse_number(tok2.string)
-            return PyIRConstant(line=line, offset=col, value=value)
-
-        # STRING
-        if tok.type == tokenize.STRING:
-            tok2 = stream.advance()
-            assert tok2 is not None
-            line, col = tok2.start
-
-            value = _parse_string(tok2.string)
-            return PyIRConstant(line=line, offset=col, value=value)
-
-        # NAME literals
+        # NAME literals: True / False / None
         if tok.type == tokenize.NAME and tok.string in _LITERAL_NAMES:
             tok2 = stream.advance()
             assert tok2 is not None
@@ -1042,7 +1016,45 @@ class StatementBuilder:
                 value=_LITERAL_NAMES[tok2.string],
             )
 
-        # Parenthesized
+        # Обычное имя (переменная / функция / класс)
+        if tok.type == tokenize.NAME:
+            tok2 = stream.advance()
+            assert tok2 is not None
+            line, col = tok2.start
+
+            return PyIRVarUse(
+                line=line,
+                offset=col,
+                name=tok2.string,
+            )
+
+        # Числовой литерал
+        if tok.type == tokenize.NUMBER:
+            tok2 = stream.advance()
+            assert tok2 is not None
+            line, col = tok2.start
+
+            value = _parse_number(tok2.string)
+            return PyIRConstant(
+                line=line,
+                offset=col,
+                value=value,
+            )
+
+        # Строковый литерал
+        if tok.type == tokenize.STRING:
+            tok2 = stream.advance()
+            assert tok2 is not None
+            line, col = tok2.start
+
+            value = _parse_string(tok2.string)
+            return PyIRConstant(
+                line=line,
+                offset=col,
+                value=value,
+            )
+
+        # Скобочное выражение / пустой tuple
         if tok.type == tokenize.OP and tok.string == "(":
             lpar = stream.advance()
             assert lpar is not None
@@ -1051,17 +1063,21 @@ class StatementBuilder:
             if nxt and nxt.type == tokenize.OP and nxt.string == ")":
                 stream.advance()
                 line, col = lpar.start
-                return PyIRTuple(line=line, offset=col, elements=[])
+                return PyIRTuple(
+                    line=line,
+                    offset=col,
+                    elements=[],
+                )
 
             node = StatementBuilder._parse_expression(stream, stop_ops={")"})
             stream.expect_op(")")
             return node
 
-        # List
+        # Список
         if tok.type == tokenize.OP and tok.string == "[":
             return StatementBuilder._parse_list_literal(stream)
 
-        # Dict or Set
+        # Словарь или множество
         if tok.type == tokenize.OP and tok.string == "{":
             return StatementBuilder._parse_dict_or_set_literal(stream)
 

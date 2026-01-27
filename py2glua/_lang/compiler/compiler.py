@@ -8,6 +8,13 @@ from ..._cli.logging_setup import exit_with_code, logger
 from ...config import Py2GluaConfig
 from ..py.ir_builder import PyIRBuilder, PyIRFile
 from .import_resolver import ImportResolver
+from .passes.analysis.symlinks import (
+    BuildScopesPass,
+    CollectDefsPass,
+    ResolveUsesPass,
+    RewriteToSymlinksPass,
+    SymLinkContext,
+)
 from .passes.normalize import (
     AttachDecoratorsPass,
     NormalizeImportsPass,
@@ -20,7 +27,14 @@ class Compiler:
         AttachDecoratorsPass,
     ]
 
-    analysis_passes = []
+    analysis_passes = [
+        # === Блок simlinks
+        BuildScopesPass,
+        CollectDefsPass,
+        ResolveUsesPass,
+        RewriteToSymlinksPass,
+        # ===
+    ]
 
     lowering_passes = []
 
@@ -178,8 +192,8 @@ class Compiler:
         cls,
         project_ir: Iterable[PyIRFile],
         internal_ir: Iterable[PyIRFile],
-    ) -> object:
-        ctx = AnalysisContext()  # type: ignore # noqa: F821
+    ) -> SymLinkContext:
+        ctx = SymLinkContext()
 
         for p in cls.analysis_passes:
             for ir in (*internal_ir, *project_ir):
@@ -203,7 +217,7 @@ class Compiler:
         cls,
         project_ir: Iterable[PyIRFile],
         internal_ir: Iterable[PyIRFile],
-        ctx: object,
+        ctx: SymLinkContext,
     ) -> None:
         for p in cls.lowering_passes:
             for ir in (*internal_ir, *project_ir):
