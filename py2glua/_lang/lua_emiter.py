@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
-from .compiler.ir_compiler import PyIRLocalRef, PyIRSymbolRef
 from .py.ir_dataclass import (
     PyAugAssignType,
     PyBinOPType,
@@ -18,7 +17,6 @@ from .py.ir_dataclass import (
     PyIRConstant,
     PyIRContinue,
     PyIRDict,
-    PyIRDictItem,
     PyIREmitExpr,
     PyIRFile,
     PyIRFor,
@@ -29,7 +27,6 @@ from .py.ir_dataclass import (
     PyIRNode,
     PyIRPass,
     PyIRReturn,
-    PyIRSet,
     PyIRSubscript,
     PyIRTuple,
     PyIRUnaryOP,
@@ -214,8 +211,6 @@ class LuaEmitter:
             (
                 PyIRCall,
                 PyIRAttribute,
-                PyIRSymbolRef,
-                PyIRLocalRef,
                 PyIREmitExpr,
                 PyIRConstant,
                 PyIRBinOP,
@@ -336,9 +331,7 @@ class LuaEmitter:
                 PyIRVarUse,
                 PyIRVarCreate,
                 PyIRSubscript,
-                PyIRSymbolRef,
                 PyIREmitExpr,
-                PyIRLocalRef,
             ),
         ):
             return str(node)
