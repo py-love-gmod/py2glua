@@ -22,6 +22,7 @@ class PyIRNode:
 class PyIRFile(PyIRNode):
     path: Path | None
     body: list["PyIRNode"] = field(default_factory=list)
+    imports: list[Path] = field(default_factory=list)
 
     def walk(self):
         yield self
@@ -34,28 +35,20 @@ class PyIRFile(PyIRNode):
 
 @dataclass
 class PyIRDecorator(PyIRNode):
-    name: str
+    exper: PyIRNode
     args_p: list["PyIRNode"] = field(default_factory=list)
     args_kw: dict[str, "PyIRNode"] = field(default_factory=dict)
 
     def walk(self):
         yield self
+
+        yield from self.exper.walk()
+
         for a in self.args_p:
             yield from a.walk()
+
         for a in self.args_kw.values():
             yield from a.walk()
-
-    def __str__(self) -> str:
-        parts: list[str] = []
-
-        if self.args_p:
-            parts.append(", ".join(str(a) for a in self.args_p))
-
-        if self.args_kw:
-            parts.append(", ".join(f"{k}={v}" for k, v in self.args_kw.items()))
-
-        args = ", ".join(parts)
-        return f"-- <PYTHON @{self.name}({args})>"
 
 
 # Import

@@ -3,7 +3,7 @@ from typing import Sequence
 
 from ...etc import TokenStream
 from ...parse import PyLogicNode
-from ..ir_dataclass import PyIRAttribute, PyIRCall, PyIRDecorator, PyIRNode, PyIRVarUse
+from ..ir_dataclass import PyIRCall, PyIRDecorator, PyIRNode
 from .statement_builder import StatementBuilder
 
 
@@ -27,7 +27,7 @@ class DecoratorBuilder:
 
         tokens = tokens[1:]
         if not tokens:
-            raise SyntaxError("Decorator name is missing")
+            raise SyntaxError("Decorator expression is missing")
 
         line, col = tokens[0].start
 
@@ -37,33 +37,21 @@ class DecoratorBuilder:
         if not stream.eof():
             raise SyntaxError("Invalid decorator expression")
 
-        if not isinstance(expr, PyIRCall):
-            return [
-                PyIRDecorator(
-                    line=line,
-                    offset=col,
-                    name=DecoratorBuilder._extract_name(expr),
-                    args_p=[],
-                    args_kw={},
-                )
-            ]
+        if isinstance(expr, PyIRCall):
+            dec_expr = expr.func
+            args_p = expr.args_p
+            args_kw = expr.args_kw
+        else:
+            dec_expr = expr
+            args_p = []
+            args_kw = {}
 
         return [
             PyIRDecorator(
                 line=line,
                 offset=col,
-                name=DecoratorBuilder._extract_name(expr.func),
-                args_p=expr.args_p,
-                args_kw=expr.args_kw,
+                exper=dec_expr,
+                args_p=args_p,
+                args_kw=args_kw,
             )
         ]
-
-    @staticmethod
-    def _extract_name(node: PyIRNode) -> str:
-        if isinstance(node, PyIRVarUse):
-            return node.name
-
-        if isinstance(node, PyIRAttribute):
-            return f"{DecoratorBuilder._extract_name(node.value)}.{node.attr}"
-
-        raise SyntaxError("Unsupported decorator expression")

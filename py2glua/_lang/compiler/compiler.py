@@ -8,31 +8,9 @@ from ..._cli.logging_setup import exit_with_code, logger
 from ...config import Py2GluaConfig
 from ..py.ir_builder import PyIRBuilder, PyIRFile
 from .import_resolver import ImportResolver
-from .passes.analysis import (
-    AnalysisContext,
-    AnalyzeInlineRecursionPass,
-    BuildSymbolIndexPass,
-    CollectContextManagersPass,
-    CollectDeprecatedSymbolsPass,
-    CollectEnumsPass,
-    CollectSymbolsPass,
-    CollectWithConditionClassesPass,
-    ResolveGlobalSymbolsPass,
-    ResolveLocalSymbolsPass,
-    WarnDeprecatedUsagePass,
-)
-from .passes.lowering import (
-    ConstFoldingPass,
-    EnumUsagePass,
-    LowerContextManagersPass,
-    LowerWithConditionPass,
-    StripEnumClassesPass,
-)
 from .passes.normalize import (
     AttachDecoratorsPass,
     NormalizeImportsPass,
-    StripBodiesByDecoratorPass,
-    StripInternalClassesPass,
 )
 
 
@@ -40,34 +18,11 @@ class Compiler:
     normalize_passes: list = [
         NormalizeImportsPass,
         AttachDecoratorsPass,
-        StripInternalClassesPass,
-        StripBodiesByDecoratorPass,
     ]
 
-    analysis_passes = [
-        # Символические ссылки
-        CollectSymbolsPass,
-        BuildSymbolIndexPass,
-        ResolveLocalSymbolsPass,
-        ResolveGlobalSymbolsPass,
-        # ===
-        AnalyzeInlineRecursionPass,  # ломаем билд если у нас рекурсия в inline/with
-        # Устаревшие методы
-        CollectDeprecatedSymbolsPass,
-        WarnDeprecatedUsagePass,
-        # ===
-        CollectEnumsPass,  # Ресолв енумов
-        CollectContextManagersPass,  # with блоки обычные
-        CollectWithConditionClassesPass,  # Сборка with_condition
-    ]
+    analysis_passes = []
 
-    lowering_passes = [
-        LowerWithConditionPass,  # Сначала заменяем with на if
-        StripEnumClassesPass,
-        EnumUsagePass,  # Толко потом инлайн
-        LowerContextManagersPass,  # Должно быть после вообще всех блоков with ловеринга, ибо тригерит сайд по убийству билда
-        ConstFoldingPass,  # магия конст фолдинга
-    ]
+    lowering_passes = []
 
     # validation
     @classmethod
@@ -159,6 +114,7 @@ class Compiler:
                             current_file=path,
                         )
                         ir = cls._run_normalize_passes(raw)
+                        ir.imports = deps.copy()
 
                         frames.append((path, deps, 0, True))
 
@@ -222,8 +178,8 @@ class Compiler:
         cls,
         project_ir: Iterable[PyIRFile],
         internal_ir: Iterable[PyIRFile],
-    ) -> AnalysisContext:
-        ctx = AnalysisContext()
+    ) -> object:
+        ctx = AnalysisContext()  # type: ignore # noqa: F821
 
         for p in cls.analysis_passes:
             for ir in (*internal_ir, *project_ir):
@@ -247,7 +203,7 @@ class Compiler:
         cls,
         project_ir: Iterable[PyIRFile],
         internal_ir: Iterable[PyIRFile],
-        ctx: AnalysisContext,
+        ctx: object,
     ) -> None:
         for p in cls.lowering_passes:
             for ir in (*internal_ir, *project_ir):
