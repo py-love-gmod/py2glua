@@ -4,16 +4,16 @@ from importlib import resources
 from pathlib import Path
 from typing import Iterable
 
-from ..._cli.logging_setup import exit_with_code, logger
+from ..._cli.logging_setup import exit_with_code, log_step
 from ...config import Py2GluaConfig
 from ..py.ir_builder import PyIRBuilder, PyIRFile
 from .import_resolver import ImportResolver
 from .passes.analysis.symlinks import (
-    BuildScopesPass,
-    CollectDefsPass,
-    ResolveUsesPass,
-    RewriteToSymlinksPass,
-    SymLinkContext,
+    BuildScopesPass,  # симлинк дата
+    CollectDefsPass,  # симлинк дата
+    ResolveUsesPass,  # симлинк дата
+    RewriteToSymlinksPass,  # симлинк дата
+    SymLinkContext,  # симлинк дата
 )
 from .passes.normalize import (
     AttachDecoratorsPass,
@@ -38,7 +38,8 @@ class Compiler:
 
     lowering_passes = []
 
-    # validation
+    project_passes = []
+
     @classmethod
     def _validate_project(cls):
         root = Py2GluaConfig.source
@@ -75,7 +76,6 @@ class Compiler:
         except ValueError:
             return False
 
-    # IR build
     @classmethod
     def build_from_src(cls) -> tuple[list[PyIRFile], list[PyIRFile]]:
         root, internal_tr, project_files = cls._validate_project()
@@ -127,7 +127,7 @@ class Compiler:
                             ir=raw,
                             current_file=path,
                         )
-                        ir = cls._run_normalize_passes(raw)
+                        ir = cls._run_normalize(raw)
                         ir.imports = deps.copy()
 
                         frames.append((path, deps, 0, True))
@@ -168,8 +168,12 @@ class Compiler:
             list(internal_ir.values()),
         )
 
+    # region passes
     @classmethod
-    def _run_normalize_passes(cls, ir: PyIRFile) -> PyIRFile:
+    def _run_normalize(
+        cls,
+        ir: PyIRFile,
+    ) -> PyIRFile:
         for p in cls.normalize_passes:
             try:
                 ir = p.run(ir)
@@ -177,7 +181,7 @@ class Compiler:
             except Exception as e:
                 exit_with_code(
                     3,
-                    "Ошибка нормализации.\n"
+                    "Ошибка normalize\n"
                     f"Файл: {ir.path}\n"
                     f"Pass: {p.__name__}\n"
                     f"Ошибка: {e}",
@@ -186,7 +190,6 @@ class Compiler:
 
         return ir
 
-    # analysis
     @classmethod
     def run_analysis(
         cls,
@@ -203,7 +206,7 @@ class Compiler:
                 except Exception as e:
                     exit_with_code(
                         3,
-                        f"Ошибка анализа.\n"
+                        f"Ошибка analysis\n"
                         f"Файл: {ir.path}\n"
                         f"Pass: {p.__name__}\n"
                         f"Ошибка: {e}",
@@ -227,42 +230,53 @@ class Compiler:
                 except Exception as e:
                     exit_with_code(
                         3,
-                        f"Ошибка lowering.\n"
+                        f"Ошибка lowering\n"
                         f"Файл: {ir.path}\n"
                         f"Pass: {p.__name__}\n"
                         f"Ошибка: {e}",
                     )
                     raise AssertionError("unreachable")
 
+    @classmethod
+    def run_project(
+        cls,
+        project_ir: Iterable[PyIRFile],
+        internal_ir: Iterable[PyIRFile],
+        ctx: SymLinkContext,
+    ) -> None:
+        for p in cls.project_passes:
+            for ir in (internal_ir, project_ir):
+                try:
+                    p.run(ir, ctx)
+
+                except Exception as e:
+                    exit_with_code(
+                        3,
+                        f"Ошибка project\nPass: {p.__name__}\nОшибка: {e}",
+                    )
+                    raise AssertionError("unreachable")
+
+    # endregion
+
     # public API
     @classmethod
     def build(cls) -> list[PyIRFile]:
-        logger.info("Запуск сборки исходников")
-        project_ir, internal_ir = cls.build_from_src()
-        logger.info("Завершено")
-        print()
+        with log_step("[1/5] Подготовка"):
+            project_ir, internal_ir = cls.build_from_src()
 
-        logger.info("Запуск анализа исходников")
-        ctx = cls.run_analysis(
-            project_ir=project_ir,
-            internal_ir=internal_ir,
-        )
-        logger.info("Завершено")
-        print()
+        with log_step("[2/5] Анализ"):
+            ctx = cls.run_analysis(project_ir=project_ir, internal_ir=internal_ir)
 
-        logger.info("Запуск конвертации кода")
-        cls.run_lowering(
-            project_ir=project_ir,
-            internal_ir=internal_ir,
-            ctx=ctx,
-        )
-        logger.info("Завершено")
-        print()
+        with log_step("[3/5] Сборка"):
+            cls.run_lowering(project_ir=project_ir, internal_ir=internal_ir, ctx=ctx)
+
+        with log_step("[4/5] Финализация"):
+            cls.run_project(project_ir=project_ir, internal_ir=internal_ir, ctx=ctx)
 
         project_ir.sort(key=lambda f: str(f.path))
         return project_ir
 
-    # utils
+    # region utils
     @staticmethod
     def _read_text(path: Path) -> str:
         try:
@@ -305,3 +319,5 @@ class Compiler:
         start = index_in_stack.get(dep, 0)
         ring = call_stack[start:] + [dep]
         return "\n".join(f"  {ring[i]} -> {ring[i + 1]}" for i in range(len(ring) - 1))
+
+    # endregion

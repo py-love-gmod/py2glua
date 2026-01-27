@@ -2,7 +2,7 @@ import argparse
 import shutil
 from pathlib import Path
 
-from ._cli.logging_setup import exit_with_code, logger, setup_logging
+from ._cli.logging_setup import exit_with_code, log_step, logger, setup_logging
 from ._lang.compiler import Compiler
 from ._lang.lua_emiter import LuaEmitter
 from .config import Py2GluaConfig
@@ -14,19 +14,24 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Python -> GLua компилятор",
     )
 
-    # region Main args
-    parser.add_argument(
-        "-d",
-        "--debug",
-        action="store_true",
-        help="Включить режим отладки",
-    )
-    # endregion
-
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     # region Build cmd
     b = sub.add_parser("build", help="Собирает python код в glua код")
+
+    b.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Подробное логирование",
+    )
+
+    b.add_argument(
+        "-d",
+        "--debug",
+        action="store_true",
+        help="Debug режим сборки",
+    )
 
     b.add_argument(
         "src",
@@ -37,18 +42,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     b.add_argument(
-        "-n",
-        "--namespace",
-        type=str,
-        help="Неймспейс проекта",
-    )
-
-    b.add_argument(
         "-o",
         "--out",
         type=Path,
         default=Path("./build"),
         help="Папка для результата (по умолчанию: ./build)",
+    )
+
+    b.add_argument(
+        "-n",
+        "--namespace",
+        type=str,
+        help="Неймспейс проекта",
     )
 
     # endregion
@@ -63,41 +68,41 @@ def _build_parser() -> argparse.ArgumentParser:
 def _build(src: Path, out: Path) -> None:
     project_ir = Compiler.build()
 
-    if out.exists():
-        if not out.is_dir():
-            exit_with_code(2, f"Путь build не является директорией: {out}")
-
-        logger.debug("Очистка build директории...")
-        shutil.rmtree(out)
-
-    out.mkdir(parents=True, exist_ok=True)
-
     emitter = LuaEmitter()
 
-    logger.info("Генерация lua файлов")
-    for ir in project_ir:
-        if ir.path is None:
-            exit_with_code(3, "Внутренняя ошибка: IR-файл без path")
+    with log_step("[5/5] Генерация GLua"):
+        if out.exists():
+            if not out.is_dir():
+                exit_with_code(2, f"Путь build не является директорией: {out}")
 
-        rel = ir.path.relative_to(src)  # type: ignore
-        out_path = out / rel.with_suffix(".lua")
+            logger.debug("Очистка build директории...")
+            shutil.rmtree(out)
 
-        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out.mkdir(parents=True, exist_ok=True)
 
-        result = emitter.emit_file(ir)
+        for ir in project_ir:
+            if ir.path is None:
+                exit_with_code(3, "Внутренняя ошибка: IR-файл без path")
 
-        out_path.write_text(result.code, encoding="utf-8")
+            rel = ir.path.relative_to(src)  # type: ignore
+            out_path = out / rel.with_suffix(".lua")
 
-    logger.info("Сборка успешно завершена")
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+
+            result = emitter.emit_file(ir)
+
+            out_path.write_text(result.code, encoding="utf-8")
+
+    logger.info("Сборка завершена")
 
 
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
-    setup_logging(args.debug)
+    setup_logging(args.verbose)
 
+    Py2GluaConfig.verbose = args.verbose
     Py2GluaConfig.debug = args.debug
-    Py2GluaConfig.debug_build = False  # TODO:
 
     Py2GluaConfig.source = args.src.resolve()
     Py2GluaConfig.output = args.out.resolve()
@@ -106,8 +111,8 @@ def main() -> None:
 Version: {Py2GluaConfig.version()}
 Source : {Py2GluaConfig.source}
 Output : {Py2GluaConfig.output}
+Verbose: {Py2GluaConfig.verbose}
 Debug  : {Py2GluaConfig.debug}
-BDebug : {Py2GluaConfig.debug_build}
 """)
 
     match args.cmd:

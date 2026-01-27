@@ -6,8 +6,8 @@ class Py2GluaConfig:
     source: Path = Path()
     output: Path = Path()
 
+    verbose: bool = False
     debug: bool = False
-    debug_build: bool = False
 
     @classmethod
     def version(cls) -> str:

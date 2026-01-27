@@ -1,5 +1,10 @@
+from __future__ import annotations
+
 import logging
 import sys
+from contextlib import contextmanager
+from time import perf_counter
+from typing import Iterator
 
 from colorama import Fore, Style, init
 
@@ -59,3 +64,21 @@ def exit_with_code(code: int, msg: str | None = None) -> None:
             logger.error(f"Exit code: {code}")
 
     sys.exit(code)
+
+
+@contextmanager
+def log_step(title: str, *, show_if_less_than: float = 0.002) -> Iterator[None]:
+    logger.info(title)
+    t0 = perf_counter()
+    try:
+        yield
+
+    finally:
+        dt = perf_counter() - t0
+        if dt >= show_if_less_than:
+            logger.info("Завершено (%.3fs)", dt)
+
+        else:
+            logger.info("Завершено")
+
+        print()
