@@ -11,6 +11,7 @@ from .import_resolver import ImportResolver
 from .passes.analysis import (
     ExtractRealmDirectivePass,
     ImportValidationPass,
+    NoInlineRecursionPass,
     RealmDirectiveValidatePass,
 )
 from .passes.analysis.symlinks import (
@@ -42,6 +43,7 @@ class Compiler:
         ResolveUsesPass,
         RewriteToSymlinksPass,
         # ===
+        NoInlineRecursionPass,
     ]
 
     lowering_passes = []

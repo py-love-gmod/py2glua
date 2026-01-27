@@ -1,3 +1,4 @@
 from .extract_realm_directive import ExtractRealmDirectivePass
 from .import_validation import ImportValidationPass
+from .no_inline_recursion import NoInlineRecursionPass
 from .realm_directive_validate import RealmDirectiveValidatePass
