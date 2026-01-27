@@ -119,7 +119,7 @@ class SymLinkContext:
         existing = self._node_uid.get(k)
         if existing is not None:
             return existing
-        
+
         uid = self._next_node
         self._next_node += 1
         self._node_uid[k] = uid
@@ -170,8 +170,10 @@ class SymLinkContext:
             sym = sc.defs.get(name)
             if sym is not None:
                 return Link(target=sym, hops=hops)
+
             if sc.parent is None:
                 return None
+
             cur = sc.parent
             hops += 1
 
@@ -181,15 +183,10 @@ class SymLinkContext:
         for i in range(len(parts) - 1, -1, -1):
             if parts[i] == name:
                 return i
+
         return None
 
     def _path_to_module(self, p: Path) -> str | None:
-        """
-        ДОЛЖНО совпадать по смыслу с NormalizeImportsPass._module_parts_from_path.
-
-        LOCAL: относительно Py2GluaConfig.source
-        INTERNAL: относительно ПОСЛЕДНЕГО сегмента 'py2glua' (чтобы не ловить py2glua/py2glua)
-        """
         p = p.resolve()
         parts = p.parts
 
@@ -222,6 +219,7 @@ class SymLinkContext:
         src_root = Py2GluaConfig.source.resolve()
         try:
             rel = p.relative_to(src_root)
+
         except Exception:
             return None
 
@@ -234,6 +232,7 @@ class SymLinkContext:
             stem = last[:-3]
             if stem == "__init__":
                 tail = tail[:-1]
+
             else:
                 tail[-1] = stem
 
@@ -283,8 +282,10 @@ class BuildScopesPass:
 
                 for d in node.decorators:
                     walk(d, scope)
+
                 for b in node.body:
                     walk(b, body_scope)
+
                 return
 
             if isinstance(node, PyIRClassDef):
@@ -293,15 +294,19 @@ class BuildScopesPass:
 
                 for b in node.bases:
                     walk(b, scope)
+
                 for d in node.decorators:
                     walk(d, scope)
+
                 for n2 in node.body:
                     walk(n2, body_scope)
+
                 return
 
             for ch in node.walk():
                 if ch is node:
                     continue
+
                 walk(ch, scope)
 
         for n in ir.body:
@@ -330,9 +335,9 @@ class CollectDefsPass:
                 decl_file=ir.path,
                 decl_line=node.line,
             )
-            # экспортируем только то, что определено на уровне модуля
             if module_name is not None and scope == module_scope:
                 ctx.module_exports.setdefault(module_name, {})[name] = sym_id
+
             return sym_id
 
         def define_if_simple_name(scope: ScopeId, n: PyIRNode) -> None:
@@ -352,6 +357,7 @@ class CollectDefsPass:
                 body_scope = ctx.fn_body_scope.get(fn_uid, sc)
                 for arg in node.signature.keys():
                     define(body_scope, arg, node)
+
                 continue
 
             if isinstance(node, PyIRClassDef):
@@ -377,13 +383,14 @@ class CollectDefsPass:
                 continue
 
             if isinstance(node, PyIRImport):
-                # import-алиасы тоже "определяются" как имена
                 if node.names:
                     for n in node.names:
                         name = n[1] if isinstance(n, tuple) else n
                         define(sc, name, node)
+
                 elif node.modules:
                     define(sc, node.modules[0], node)
+
                 continue
 
 
@@ -436,8 +443,6 @@ class RewriteToSymlinksPass:
                 return n.name
 
             if isinstance(n, PyIRSymLink):
-                # ВАЖНО: имя тут — локальный алиас, но для collapse нам нужна именно строка,
-                # совпадающая с тем, как NormalizeImportsPass строит цепочки (обычно это "py2glua"/"s"/"v" и т.п.)
                 return n.name
 
             return None
@@ -448,18 +453,11 @@ class RewriteToSymlinksPass:
             while isinstance(cur, PyIRAttribute):
                 attrs_rev.append(cur.attr)
                 cur = cur.value
+
             attrs_rev.reverse()
             return cur, attrs_rev
 
         def try_collapse_attr(n: PyIRAttribute) -> PyIRNode:
-            """
-            Пытаемся схлопнуть цепочку в линк на export модуля.
-
-            Важное правило против "частичного уродства":
-            - если (module.export) сам является модулем (есть ключ в module_exports),
-              и при этом у нас есть ещё хвост (.GG / .SERVER / ...),
-              то НЕ схлопываем на этом шаге (иначе потеряем путь и дальше не схлопнёмся).
-            """
             base, attrs = flatten_attr_chain(n)
             bn = base_name(base)
             if bn is None:
@@ -533,7 +531,7 @@ class RewriteToSymlinksPass:
                 node.value = rw(node.value, store=False)
                 return try_collapse_attr(node)
 
-            # Call: чтобы func тоже переписывался (у тебя это уже даёт плюс)
+            # Call: чтобы func тоже переписывался
             if isinstance(node, PyIRCall):
                 node.func = rw(node.func, store=False)
                 node.args_p = [rw(a, store=False) for a in node.args_p]
@@ -561,15 +559,17 @@ class RewriteToSymlinksPass:
                 node.context_expr = rw(node.context_expr, store=False)
                 if node.optional_vars is not None:
                     node.optional_vars = rw(node.optional_vars, store=True)
+
                 return node
 
             # function/class
             if isinstance(node, PyIRFunctionDef):
-                # decorators не трогаем
+                node.decorators = [rw(d, store=False) for d in node.decorators]  # pyright: ignore[reportAttributeAccessIssue]
                 node.body = [rw(n, store=False) for n in node.body]
                 return node
 
             if isinstance(node, PyIRClassDef):
+                node.decorators = [rw(d, store=False) for d in node.decorators]  # pyright: ignore[reportAttributeAccessIssue]
                 node.bases = [rw(b, store=False) for b in node.bases]
                 node.body = [rw(n, store=False) for n in node.body]
                 return node
