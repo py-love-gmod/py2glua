@@ -60,6 +60,16 @@ class ContextManagerInfo:
     post_body: list[PyIRNode]
 
 
+@dataclass
+class DeprecatedSymbolInfo:
+    symbol_id: int
+    fqname: str
+    message: str | None
+    file: Path | None
+    line: int | None
+    offset: int | None
+
+
 class AnalysisContext:
     def __init__(self) -> None:
         self.file_simbol_data: dict[Path, FileSymbolTable] = {}
@@ -77,6 +87,12 @@ class AnalysisContext:
         self.with_condition_classes: set[int] = set()
 
         self.context_managers: dict[int, ContextManagerInfo] = {}
+
+        self.deprecated_symbols: dict[int, DeprecatedSymbolInfo] = {}
+        self.deprecated_members: dict[tuple[int, str], DeprecatedSymbolInfo] = {}
+        self.deprecated_warned: set[tuple[Path | None, int | None, int | None, str]] = (
+            set()
+        )
 
     def new_symbol_id(self) -> int:
         sid = self._next_symbol_id

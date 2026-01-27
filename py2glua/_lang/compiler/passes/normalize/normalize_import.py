@@ -227,6 +227,7 @@ class NormalizeImportsPass:
                 try:
                     init_py = p
                     text = p.read_text(encoding="utf-8")
+                    
                 except Exception:
                     init_py = None
                     text = None

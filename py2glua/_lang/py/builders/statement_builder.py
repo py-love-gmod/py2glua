@@ -47,7 +47,7 @@ def _parse_number(text: str):
 
 
 def _parse_string(token: str) -> str:
-    return bytes(token[1:-1], "utf-8").decode("unicode_escape")
+    return bytes(token[1:-1], "utf-8").decode("utf-8")
 
 
 _LITERAL_NAMES = {

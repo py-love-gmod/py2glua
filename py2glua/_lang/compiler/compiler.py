@@ -4,7 +4,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Iterable
 
-from ..._cli.logging_setup import exit_with_code
+from ..._cli.logging_setup import exit_with_code, logger
 from ...config import Py2GluaConfig
 from ..py.ir_builder import PyIRBuilder, PyIRFile
 from .import_resolver import ImportResolver
@@ -13,11 +13,13 @@ from .passes.analysis import (
     AnalyzeInlineRecursionPass,
     BuildSymbolIndexPass,
     CollectContextManagersPass,
+    CollectDeprecatedSymbolsPass,
     CollectEnumsPass,
     CollectSymbolsPass,
     CollectWithConditionClassesPass,
     ResolveGlobalSymbolsPass,
     ResolveLocalSymbolsPass,
+    WarnDeprecatedUsagePass,
 )
 from .passes.lowering import (
     ConstFoldingPass,
@@ -50,6 +52,9 @@ class Compiler:
         ResolveGlobalSymbolsPass,
         # ===
         AnalyzeInlineRecursionPass,  # ломаем билд если у нас рекурсия в inline/with
+        # Устаревшие методы
+        CollectDeprecatedSymbolsPass,
+        WarnDeprecatedUsagePass,
         # ===
         CollectEnumsPass,  # Ресолв енумов
         CollectContextManagersPass,  # with блоки обычные
@@ -202,9 +207,9 @@ class Compiler:
             except Exception as e:
                 exit_with_code(
                     3,
-                    "Ошибка нормализации.",
-                    f"Файл: {ir.path}\n",  # pyright: ignore[reportCallIssue]
-                    f"Pass: {p.__name__}\n",
+                    "Ошибка нормализации.\n"
+                    f"Файл: {ir.path}\n"
+                    f"Pass: {p.__name__}\n"
                     f"Ошибка: {e}",
                 )
                 raise AssertionError("unreachable")
@@ -262,18 +267,27 @@ class Compiler:
     # public API
     @classmethod
     def build(cls) -> list[PyIRFile]:
+        logger.info("Запуск сборки исходников")
         project_ir, internal_ir = cls.build_from_src()
+        logger.info("Завершено")
+        print()
 
+        logger.info("Запуск анализа исходников")
         ctx = cls.run_analysis(
             project_ir=project_ir,
             internal_ir=internal_ir,
         )
+        logger.info("Завершено")
+        print()
 
+        logger.info("Запуск конвертации кода")
         cls.run_lowering(
             project_ir=project_ir,
             internal_ir=internal_ir,
             ctx=ctx,
         )
+        logger.info("Завершено")
+        print()
 
         project_ir.sort(key=lambda f: str(f.path))
         return project_ir

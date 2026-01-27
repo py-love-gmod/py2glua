@@ -34,6 +34,7 @@ class ConstFoldingPass(AnalysisPass):
         out: list[PyIRNode] = []
         for n in body:
             out.append(cls._rewrite_node(n))
+
         return out
 
     @classmethod

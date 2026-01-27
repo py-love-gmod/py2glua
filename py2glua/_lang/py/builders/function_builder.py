@@ -194,14 +194,14 @@ class FunctionBuilder:
         for t in tokens:
             if t.type == tokenize.OP and t.string in {"/", "*"}:  # TODO:
                 raise SyntaxError(
-                    "Keyword-only/posonly markers (*, /) are not supported in py2glua"
+                    "Keyword-only/posonly маркеры (*, /) пока что не поддерживаются в py2glua"
                 )
 
             if t.type == tokenize.OP and t.string == "**":  # TODO:
-                raise SyntaxError("**kwargs is not supported in py2glua")
+                raise SyntaxError("**kwargs пока что не поддерживается в py2glua")
 
             if t.type == tokenize.OP and t.string == "*":  # TODO:
-                raise SyntaxError("*args is not supported in py2glua")
+                raise SyntaxError("*args пока что не поддерживается в py2glua")
 
         parts = FunctionBuilder._split_top_level_commas(tokens)
         for part in parts:

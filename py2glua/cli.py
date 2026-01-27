@@ -61,8 +61,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _build(src: Path, out: Path) -> None:
-    logger.info("Начало сборки...")
-
     project_ir = Compiler.build()
 
     if out.exists():
@@ -76,6 +74,7 @@ def _build(src: Path, out: Path) -> None:
 
     emitter = LuaEmitter()
 
+    logger.info("Генерация lua файлов")
     for ir in project_ir:
         if ir.path is None:
             exit_with_code(3, "Внутренняя ошибка: IR-файл без path")
@@ -88,16 +87,18 @@ def _build(src: Path, out: Path) -> None:
         result = emitter.emit_file(ir)
 
         out_path.write_text(result.code, encoding="utf-8")
-        logger.info(f"Сгенерирован файл: {out_path}")
 
-    logger.info("Сборка успешно завершена.")
+    logger.info("Сборка успешно завершена")
 
 
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
     setup_logging(args.debug)
+
     Py2GluaConfig.debug = args.debug
+    Py2GluaConfig.debug_build = False  # TODO:
+
     Py2GluaConfig.source = args.src.resolve()
     Py2GluaConfig.output = args.out.resolve()
 
@@ -106,6 +107,7 @@ Version: {Py2GluaConfig.version()}
 Source : {Py2GluaConfig.source}
 Output : {Py2GluaConfig.output}
 Debug  : {Py2GluaConfig.debug}
+BDebug : {Py2GluaConfig.debug_build}
 """)
 
     match args.cmd:
