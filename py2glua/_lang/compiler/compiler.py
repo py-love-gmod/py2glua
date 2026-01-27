@@ -8,12 +8,17 @@ from ..._cli.logging_setup import exit_with_code, log_step
 from ...config import Py2GluaConfig
 from ..py.ir_builder import PyIRBuilder, PyIRFile
 from .import_resolver import ImportResolver
+from .passes.analysis import (
+    ExtractRealmDirectivePass,
+    ImportValidationPass,
+    RealmDirectiveValidatePass,
+)
 from .passes.analysis.symlinks import (
-    BuildScopesPass,  # симлинк дата
-    CollectDefsPass,  # симлинк дата
-    ResolveUsesPass,  # симлинк дата
-    RewriteToSymlinksPass,  # симлинк дата
-    SymLinkContext,  # симлинк дата
+    BuildScopesPass,
+    CollectDefsPass,
+    ResolveUsesPass,
+    RewriteToSymlinksPass,
+    SymLinkContext,
 )
 from .passes.normalize import (
     AttachDecoratorsPass,
@@ -28,6 +33,9 @@ class Compiler:
     ]
 
     analysis_passes = [
+        ImportValidationPass,  # Валидация импортов
+        RealmDirectiveValidatePass,  # Валидация __realm__
+        ExtractRealmDirectivePass,  # Извлечение __realm__
         # === Блок simlinks
         BuildScopesPass,
         CollectDefsPass,

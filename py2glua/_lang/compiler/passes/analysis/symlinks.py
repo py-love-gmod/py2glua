@@ -104,7 +104,7 @@ class SymLinkContext:
 
     _node_uid: dict[int, int] = field(default_factory=dict)
 
-    # ---- module index ----
+    # module index
     _all_paths: set[Path] = field(default_factory=set)
     _module_index_ready: bool = False
 
@@ -119,6 +119,7 @@ class SymLinkContext:
         existing = self._node_uid.get(k)
         if existing is not None:
             return existing
+        
         uid = self._next_node
         self._next_node += 1
         self._node_uid[k] = uid

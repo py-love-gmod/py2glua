@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import IntEnum, auto
+from enum import Enum, IntEnum, auto
 from pathlib import Path
 
 from ...glua.core.types import nil
@@ -18,11 +18,19 @@ class PyIRNode:
 
 
 # File / Decorators
+class FileRealm(Enum):
+    SERVER = "SERVER"
+    CLIENT = "CLIENT"
+    SHARED = "SHARED"
+    MENU = "MENU"
+
+
 @dataclass
 class PyIRFile(PyIRNode):
     path: Path | None
     body: list["PyIRNode"] = field(default_factory=list)
     imports: list[Path] = field(default_factory=list)
+    realm: FileRealm = FileRealm.SHARED
 
     def walk(self):
         yield self
