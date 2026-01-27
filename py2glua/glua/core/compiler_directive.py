@@ -70,6 +70,15 @@ class CompilerDirective:
 
         return decorator
 
+    @staticmethod
+    def anonymous() -> Callable:
+        """Указывает что функция является анонимной, и её тело необходимо поставить ака function(args) body end"""
+
+        def decorator(fn):
+            return fn
+
+        return decorator
+
     # endregion
 
     @staticmethod
