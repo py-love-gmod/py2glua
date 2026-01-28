@@ -21,6 +21,9 @@ from .passes.analysis.symlinks import (
     RewriteToSymlinksPass,
     SymLinkContext,
 )
+from .passes.lowering import (
+    RewriteContextManagerWithPass,
+)
 from .passes.normalize import (
     AttachDecoratorsPass,
     NormalizeImportsPass,
@@ -46,7 +49,9 @@ class Compiler:
         NoInlineRecursionPass,
     ]
 
-    lowering_passes = []
+    lowering_passes = [
+        RewriteContextManagerWithPass,  # Замена with конструкций
+    ]
 
     project_passes = []
 
