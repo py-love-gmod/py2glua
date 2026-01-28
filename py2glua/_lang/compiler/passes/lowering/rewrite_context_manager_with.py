@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Literal, Tuple
+from typing import Iterable, Literal
 
 from ....._cli.logging_setup import exit_with_code
 from ....py.ir_dataclass import (
@@ -16,7 +16,6 @@ from ....py.ir_dataclass import (
     PyIRFunctionDef,
     PyIRIf,
     PyIRNode,
-    PyIRReturn,
     PyIRVarUse,
     PyIRWhile,
     PyIRWith,
@@ -63,7 +62,6 @@ class RewriteContextManagerWithPass:
         pre(x)
         body
         post(y)
-
     """
 
     _CTX_SEEN = "_ctxm_seen_paths"
@@ -123,7 +121,7 @@ class RewriteContextManagerWithPass:
 
     @staticmethod
     def _collect_contextmanager_functions(ir: PyIRFile, ctx: SymLinkContext) -> None:
-        funcs: Dict[int, _CtxmFnInfo] = getattr(
+        funcs: dict[int, _CtxmFnInfo] = getattr(
             ctx, RewriteContextManagerWithPass._CTX_FUNCS
         )
 
@@ -137,8 +135,7 @@ class RewriteContextManagerWithPass:
                 if expr is None:
                     continue
 
-                k = RewriteContextManagerWithPass._decorator_kind(expr)
-                if k is not None:
+                if RewriteContextManagerWithPass._decorator_kind(expr) is not None:
                     flag = True
 
             if not flag:
@@ -216,9 +213,8 @@ class RewriteContextManagerWithPass:
 
         setattr(ctx, RewriteContextManagerWithPass._CTX_DONE, True)
 
-        funcs: Dict[int, _CtxmFnInfo] = getattr(
-            ctx,
-            RewriteContextManagerWithPass._CTX_FUNCS,
+        funcs: dict[int, _CtxmFnInfo] = getattr(
+            ctx, RewriteContextManagerWithPass._CTX_FUNCS
         )
         jobs: list[_WithJob] = getattr(ctx, RewriteContextManagerWithPass._CTX_JOBS)
 
@@ -228,10 +224,8 @@ class RewriteContextManagerWithPass:
             if job.index >= len(job.parent) or job.parent[job.index] is not job.node:
                 try:
                     job_index = job.parent.index(job.node)
-
                 except ValueError:
                     continue
-
             else:
                 job_index = job.index
 
@@ -257,14 +251,6 @@ class RewriteContextManagerWithPass:
         return False
 
     @staticmethod
-    def _has_forbidden_control_flow(fn: PyIRFunctionDef) -> bool:
-        for n in fn.walk():
-            if isinstance(n, PyIRReturn):
-                return True
-
-        return False
-
-    @staticmethod
     def _next_tmp_name(ctx: SymLinkContext, scope, *, prefix: str = "__ctxm_") -> str:
         while True:
             cur = getattr(ctx, RewriteContextManagerWithPass._CTX_TMP_COUNTER)
@@ -279,7 +265,7 @@ class RewriteContextManagerWithPass:
         return isinstance(node, (PyIRVarUse, PyIRSymLink, PyIRConstant))
 
     @staticmethod
-    def _clone_with_subst(node: PyIRNode, subst: Dict[str, PyIRNode]) -> PyIRNode:
+    def _clone_with_subst(node: PyIRNode, subst: dict[str, PyIRNode]) -> PyIRNode:
         def clone_value(v):
             if isinstance(v, PyIRNode):
                 return clone_node(v)
@@ -320,7 +306,6 @@ class RewriteContextManagerWithPass:
             kwargs = {}
             for f in fields(n):
                 value = getattr(n, f.name)
-
                 if f.name in ("line", "offset"):
                     kwargs[f.name] = value
                     continue
@@ -347,7 +332,7 @@ class RewriteContextManagerWithPass:
         file: Path | None,
         line: int | None,
         offset: int | None,
-    ) -> Tuple[PyIRSymLink, PyIRSymLink]:
+    ) -> tuple[PyIRSymLink, PyIRSymLink]:
         sym_id = ctx.ensure_def(scope=scope, name=name, decl_file=file, decl_line=line)
         sym = ctx.symbols[sym_id]
 
@@ -378,13 +363,117 @@ class RewriteContextManagerWithPass:
         return store, load
 
     @staticmethod
+    def _find_marker_stmt(
+        body: list[PyIRNode],
+    ) -> tuple[list[PyIRNode], int] | None:
+        def scan_list(lst: list[PyIRNode]) -> tuple[list[PyIRNode], int] | None:
+            for i, st in enumerate(lst):
+                if RewriteContextManagerWithPass._is_ctx_body_marker(st):
+                    return (lst, i)
+
+                for child_list in RewriteContextManagerWithPass._statement_lists(st):
+                    hit = scan_list(child_list)
+                    if hit is not None:
+                        return hit
+
+            return None
+
+        return scan_list(body)
+
+    @staticmethod
+    def _count_markers_in_stmt_lists(body: list[PyIRNode]) -> int:
+        def scan_list(lst: list[PyIRNode]) -> int:
+            cnt = 0
+            for st in lst:
+                if RewriteContextManagerWithPass._is_ctx_body_marker(st):
+                    cnt += 1
+
+                if isinstance(st, (PyIRFunctionDef, PyIRClassDef)):
+                    continue
+
+                for child_list in RewriteContextManagerWithPass._statement_lists(st):
+                    cnt += scan_list(child_list)
+
+            return cnt
+
+        return scan_list(body)
+
+    @staticmethod
+    def _expand_macro_once(
+        *,
+        with_scope,
+        w: PyIRWith,
+        macro: _CtxmFnInfo,
+        call: PyIRCall,
+        inner_body: list[PyIRNode],
+        ctx: SymLinkContext,
+        file: Path | None,
+    ) -> list[PyIRNode]:
+        fn = macro.fn
+        param_names = list(fn.signature.keys())
+
+        bound_pairs: list[tuple[str, PyIRNode]] = list(zip(param_names, call.args_p))
+
+        eval_nodes: list[PyIRNode] = []
+        subst: dict[str, PyIRNode] = {}
+
+        for pname, arg_node in bound_pairs:
+            if RewriteContextManagerWithPass._is_pure_expr(arg_node):
+                subst[pname] = RewriteContextManagerWithPass._clone_with_subst(
+                    arg_node, {}
+                )
+                continue
+
+            tmp_name = RewriteContextManagerWithPass._next_tmp_name(ctx, with_scope)
+            store_sym, load_sym = RewriteContextManagerWithPass._define_temp_symlink(
+                ctx,
+                scope=with_scope,
+                name=tmp_name,
+                file=file,
+                line=w.line,
+                offset=w.offset,
+            )
+
+            eval_nodes.append(
+                PyIRAssign(
+                    line=w.line,
+                    offset=w.offset,
+                    targets=[store_sym],
+                    value=RewriteContextManagerWithPass._clone_with_subst(arg_node, {}),
+                )
+            )
+            subst[pname] = load_sym
+
+        macro_body = [
+            RewriteContextManagerWithPass._clone_with_subst(n, subst) for n in fn.body
+        ]
+
+        cnt = RewriteContextManagerWithPass._count_markers_in_stmt_lists(macro_body)
+        if cnt > 1:
+            exit_with_code(
+                1,
+                "Маркер contextmanager_body может встречаться не более одного раза.\n"
+                f"Макрос: {macro.name}\n"
+                + RewriteContextManagerWithPass._err_ctx(
+                    macro.file, macro.line, macro.offset
+                ),
+            )
+
+        hit = RewriteContextManagerWithPass._find_marker_stmt(macro_body)
+        if hit:
+            parent_list, idx = hit
+            parent_list[idx : idx + 1] = inner_body
+
+        return [*eval_nodes, *macro_body]
+
+    @staticmethod
     def _rewrite_with(
         w: PyIRWith,
-        funcs: Dict[int, _CtxmFnInfo],
+        funcs: dict[int, _CtxmFnInfo],
         ctx: SymLinkContext,
         file: Path | None,
     ) -> list[PyIRNode] | None:
-        calls: list[Tuple[PyIRCall, _CtxmFnInfo]] = []
+        calls: list[tuple[PyIRCall, _CtxmFnInfo]] = []
 
         for item in w.items:
             if item.optional_vars is not None:
@@ -412,165 +501,17 @@ class RewriteContextManagerWithPass:
 
         with_scope = ctx.node_scope[ctx.uid(w)]
 
-        eval_nodes: list[PyIRNode] = []
-        pre_nodes: list[PyIRNode] = []
-        post_nodes_stack: list[list[PyIRNode]] = []
+        inner: list[PyIRNode] = w.body
 
-        for call, info in calls:
-            fn = info.fn
+        for call, info in reversed(calls):
+            inner = RewriteContextManagerWithPass._expand_macro_once(
+                with_scope=with_scope,
+                w=w,
+                macro=info,
+                call=call,
+                inner_body=inner,
+                ctx=ctx,
+                file=file,
+            )
 
-            if RewriteContextManagerWithPass._has_forbidden_control_flow(fn):
-                exit_with_code(
-                    1,
-                    "Макро-contextmanager функция не должна содержать 'return'.\n"
-                    f"Макрос: {info.name}\n"
-                    + RewriteContextManagerWithPass._err_ctx(
-                        info.file, info.line, info.offset
-                    ),
-                )
-
-            marker_nodes_any = [
-                n
-                for n in fn.walk()
-                if RewriteContextManagerWithPass._is_ctx_body_marker(n)
-            ]
-            if len(marker_nodes_any) > 1:
-                exit_with_code(
-                    1,
-                    "Маркер contextmanager_body может встречаться не более одного раза.\n"
-                    f"Макрос: {info.name}\n"
-                    + RewriteContextManagerWithPass._err_ctx(
-                        info.file, info.line, info.offset
-                    ),
-                )
-
-            marker_idx: int | None = None
-            if marker_nodes_any:
-                marker = marker_nodes_any[0]
-                for i, st in enumerate(fn.body):
-                    if st is marker:
-                        marker_idx = i
-                        break
-
-                if marker_idx is None:
-                    exit_with_code(
-                        1,
-                        "Маркер contextmanager_body должен быть отдельным statement на верхнем уровне тела макроса.\n"
-                        f"Макрос: {info.name}\n"
-                        + RewriteContextManagerWithPass._err_ctx(
-                            info.file, info.line, info.offset
-                        ),
-                    )
-
-            param_names = list(fn.signature.keys())
-
-            bound_pairs: list[Tuple[str, PyIRNode]] = []
-
-            if len(call.args_p) > len(param_names):
-                exit_with_code(
-                    1,
-                    "Слишком много позиционных аргументов при вызове макро-contextmanager.\n"
-                    f"Макрос: {info.name}\n"
-                    + RewriteContextManagerWithPass._err_ctx(file, w.line, w.offset),
-                )
-
-            for i, arg in enumerate(call.args_p):
-                bound_pairs.append((param_names[i], arg))
-
-            provided = {k for k, _ in bound_pairs}
-
-            for k, v in call.args_kw.items():
-                if k not in param_names:
-                    exit_with_code(
-                        1,
-                        "Передан неизвестный именованный аргумент при вызове макро-contextmanager.\n"
-                        f"Макрос: {info.name}\n"
-                        f"Аргумент: {k}\n"
-                        + RewriteContextManagerWithPass._err_ctx(
-                            file, w.line, w.offset
-                        ),
-                    )
-
-                if k in provided:
-                    exit_with_code(
-                        1,
-                        "Параметр макро-contextmanager передан дважды (позиционно и/или по имени).\n"
-                        f"Макрос: {info.name}\n"
-                        f"Параметр: {k}\n"
-                        + RewriteContextManagerWithPass._err_ctx(
-                            file, w.line, w.offset
-                        ),
-                    )
-
-                provided.add(k)
-                bound_pairs.append((k, v))
-
-            missing = [p for p in param_names if p not in provided]
-            if missing:
-                exit_with_code(
-                    1,
-                    "Для макро-contextmanager необходимо передать все параметры (значения по умолчанию не поддерживаются).\n"  # TODO: default args
-                    f"Макрос: {info.name}\n"
-                    f"Не хватает: {', '.join(missing)}\n"
-                    + RewriteContextManagerWithPass._err_ctx(file, w.line, w.offset),
-                )
-
-            subst: Dict[str, PyIRNode] = {}
-
-            for pname, arg_node in bound_pairs:
-                if RewriteContextManagerWithPass._is_pure_expr(arg_node):
-                    subst[pname] = RewriteContextManagerWithPass._clone_with_subst(
-                        arg_node, {}
-                    )
-                    continue
-
-                tmp_name = RewriteContextManagerWithPass._next_tmp_name(ctx, with_scope)
-                store_sym, load_sym = (
-                    RewriteContextManagerWithPass._define_temp_symlink(
-                        ctx,
-                        scope=with_scope,
-                        name=tmp_name,
-                        file=file,
-                        line=w.line,
-                        offset=w.offset,
-                    )
-                )
-
-                eval_nodes.append(
-                    PyIRAssign(
-                        line=w.line,
-                        offset=w.offset,
-                        targets=[store_sym],
-                        value=RewriteContextManagerWithPass._clone_with_subst(
-                            arg_node, {}
-                        ),
-                    )
-                )
-
-                subst[pname] = load_sym
-
-            if marker_idx is None:
-                pre_src = fn.body
-                post_src: list[PyIRNode] = []
-
-            else:
-                pre_src = fn.body[:marker_idx]
-                post_src = fn.body[marker_idx + 1 :]
-
-            pre_part = [
-                RewriteContextManagerWithPass._clone_with_subst(n, subst)
-                for n in pre_src
-            ]
-            post_part = [
-                RewriteContextManagerWithPass._clone_with_subst(n, subst)
-                for n in post_src
-            ]
-
-            pre_nodes.extend(pre_part)
-            post_nodes_stack.append(post_part)
-
-        post_nodes: list[PyIRNode] = []
-        for part in reversed(post_nodes_stack):
-            post_nodes.extend(part)
-
-        return [*eval_nodes, *pre_nodes, *w.body, *post_nodes]
+        return inner
