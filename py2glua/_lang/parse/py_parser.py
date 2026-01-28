@@ -444,26 +444,51 @@ class PyParser:
     @classmethod
     def _build_raw_indent(cls, token_stream):
         tokens: list[tokenize.TokenInfo] = []
+
         first = token_stream.advance()
         if first is None or first.type != tokenize.INDENT:
             raise SyntaxError("Expected INDENT at start of block")
 
         tokens.append(first)
         depth = 1
+        balance = {"(": 0, ")": 0, "[": 0, "]": 0, "{": 0, "}": 0}
+
+        def paren_open() -> bool:
+            return (
+                balance["("] > balance[")"]
+                or balance["["] > balance["]"]
+                or balance["{"] > balance["}"]
+            )
+
+        def next_significant_type(start_offset: int) -> int | None:
+            j = start_offset
+            while True:
+                t = token_stream.peek(j)
+                if t is None:
+                    return None
+
+                if t.type in (tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT):
+                    j += 1
+                    continue
+
+                return t.type
+
         while not token_stream.eof():
             look = token_stream.peek()
             if look is None:
                 break
 
-            if (
-                look.type == tokenize.COMMENT
-                and depth == 1
-                and getattr(look, "start", (0, 1))[1] == 0
-            ):
-                break
+            if look.type == tokenize.COMMENT and depth == 1 and not paren_open():
+                nxt = next_significant_type(1)
+                if nxt == tokenize.DEDENT:
+                    break
 
             tok = token_stream.advance()
             tokens.append(tok)
+
+            s = tok.string
+            if s in balance:
+                balance[s] += 1
 
             if tok.type == tokenize.INDENT:
                 depth += 1

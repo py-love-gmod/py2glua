@@ -33,42 +33,39 @@ class _CtxmFnInfo:
     offset: int | None
 
 
-@dataclass
-class _WithJob:
-    parent: list[PyIRNode]
-    index: int
-    node: PyIRWith
-    depth: int
-    file: Path | None
-
-
 class RewriteContextManagerWithPass:
     """
-    Разворачивает with для @CompilerDirective.contextmanager().
+    Макро-развёртка with для @CompilerDirective.contextmanager().
 
-    Паттерн:
-
-        @*.contextmanager()
-        def foo(a, b):
-            pre(a)
-            CompilerDirective.contextmanager_body
-            post(b)
-
-        with foo(x, y):
+    Стековая семантика multiple-items:
+        with A(...), B(...):
             body
-
-    Становится:
-
-        pre(x)
+    ->
+        A.pre(...)
+        B.pre(...)
         body
-        post(y)
+        B.post(...)
+        A.post(...)
+
+    Механика:
+      - берём тело макро-функции
+      - подставляем args в параметры
+      - находим statement marker `contextmanager_body`
+      - заменяем marker на тело with
+
+    Правила:
+      - marker может быть в любом statement-list.
+      - marker > 1 -> ошибка.
+      - marker == 0 -> тело with игнорируется.
+      - "with ... as name" запрещён.
+      - kwargs/кол-во аргументов тут не валидируем.
     """
 
     _CTX_SEEN = "_ctxm_seen_paths"
     _CTX_DONE = "_ctxm_done"
     _CTX_FUNCS = "_ctxm_funcs"  # sym_id -> _CtxmFnInfo
-    _CTX_JOBS = "_ctxm_jobs"  # list[_WithJob]
     _CTX_TMP_COUNTER = "_ctxm_tmp_counter"
+    _CTX_FILES = "_ctxm_files"  # list[PyIRFile]
 
     @staticmethod
     def run(ir: PyIRFile, ctx: SymLinkContext) -> None:
@@ -77,8 +74,11 @@ class RewriteContextManagerWithPass:
         if ir.path is not None:
             getattr(ctx, RewriteContextManagerWithPass._CTX_SEEN).add(ir.path.resolve())
 
+        files: list[PyIRFile] = getattr(ctx, RewriteContextManagerWithPass._CTX_FILES)
+        if ir not in files:
+            files.append(ir)
+
         RewriteContextManagerWithPass._collect_contextmanager_functions(ir, ctx)
-        RewriteContextManagerWithPass._collect_with_jobs(ir, ctx)
         RewriteContextManagerWithPass._maybe_finalize(ctx)
 
     @staticmethod
@@ -92,11 +92,33 @@ class RewriteContextManagerWithPass:
         if not hasattr(ctx, RewriteContextManagerWithPass._CTX_FUNCS):
             setattr(ctx, RewriteContextManagerWithPass._CTX_FUNCS, {})
 
-        if not hasattr(ctx, RewriteContextManagerWithPass._CTX_JOBS):
-            setattr(ctx, RewriteContextManagerWithPass._CTX_JOBS, [])
-
         if not hasattr(ctx, RewriteContextManagerWithPass._CTX_TMP_COUNTER):
             setattr(ctx, RewriteContextManagerWithPass._CTX_TMP_COUNTER, 0)
+
+        if not hasattr(ctx, RewriteContextManagerWithPass._CTX_FILES):
+            setattr(ctx, RewriteContextManagerWithPass._CTX_FILES, [])
+
+    @staticmethod
+    def _maybe_finalize(ctx: SymLinkContext) -> None:
+        if getattr(ctx, RewriteContextManagerWithPass._CTX_DONE):
+            return
+
+        all_paths = {p.resolve() for p in getattr(ctx, "_all_paths", set()) if p}
+        seen = getattr(ctx, RewriteContextManagerWithPass._CTX_SEEN)
+        if all_paths and seen != all_paths:
+            return
+
+        setattr(ctx, RewriteContextManagerWithPass._CTX_DONE, True)
+
+        funcs: dict[int, _CtxmFnInfo] = getattr(
+            ctx, RewriteContextManagerWithPass._CTX_FUNCS
+        )
+        files: list[PyIRFile] = getattr(ctx, RewriteContextManagerWithPass._CTX_FILES)
+
+        for ir in files:
+            ir.body[:] = RewriteContextManagerWithPass._rewrite_stmt_list(
+                ir.body, ctx=ctx, funcs=funcs, file=ir.path
+            )
 
     @staticmethod
     def _decorator_kind(expr: PyIRNode) -> Literal["contextmanager"] | None:
@@ -129,27 +151,23 @@ class RewriteContextManagerWithPass:
             if not isinstance(node, PyIRFunctionDef):
                 continue
 
-            flag = False
+            is_ctxm = False
             for dec in node.decorators:
                 expr = getattr(dec, "exper", None)
                 if expr is None:
                     continue
 
                 if RewriteContextManagerWithPass._decorator_kind(expr) is not None:
-                    flag = True
+                    is_ctxm = True
 
-            if not flag:
+            if not is_ctxm:
                 continue
 
             sym_id = RewriteContextManagerWithPass._func_symbol_id(node, ctx)
-            if sym_id is None:
-                continue
-
-            if sym_id in funcs:
+            if sym_id is None or sym_id in funcs:
                 continue
 
             sym = ctx.symbols.get(SymbolId(sym_id))
-
             funcs[sym_id] = _CtxmFnInfo(
                 sym_id=sym_id,
                 name=node.name,
@@ -184,71 +202,70 @@ class RewriteContextManagerWithPass:
             yield node.body
 
     @staticmethod
-    def _collect_with_jobs(ir: PyIRFile, ctx: SymLinkContext) -> None:
-        jobs: list[_WithJob] = getattr(ctx, RewriteContextManagerWithPass._CTX_JOBS)
+    def _rewrite_stmt_list(
+        stmts: list[PyIRNode],
+        *,
+        ctx: SymLinkContext,
+        funcs: dict[int, _CtxmFnInfo],
+        file: Path | None,
+    ) -> list[PyIRNode]:
+        out: list[PyIRNode] = []
 
-        def walk_list(stmts: list[PyIRNode], depth: int) -> None:
-            for idx, st in enumerate(stmts):
-                if isinstance(st, PyIRWith):
-                    jobs.append(
-                        _WithJob(
-                            parent=stmts, index=idx, node=st, depth=depth, file=ir.path
-                        )
+        for st in stmts:
+            for child in RewriteContextManagerWithPass._statement_lists(st):
+                child[:] = RewriteContextManagerWithPass._rewrite_stmt_list(
+                    child, ctx=ctx, funcs=funcs, file=file
+                )
+
+            if isinstance(st, PyIRWith):
+                repl = RewriteContextManagerWithPass._rewrite_with(st, funcs, ctx, file)
+                if repl is not None:
+                    repl = RewriteContextManagerWithPass._rewrite_stmt_list(
+                        repl, ctx=ctx, funcs=funcs, file=file
                     )
-
-                for child_list in RewriteContextManagerWithPass._statement_lists(st):
-                    walk_list(child_list, depth + 1)
-
-        walk_list(ir.body, depth=0)
-
-    @staticmethod
-    def _maybe_finalize(ctx: SymLinkContext) -> None:
-        if getattr(ctx, RewriteContextManagerWithPass._CTX_DONE):
-            return
-
-        all_paths = {p.resolve() for p in getattr(ctx, "_all_paths", set()) if p}
-        seen = getattr(ctx, RewriteContextManagerWithPass._CTX_SEEN)
-        if all_paths and seen != all_paths:
-            return
-
-        setattr(ctx, RewriteContextManagerWithPass._CTX_DONE, True)
-
-        funcs: dict[int, _CtxmFnInfo] = getattr(
-            ctx, RewriteContextManagerWithPass._CTX_FUNCS
-        )
-        jobs: list[_WithJob] = getattr(ctx, RewriteContextManagerWithPass._CTX_JOBS)
-
-        jobs_sorted = sorted(jobs, key=lambda j: (-j.depth, id(j.parent), -j.index))
-
-        for job in jobs_sorted:
-            if job.index >= len(job.parent) or job.parent[job.index] is not job.node:
-                try:
-                    job_index = job.parent.index(job.node)
-                except ValueError:
+                    out.extend(repl)
                     continue
-            else:
-                job_index = job.index
 
-            repl = RewriteContextManagerWithPass._rewrite_with(
-                job.node, funcs, ctx, job.file
-            )
-            if repl is None:
-                continue
+            out.append(st)
 
-            job.parent[job_index : job_index + 1] = repl
+        return out
 
     @staticmethod
     def _is_ctx_body_marker(node: PyIRNode) -> bool:
-        if isinstance(node, PyIRAttribute) and node.attr == "contextmanager_body":
-            return True
+        return (
+            (isinstance(node, PyIRAttribute) and node.attr == "contextmanager_body")
+            or (isinstance(node, PyIRVarUse) and node.name == "contextmanager_body")
+            or (isinstance(node, PyIRSymLink) and node.name == "contextmanager_body")
+        )
 
-        if isinstance(node, PyIRVarUse) and node.name == "contextmanager_body":
-            return True
+    @staticmethod
+    def _count_markers_in_stmt_lists(body: list[PyIRNode]) -> int:
+        cnt = 0
+        stack: list[list[PyIRNode]] = [body]
+        while stack:
+            lst = stack.pop()
+            for st in lst:
+                if RewriteContextManagerWithPass._is_ctx_body_marker(st):
+                    cnt += 1
 
-        if isinstance(node, PyIRSymLink) and node.name == "contextmanager_body":
-            return True
+                for child in RewriteContextManagerWithPass._statement_lists(st):
+                    stack.append(child)
 
-        return False
+        return cnt
+
+    @staticmethod
+    def _find_marker_stmt(body: list[PyIRNode]) -> tuple[list[PyIRNode], int] | None:
+        stack: list[list[PyIRNode]] = [body]
+        while stack:
+            lst = stack.pop()
+            for i, st in enumerate(lst):
+                if RewriteContextManagerWithPass._is_ctx_body_marker(st):
+                    return lst, i
+
+                for child in RewriteContextManagerWithPass._statement_lists(st):
+                    stack.append(child)
+
+        return None
 
     @staticmethod
     def _next_tmp_name(ctx: SymLinkContext, scope, *, prefix: str = "__ctxm_") -> str:
@@ -256,8 +273,7 @@ class RewriteContextManagerWithPass:
             cur = getattr(ctx, RewriteContextManagerWithPass._CTX_TMP_COUNTER)
             setattr(ctx, RewriteContextManagerWithPass._CTX_TMP_COUNTER, cur + 1)
             name = f"{prefix}{cur}"
-            sc = ctx.scopes[scope]
-            if name not in sc.defs:
+            if name not in ctx.scopes[scope].defs:
                 return name
 
     @staticmethod
@@ -266,15 +282,17 @@ class RewriteContextManagerWithPass:
 
     @staticmethod
     def _clone_with_subst(node: PyIRNode, subst: dict[str, PyIRNode]) -> PyIRNode:
-        def clone_value(v):
+        def clone_value(v, *, apply_subst: bool):
             if isinstance(v, PyIRNode):
-                return clone_node(v)
+                return clone_node(v, apply_subst=apply_subst)
 
             if isinstance(v, list):
-                return [clone_value(x) for x in v]
+                return [clone_value(x, apply_subst=apply_subst) for x in v]
 
             if isinstance(v, dict):
-                return {k: clone_value(x) for k, x in v.items()}
+                return {
+                    k: clone_value(x, apply_subst=apply_subst) for k, x in v.items()
+                }
 
             return v
 
@@ -292,12 +310,13 @@ class RewriteContextManagerWithPass:
                 )
             return n
 
-        def clone_node(n: PyIRNode) -> PyIRNode:
-            if isinstance(n, PyIRVarUse) and n.name in subst:
-                return clone_node(subst[n.name])
+        def clone_node(n: PyIRNode, *, apply_subst: bool) -> PyIRNode:
+            if apply_subst:
+                if isinstance(n, PyIRVarUse) and n.name in subst:
+                    return clone_node(subst[n.name], apply_subst=False)
 
-            if isinstance(n, PyIRSymLink) and n.name in subst:
-                return clone_node(subst[n.name])
+                if isinstance(n, PyIRSymLink) and n.name in subst:
+                    return clone_node(subst[n.name], apply_subst=False)
 
             if not is_dataclass(n):
                 return n
@@ -308,16 +327,16 @@ class RewriteContextManagerWithPass:
                 value = getattr(n, f.name)
                 if f.name in ("line", "offset"):
                     kwargs[f.name] = value
-                    continue
 
-                kwargs[f.name] = clone_value(value)
+                else:
+                    kwargs[f.name] = clone_value(value, apply_subst=apply_subst)
 
             out = cls(**kwargs)
             if isinstance(out, PyIRSymLink):
                 out = force_load(out)
             return out
 
-        return clone_node(node)
+        return clone_node(node, apply_subst=True)
 
     @staticmethod
     def _err_ctx(file: Path | None, line: int | None, offset: int | None) -> str:
@@ -359,50 +378,13 @@ class RewriteContextManagerWithPass:
 
         ctx.node_scope[ctx.uid(store)] = scope
         ctx.node_scope[ctx.uid(load)] = scope
-
         return store, load
 
     @staticmethod
-    def _find_marker_stmt(
-        body: list[PyIRNode],
-    ) -> tuple[list[PyIRNode], int] | None:
-        def scan_list(lst: list[PyIRNode]) -> tuple[list[PyIRNode], int] | None:
-            for i, st in enumerate(lst):
-                if RewriteContextManagerWithPass._is_ctx_body_marker(st):
-                    return (lst, i)
-
-                for child_list in RewriteContextManagerWithPass._statement_lists(st):
-                    hit = scan_list(child_list)
-                    if hit is not None:
-                        return hit
-
-            return None
-
-        return scan_list(body)
-
-    @staticmethod
-    def _count_markers_in_stmt_lists(body: list[PyIRNode]) -> int:
-        def scan_list(lst: list[PyIRNode]) -> int:
-            cnt = 0
-            for st in lst:
-                if RewriteContextManagerWithPass._is_ctx_body_marker(st):
-                    cnt += 1
-
-                if isinstance(st, (PyIRFunctionDef, PyIRClassDef)):
-                    continue
-
-                for child_list in RewriteContextManagerWithPass._statement_lists(st):
-                    cnt += scan_list(child_list)
-
-            return cnt
-
-        return scan_list(body)
-
-    @staticmethod
-    def _expand_macro_once(
+    def _expand_macro_call(
         *,
-        with_scope,
         w: PyIRWith,
+        with_scope,
         macro: _CtxmFnInfo,
         call: PyIRCall,
         inner_body: list[PyIRNode],
@@ -411,8 +393,7 @@ class RewriteContextManagerWithPass:
     ) -> list[PyIRNode]:
         fn = macro.fn
         param_names = list(fn.signature.keys())
-
-        bound_pairs: list[tuple[str, PyIRNode]] = list(zip(param_names, call.args_p))
+        bound_pairs = list(zip(param_names, call.args_p))
 
         eval_nodes: list[PyIRNode] = []
         subst: dict[str, PyIRNode] = {}
@@ -500,18 +481,16 @@ class RewriteContextManagerWithPass:
             return None
 
         with_scope = ctx.node_scope[ctx.uid(w)]
-
-        inner: list[PyIRNode] = w.body
-
+        cur: list[PyIRNode] = list(w.body)
         for call, info in reversed(calls):
-            inner = RewriteContextManagerWithPass._expand_macro_once(
-                with_scope=with_scope,
+            cur = RewriteContextManagerWithPass._expand_macro_call(
                 w=w,
+                with_scope=with_scope,
                 macro=info,
                 call=call,
-                inner_body=inner,
+                inner_body=cur,
                 ctx=ctx,
                 file=file,
             )
 
-        return inner
+        return cur
