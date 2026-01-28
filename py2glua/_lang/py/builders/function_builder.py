@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import tokenize
 from typing import List, Sequence
 
@@ -84,7 +86,6 @@ class FunctionBuilder:
         signature = FunctionBuilder._parse_params(params_tokens)
 
         body_children = list(node.children)
-
         body = build_block(body_children)
 
         line, col = tokens[def_idx].start
@@ -145,7 +146,6 @@ class FunctionBuilder:
     @staticmethod
     def _tokens_to_clean_src(tokens: list[tokenize.TokenInfo]) -> str:
         parts: list[str] = []
-
         for t in tokens:
             if t.type in (tokenize.NAME, tokenize.OP, tokenize.STRING, tokenize.NUMBER):
                 parts.append(t.string)
@@ -185,8 +185,8 @@ class FunctionBuilder:
     @staticmethod
     def _parse_params(
         tokens: List[tokenize.TokenInfo],
-    ) -> dict[str, tuple[str | None, str | None]]:
-        signature: dict[str, tuple[str | None, str | None]] = {}
+    ) -> dict[str, tuple[str | None, PyIRNode | None]]:
+        signature: dict[str, tuple[str | None, PyIRNode | None]] = {}
 
         if not tokens:
             return signature
@@ -220,22 +220,16 @@ class FunctionBuilder:
                 else None
             )
 
-            default_str: str | None = None
+            default_expr: PyIRNode | None = None
             if default_tokens is not None:
                 stream = TokenStream(default_tokens)
-                _ = StatementBuilder._parse_expression(stream)
+                default_expr = StatementBuilder._parse_expression(stream)
                 if not stream.eof():
                     raise SyntaxError(
                         "Invalid default value expression in function parameter"
                     )
 
-                default_str = FunctionBuilder._tokens_to_clean_src(
-                    default_tokens
-                ).strip()
-                if not default_str:
-                    raise SyntaxError("Empty default expression in function parameter")
-
-            signature[name] = (ann_str, default_str)
+            signature[name] = (ann_str, default_expr)
 
         return signature
 

@@ -22,6 +22,7 @@ from .passes.analysis.symlinks import (
     SymLinkContext,
 )
 from .passes.lowering import (
+    NormalizeCallArgumentsPass,
     RewriteContextManagerWithPass,
 )
 from .passes.normalize import (
@@ -50,6 +51,7 @@ class Compiler:
     ]
 
     lowering_passes = [
+        NormalizeCallArgumentsPass,  # Нормализация аргументов
         RewriteContextManagerWithPass,  # Замена with конструкций
     ]
 

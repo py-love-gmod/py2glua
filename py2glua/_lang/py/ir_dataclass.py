@@ -442,7 +442,7 @@ class PyIRCall(PyIRNode):
 @dataclass
 class PyIRFunctionDef(PyIRNode):
     name: str
-    signature: dict[str, tuple[str | None, str | None]]
+    signature: dict[str, tuple[str | None, PyIRNode | None]]
     returns: str | None
     decorators: list[PyIRDecorator] = field(default_factory=list)
     body: list[PyIRNode] = field(default_factory=list)
@@ -451,6 +451,7 @@ class PyIRFunctionDef(PyIRNode):
         yield self
         for d in self.decorators:
             yield from d.walk()
+
         for n in self.body:
             yield from n.walk()
 
