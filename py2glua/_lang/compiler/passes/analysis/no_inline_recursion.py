@@ -195,7 +195,7 @@ class NoInlineRecursionPass:
 
         exit_with_code(
             1,
-            "Обнаружена рекурсия среди inline/contextmanager функций\n"
+            f"Обнаружена рекурсия среди {next(iter(first.kinds))} функций\n"
             f"Цепочка: {chain}\n"
             f"Файл: {first.file}\n"
             f"LINE|OFFSET: {first.line}|{first.offset}",
