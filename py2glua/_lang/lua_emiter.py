@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from .._lang.compiler.passes.analysis.symlinks import PyIRSymLink
+from .._lang.compiler.passes.lowering.rewrite_anonymous_functions import PyIRFnExpr
 from .py.ir_dataclass import (
     PyAugAssignType,
     PyBinOPType,
@@ -17,6 +18,7 @@ from .py.ir_dataclass import (
     PyIRComment,
     PyIRConstant,
     PyIRContinue,
+    PyIRDecorator,
     PyIRDict,
     PyIREmitExpr,
     PyIRFile,
@@ -71,7 +73,6 @@ class LuaEmitter:
         PyBinOPType.FLOORDIV: "//",
         PyBinOPType.MOD: "%",
         PyBinOPType.POW: "^",
-        # IN / NOT_IN / IS / IS_NOT
     }
 
     _UNARY_OP: Final[dict[PyUnaryOPType, str]] = {
@@ -101,10 +102,15 @@ class LuaEmitter:
         return EmitResult(code=code)
 
     def _wl(self, s: str = "") -> None:
-        if s:
-            self._buf.append(self._INDENT * self._indent + s + "\n")
-        else:
+        # IMPORTANT: support multiline strings; indent every line
+        if not s:
             self._buf.append("\n")
+            return
+
+        prefix = self._INDENT * self._indent
+        lines = s.splitlines()
+        for ln in lines:
+            self._buf.append(prefix + ln + "\n")
 
     def _indent_push(self) -> None:
         self._indent += 1
@@ -133,6 +139,11 @@ class LuaEmitter:
             self._wl()
 
     def _stmt(self, node: PyIRNode, *, top_level: bool) -> None:
+        # after the attach step, decorator statements should not appear;
+        # if they still do, ignore them to avoid garbage output
+        if isinstance(node, PyIRDecorator):
+            return
+
         if isinstance(node, PyIRComment):
             self._maybe_blankline_before("comment", top_level=top_level)
             self._emit_comment(node)
@@ -217,6 +228,7 @@ class LuaEmitter:
                 PyIRBinOP,
                 PyIRUnaryOP,
                 PyIRSymLink,
+                PyIRFnExpr,
             ),
         ):
             self._maybe_blankline_before("stmt", top_level=top_level)
@@ -322,7 +334,41 @@ class LuaEmitter:
         v = self._expr(node.value)
         self._wl(f"{t} = ({t} {op} {v})")
 
+    def _emit_fn_expr(self, node: PyIRFnExpr) -> str:
+        args = ", ".join(node.signature.keys())
+        lines: list[str] = [f"function({args})"]
+
+        old_buf = self._buf
+        old_indent = self._indent
+        old_prev = self._prev_top_kind
+
+        tmp: list[str] = []
+        self._buf = tmp
+        self._prev_top_kind = None
+        self._indent = 1
+
+        if not node.body:
+            self._wl("-- pass")
+
+        else:
+            for st in node.body:
+                self._stmt(st, top_level=False)
+
+        self._buf = old_buf
+        self._indent = old_indent
+        self._prev_top_kind = old_prev
+
+        body = "".join(tmp).rstrip("\n")
+        if body:
+            lines.extend(body.splitlines())
+
+        lines.append("end")
+        return "\n".join(lines)
+
     def _expr(self, node: PyIRNode) -> str:
+        if isinstance(node, PyIRFnExpr):
+            return self._emit_fn_expr(node)
+
         if isinstance(node, PyIRAttribute):
             return f"{self._expr(node.value)}.{node.attr}"
 
@@ -346,14 +392,12 @@ class LuaEmitter:
             op = self._BIN_OP.get(node.op)
             if op is None:
                 return self._leak(f"binop {node.op.name}")
-
             return f"({self._expr(node.left)} {op} {self._expr(node.right)})"
 
         if isinstance(node, PyIRUnaryOP):
             op = self._UNARY_OP.get(node.op)
             if op is None:
                 return self._leak(f"unary {node.op.name}")
-
             v = self._expr(node.value)
             return f"(not {v})" if op == "not" else f"({op}{v})"
 
@@ -373,12 +417,16 @@ class LuaEmitter:
             return self._leak("call with kwargs")
 
         args = ", ".join(self._expr(a) for a in node.args_p)
-        return f"{self._expr(node.func)}({args})"
+
+        func_s = self._expr(node.func)
+        if isinstance(node.func, PyIRFnExpr):
+            func_s = f"({func_s})"
+
+        return f"{func_s}({args})"
 
     def _emit_list(self, node: PyIRList) -> str:
         if not node.elements:
             return "{}"
-
         items = ", ".join(self._expr(e) for e in node.elements)
         return f"{{ {items} }}"
 
@@ -387,17 +435,14 @@ class LuaEmitter:
             return "{}"
 
         parts: list[str] = []
-
         for item in node.items:
             key = item.key
             val = item.value
 
             if isinstance(key, PyIRConstant) and isinstance(key.value, str):
                 k = f"[{repr(key.value)}]"
-
             elif isinstance(key, PyIRConstant) and isinstance(key.value, (int, float)):
                 k = f"[{key.value}]"
-
             else:
                 k = f"[{self._expr(key)}]"
 
@@ -408,7 +453,6 @@ class LuaEmitter:
     def _emit_tuple(self, node: PyIRTuple) -> str:
         if not node.elements:
             return ""
-
         return ", ".join(self._expr(e) for e in node.elements)
 
     @staticmethod

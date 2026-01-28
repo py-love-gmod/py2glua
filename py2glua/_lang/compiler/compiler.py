@@ -23,6 +23,7 @@ from .passes.analysis.symlinks import (
 )
 from .passes.lowering import (
     NormalizeCallArgumentsPass,
+    RewriteAnonymousFunctionsPass,
     RewriteContextManagerWithPass,
     RewriteWithConditionPass,
 )
@@ -52,9 +53,10 @@ class Compiler:
     ]
 
     lowering_passes = [
-        RewriteWithConditionPass,
+        RewriteWithConditionPass,  # with == if
         NormalizeCallArgumentsPass,  # Нормализация аргументов
         RewriteContextManagerWithPass,  # Замена with конструкций
+        RewriteAnonymousFunctionsPass,  # Анонимки
     ]
 
     project_passes = []

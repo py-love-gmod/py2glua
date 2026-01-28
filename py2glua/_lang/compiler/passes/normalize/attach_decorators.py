@@ -7,26 +7,23 @@ from ....py.ir_builder import PyIRFile
 from ....py.ir_dataclass import (
     PyIRClassDef,
     PyIRDecorator,
+    PyIRFor,
     PyIRFunctionDef,
+    PyIRIf,
     PyIRNode,
+    PyIRWhile,
+    PyIRWith,
 )
 
 
 class AttachDecoratorsPass:
     """
-    Обрабатывает:
-      - PyIRDecorator на уровне файла, классов и функций
+    Обрабатывает PyIRDecorator
 
     Назначение:
-      - привязывает декораторы к следующему объявлению
-        (классу или функции)
-      - поддерживает вложенные блоки
-
-    Правила:
-      - декоратор применяется только к классу или функции
-      - декоратор обязан стоять непосредственно перед объявлением
-      - несколько декораторов подряд накапливаются
-      - после применения декораторы удаляются из тела блока
+      - привязывает декораторы к следующему FunctionDef или ClassDef
+      - работает рекурсивно во всех вложенных блоках
+      - запрещает декораторы перед чем-либо кроме class/function
     """
 
     @classmethod
@@ -48,7 +45,7 @@ class AttachDecoratorsPass:
                 pending.append(node)
                 continue
 
-            if isinstance(node, (PyIRClassDef, PyIRFunctionDef)):
+            if isinstance(node, (PyIRFunctionDef, PyIRClassDef)):
                 if pending:
                     node.decorators = pending + node.decorators
                     pending = []
@@ -57,26 +54,55 @@ class AttachDecoratorsPass:
                 new_body.append(node)
                 continue
 
+            if isinstance(node, PyIRIf):
+                if pending:
+                    cls._decorator_error(pending[0], file_path)
+
+                cls._process_block(node.body, file_path)
+                cls._process_block(node.orelse, file_path)
+                new_body.append(node)
+                continue
+
+            if isinstance(node, PyIRFor):
+                if pending:
+                    cls._decorator_error(pending[0], file_path)
+
+                cls._process_block(node.body, file_path)
+                new_body.append(node)
+                continue
+
+            if isinstance(node, PyIRWhile):
+                if pending:
+                    cls._decorator_error(pending[0], file_path)
+
+                cls._process_block(node.body, file_path)
+                new_body.append(node)
+                continue
+
+            if isinstance(node, PyIRWith):
+                if pending:
+                    cls._decorator_error(pending[0], file_path)
+
+                cls._process_block(node.body, file_path)
+                new_body.append(node)
+                continue
+
             if pending:
-                d = pending[0]
-                exit_with_code(
-                    1,
-                    "Декоратор не может быть применён к этому выражению\n"
-                    f"Файл: {file_path}\n"
-                    f"Строка: {d.line}, позиция: {d.offset}",
-                )
-                raise AssertionError("unreachable")
+                cls._decorator_error(pending[0], file_path)
 
             new_body.append(node)
 
         if pending:
-            d = pending[0]
-            exit_with_code(
-                1,
-                "Декоратор не был применён ни к одной функции или классу\n"
-                f"Файл: {file_path}\n"
-                f"Строка: {d.line}, позиция: {d.offset}",
-            )
-            raise AssertionError("unreachable")
+            cls._decorator_error(pending[0], file_path)
 
         body[:] = new_body
+
+    @staticmethod
+    def _decorator_error(dec: PyIRDecorator, file_path: Path | None) -> None:
+        exit_with_code(
+            1,
+            "Декоратор не может быть применён к этому выражению\n"
+            f"Файл: {file_path}\n"
+            f"Строка: {dec.line}, позиция: {dec.offset}",
+        )
+        raise AssertionError("unreachable")

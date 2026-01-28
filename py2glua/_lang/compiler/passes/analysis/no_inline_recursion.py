@@ -15,7 +15,7 @@ from ....py.ir_dataclass import (
 )
 from .symlinks import PyIRSymLink, SymbolId, SymLinkContext
 
-_Directive = Literal["inline", "contextmanager"]
+_Directive = Literal["inline", "contextmanager", "anonymous"]
 
 
 @dataclass(frozen=True)
@@ -31,13 +31,15 @@ class _MacroFnInfo:
 class NoInlineRecursionPass:
     """
     Запрещает прямую и косвенную рекурсию среди функций,
-    помеченных @inline() и @contextmanager().
+    помеченных @inline(), @contextmanager(), @anonymous().
     """
 
     _CTX_SEEN = "_macrorec_seen_paths"
     _CTX_DONE = "_macrorec_done"
     _CTX_MACRO_FUNCS = "_macrorec_macro_funcs"
     _CTX_EDGES = "_macrorec_edges"
+
+    _DECORATOR_NAMES = ("inline", "contextmanager", "anonymous")
 
     @staticmethod
     def run(ir: PyIRFile, ctx: SymLinkContext) -> None:
@@ -66,18 +68,24 @@ class NoInlineRecursionPass:
 
     @staticmethod
     def _decorator_kind(expr: PyIRNode) -> _Directive | None:
-        if isinstance(expr, PyIRAttribute) and expr.attr in (
-            "inline",
-            "contextmanager",
+        if (
+            isinstance(expr, PyIRAttribute)
+            and expr.attr in NoInlineRecursionPass._DECORATOR_NAMES
         ):
             return expr.attr  # type: ignore[return-value]
 
         if isinstance(expr, PyIRCall):
             f = expr.func
-            if isinstance(f, PyIRAttribute) and f.attr in ("inline", "contextmanager"):
+            if (
+                isinstance(f, PyIRAttribute)
+                and f.attr in NoInlineRecursionPass._DECORATOR_NAMES
+            ):
                 return f.attr  # type: ignore[return-value]
 
-            if isinstance(f, PyIRSymLink) and f.name in ("inline", "contextmanager"):
+            if (
+                isinstance(f, PyIRSymLink)
+                and f.name in NoInlineRecursionPass._DECORATOR_NAMES
+            ):
                 return f.name  # type: ignore[return-value]
 
         return None
