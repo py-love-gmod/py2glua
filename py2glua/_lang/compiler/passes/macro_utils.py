@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Callable, Iterable, Type
+from typing import Callable, Iterable, Type
 
 from ...py.ir_dataclass import (
     PyIRAttribute,
@@ -12,9 +12,7 @@ from ...py.ir_dataclass import (
     PyIRWhile,
     PyIRWith,
 )
-
-if TYPE_CHECKING:
-    from .analysis.symlinks import PyIRSymLink, SymLinkContext
+from .analysis.symlinks import PyIRSymLink, SymLinkContext
 
 
 class MacroUtils:

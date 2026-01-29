@@ -1,12 +1,8 @@
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
 
+from .._lang.py.ir_builder import PyIRNode
 from .logging_setup import logger
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    from .._lang.py.ir_builder import PyIRNode
 
 
 class CompilerExit:
