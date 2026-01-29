@@ -180,11 +180,6 @@ class RewriteAnonymousFunctionsPass:
         out: list[PyIRNode] = []
 
         for st in stmts:
-            for child in MacroUtils.statement_lists(st):
-                child[:] = RewriteAnonymousFunctionsPass._rewrite_stmt_list(
-                    child, ctx=ctx, funcs=funcs, file=file
-                )
-
             st = RewriteAnonymousFunctionsPass._rw_node(
                 st, ctx=ctx, funcs=funcs, store=False, file=file
             )
@@ -207,6 +202,90 @@ class RewriteAnonymousFunctionsPass:
         store: bool,
         file: Path | None,
     ) -> PyIRNode:
+        from dataclasses import fields, is_dataclass
+
+        blocked = getattr(ctx, "_anon_blocked_syms", None)
+        if blocked is None:
+            blocked = set()
+            setattr(ctx, "_anon_blocked_syms", blocked)
+
+        def clone_preserve_links(n: PyIRNode) -> PyIRNode:
+            pairs: list[tuple[PyIRNode, PyIRNode]] = []
+
+            def clone_value(v):
+                if isinstance(v, PyIRNode):
+                    return clone_node(v)
+                if isinstance(v, list):
+                    return [clone_value(x) for x in v]
+                if isinstance(v, dict):
+                    return {k: clone_value(x) for k, x in v.items()}
+                if isinstance(v, tuple):
+                    return tuple(clone_value(x) for x in v)
+                return v
+
+            def clone_node(x: PyIRNode) -> PyIRNode:
+                if not is_dataclass(x):
+                    return x
+                cls = x.__class__
+                kwargs = {f.name: clone_value(getattr(x, f.name)) for f in fields(x)}
+                out = cls(**kwargs)  # type: ignore
+                pairs.append((x, out))
+                return out
+
+            out = clone_node(n)
+
+            for old, new in pairs:
+                old_uid = ctx.uid(old)
+                new_uid = ctx.uid(new)
+
+                link = ctx.var_links.get(old_uid)
+                if link is not None and new_uid not in ctx.var_links:
+                    ctx.var_links[new_uid] = link
+
+                node_scope = getattr(ctx, "node_scope", None)
+                if isinstance(node_scope, dict):
+                    sc = node_scope.get(old_uid)
+                    if sc is not None and new_uid not in node_scope:
+                        node_scope[new_uid] = sc
+
+            return out
+
+        def make_fn_expr(
+            info: _AnonFnInfo, *, line: int | None, offset: int | None
+        ) -> PyIRFnExpr:
+            sig: dict[str, object] = dict(info.fn.signature)
+            for k, v in list(sig.items()):
+                if isinstance(v, PyIRNode):
+                    sig[k] = clone_preserve_links(v)
+                elif isinstance(v, list):
+                    sig[k] = [
+                        clone_preserve_links(x) if isinstance(x, PyIRNode) else x
+                        for x in v
+                    ]
+                elif isinstance(v, dict):
+                    sig[k] = {
+                        kk: (clone_preserve_links(x) if isinstance(x, PyIRNode) else x)
+                        for kk, x in v.items()
+                    }
+                elif isinstance(v, tuple):
+                    sig[k] = tuple(
+                        clone_preserve_links(x) if isinstance(x, PyIRNode) else x
+                        for x in v
+                    )
+
+            body = [clone_preserve_links(st) for st in info.fn.body]
+            expr = PyIRFnExpr(line=line, offset=offset, signature=sig, body=body)
+
+            blocked.add(info.sym_id)
+            try:
+                expr.body[:] = RewriteAnonymousFunctionsPass._rewrite_stmt_list(
+                    expr.body, ctx=ctx, funcs=funcs, file=file
+                )
+            finally:
+                blocked.discard(info.sym_id)
+
+            return expr
+
         if isinstance(node, PyIRCall):
             f = node.func
 
@@ -226,34 +305,19 @@ class RewriteAnonymousFunctionsPass:
                             call=node, info=info, file=file
                         )
 
-            node.func = RewriteAnonymousFunctionsPass._rw_node(
-                node.func, ctx=ctx, funcs=funcs, store=False, file=file
-            )
-            node.args_p = [
-                RewriteAnonymousFunctionsPass._rw_node(
-                    a, ctx=ctx, funcs=funcs, store=False, file=file
-                )
-                for a in node.args_p
-            ]
-            node.args_kw = {
-                k: RewriteAnonymousFunctionsPass._rw_node(
-                    v, ctx=ctx, funcs=funcs, store=False, file=file
-                )
-                for k, v in node.args_kw.items()
-            }
-            return node
-
         if isinstance(node, PyIRSymLink):
             if store or node.is_store:
                 return node
 
-            info = funcs.get(node.symbol_id)
+            sym_id = int(node.symbol_id)
+            if sym_id in blocked:
+                return node
+
+            info = funcs.get(sym_id)
             if not info:
                 return node
 
-            return RewriteAnonymousFunctionsPass._make_fn_expr(
-                info, line=node.line, offset=node.offset
-            )
+            return make_fn_expr(info, line=node.line, offset=node.offset)
 
         if isinstance(node, PyIRVarUse):
             if store:
@@ -263,20 +327,99 @@ class RewriteAnonymousFunctionsPass:
             if not link:
                 return node
 
-            info = funcs.get(link.target.value)
+            sym_id = int(link.target.value)
+            if sym_id in blocked:
+                return node
+
+            info = funcs.get(sym_id)
             if not info:
                 return node
 
-            return RewriteAnonymousFunctionsPass._make_fn_expr(
-                info, line=node.line, offset=node.offset
-            )
+            return make_fn_expr(info, line=node.line, offset=node.offset)
 
-        for child_lists in MacroUtils.statement_lists(node):
-            child_lists[:] = [
-                RewriteAnonymousFunctionsPass._rw_node(
-                    n, ctx=ctx, funcs=funcs, store=False, file=file
+        rewritten_lists: set[int] = set()
+        if isinstance(node, PyIRFnExpr):
+            node.body[:] = RewriteAnonymousFunctionsPass._rewrite_stmt_list(
+                node.body, ctx=ctx, funcs=funcs, file=file
+            )
+            rewritten_lists.add(id(node.body))
+
+        for lst in MacroUtils.statement_lists(node):
+            lst[:] = RewriteAnonymousFunctionsPass._rewrite_stmt_list(
+                lst, ctx=ctx, funcs=funcs, file=file
+            )
+            rewritten_lists.add(id(lst))
+
+        if not is_dataclass(node):
+            return node
+
+        cls_name = node.__class__.__name__
+        store_fields: set[str] = set()
+
+        if cls_name == "PyIRAssign":
+            store_fields = {"targets"}
+
+        elif cls_name in ("PyIRAugAssign", "PyIRAnnAssign"):
+            store_fields = {"target"}
+
+        elif cls_name == "PyIRFor":
+            store_fields = {"target"}
+
+        elif cls_name == "PyIRWith":
+            store_fields = {"targets", "optional_vars", "target"}
+
+        for f in fields(node):
+            name = f.name
+            if name in ("line", "offset"):
+                continue
+
+            value = getattr(node, name)
+
+            if isinstance(value, list) and id(value) in rewritten_lists:
+                continue
+
+            field_is_store = name in store_fields
+
+            if isinstance(value, PyIRNode):
+                new_child = RewriteAnonymousFunctionsPass._rw_node(
+                    value, ctx=ctx, funcs=funcs, store=field_is_store, file=file
                 )
-                for n in child_lists
-            ]
+                if new_child is not value:
+                    setattr(node, name, new_child)
+
+            elif isinstance(value, list):
+                for i, item in enumerate(value):
+                    if isinstance(item, PyIRNode):
+                        value[i] = RewriteAnonymousFunctionsPass._rw_node(
+                            item, ctx=ctx, funcs=funcs, store=field_is_store, file=file
+                        )
+                    elif isinstance(item, tuple):
+                        value[i] = tuple(
+                            RewriteAnonymousFunctionsPass._rw_node(
+                                x, ctx=ctx, funcs=funcs, store=False, file=file
+                            )
+                            if isinstance(x, PyIRNode)
+                            else x
+                            for x in item
+                        )
+
+            elif isinstance(value, dict):
+                for k, v in list(value.items()):
+                    if isinstance(v, PyIRNode):
+                        value[k] = RewriteAnonymousFunctionsPass._rw_node(
+                            v, ctx=ctx, funcs=funcs, store=False, file=file
+                        )
+
+            elif isinstance(value, tuple):
+                new_t = tuple(
+                    RewriteAnonymousFunctionsPass._rw_node(
+                        x, ctx=ctx, funcs=funcs, store=False, file=file
+                    )
+                    if isinstance(x, PyIRNode)
+                    else x
+                    for x in value
+                )
+                if new_t is not value:
+                    setattr(node, name, new_t)
 
         return node
