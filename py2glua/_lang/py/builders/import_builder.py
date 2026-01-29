@@ -61,6 +61,7 @@ class ImportBuilder:
                 a = stream.advance()
                 if a is None or a.type != tokenize.NAME:
                     raise SyntaxError("Expected alias name after 'as'")
+                
                 alias = a.string
 
             # import a.b.c as d

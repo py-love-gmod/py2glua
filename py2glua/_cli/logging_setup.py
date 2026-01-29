@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 from contextlib import contextmanager
 from time import perf_counter
 from typing import Iterator
@@ -52,18 +51,6 @@ def setup_logging(debug: bool) -> logging.Logger:
     logger.addHandler(ch)
 
     return logger
-
-
-def exit_with_code(code: int, msg: str | None = None) -> None:
-    if msg:
-        if code == 0:
-            logger.info(msg)
-
-        else:
-            logger.error(msg)
-            logger.error(f"Exit code: {code}")
-
-    sys.exit(code)
 
 
 @contextmanager

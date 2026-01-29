@@ -209,13 +209,11 @@ class SymLinkContext:
             if not tail:
                 return None
 
-            # IMPORTANT: internal должен начинаться с "py2glua...."
             if tail[0] != "py2glua":
                 return None
 
             return ".".join(tail)
 
-        # LOCAL: относительно Py2GluaConfig.source
         src_root = Py2GluaConfig.source.resolve()
         try:
             rel = p.relative_to(src_root)
@@ -254,6 +252,31 @@ class SymLinkContext:
             self.module_exports.setdefault(mod, {})
 
         self._module_index_ready = True
+
+    def get_exported_symbol(
+        self,
+        module_path: str,
+        symbol: str,
+    ) -> Symbol | None:
+        """
+        Получить экспортируемый символ из модуля.
+
+        module_path: "a.b.c"
+        symbol: имя экспортируемого символа
+
+        Возвращает Symbol или None, если не найден.
+        """
+        self.ensure_module_index()
+
+        exports = self.module_exports.get(module_path)
+        if not exports:
+            return None
+
+        sym_id = exports.get(symbol)
+        if sym_id is None:
+            return None
+
+        return self.symbols.get(sym_id)
 
 
 # Pass 1: построение скоупов

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from ..._cli.logging_setup import exit_with_code
+from ..._cli import CompilerExit
 from ..py.ir_builder import PyIRBuilder, PyIRFile
 from ..py.ir_dataclass import (
     PyIRAssign,
@@ -96,11 +96,11 @@ class ImportResolver:
             imp.itype = resolved.itype
 
             if resolved.itype == PyIRImportType.EXTERNAL:
-                exit_with_code(
-                    1,
+                CompilerExit.user_error(
                     "Внешний импорт не поддерживается\n"
-                    f"Импорт: {'.'.join(imp.modules or [])}\n"
-                    f"Файл: {current_file}",
+                    f"Импорт: {'.'.join(imp.modules or [])}\n",
+                    path=current_file,
+                    show_pos=False,
                 )
                 raise AssertionError("unreachable")
 
@@ -117,11 +117,10 @@ class ImportResolver:
         if imp.level:
             deps = self._resolve_relative(imp, current_file)
             if not deps:
-                exit_with_code(
-                    1,
+                CompilerExit.user_error(
                     "Не удалось разрешить относительный импорт\n"
-                    f"Импорт: {'.'.join(modules)}\n"
-                    f"Файл: {current_file}",
+                    f"Импорт: {'.'.join(modules)}\n",
+                    path=current_file,
                 )
                 raise AssertionError("unreachable")
 
@@ -173,9 +172,10 @@ class ImportResolver:
                 deps.add(p2)
                 continue
 
-            exit_with_code(
-                1,
-                f"Не удалось разрешить internal-символ {name}\nФайл: {current_file}",
+            CompilerExit.user_error(
+                f"Не удалось разрешить internal-символ {name}",
+                path=current_file,
+                show_pos=False,
             )
             raise AssertionError("unreachable")
 
@@ -215,9 +215,10 @@ class ImportResolver:
                 deps.add(p2)
                 continue
 
-            exit_with_code(
-                1,
-                f"Не удалось разрешить импорт {name}\nФайл: {parent}",
+            CompilerExit.user_error(
+                f"Не удалось разрешить импорт {name}",
+                path=parent,
+                show_pos=False,
             )
             raise AssertionError("unreachable")
 
@@ -264,10 +265,10 @@ class ImportResolver:
                 deps.add(p3)
                 continue
 
-            exit_with_code(
-                1,
-                f"Не удалось разрешить относительный импорт {name}\n"
-                f"Файл: {current_file}",
+            CompilerExit.user_error(
+                f"Не удалось разрешить относительный импорт {name}",
+                path=current_file,
+                show_pos=False,
             )
             raise AssertionError("unreachable")
 
@@ -303,9 +304,10 @@ class ImportResolver:
         for name in imp.names or []:
             n = name[0] if isinstance(name, tuple) else name
             if n == "*":
-                exit_with_code(
-                    1,
-                    f"import * не поддерживается\nФайл: {current_file}",
+                CompilerExit.user_error_node(
+                    "import * не поддерживается",
+                    path=current_file,
+                    node=imp,
                 )
                 raise AssertionError("unreachable")
 

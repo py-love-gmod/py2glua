@@ -1,4 +1,4 @@
-from ....._cli.logging_setup import exit_with_code
+from ....._cli import CompilerExit
 from ....py.ir_dataclass import PyIRFile, PyIRImport
 
 
@@ -12,7 +12,8 @@ class ImportValidationPass:
                 continue
 
             if node not in top_level_imports:
-                exit_with_code(
-                    1,
-                    f"Импорт разрешён только на уровне файла\nФайл: {ir.path}\nLINE|OFFSET: {node.line}|{node.offset}",
+                CompilerExit.user_error_node(
+                    "Импорт разрешён только на уровне файла",
+                    path=ir.path,
+                    node=node,
                 )

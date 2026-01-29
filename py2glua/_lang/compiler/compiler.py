@@ -4,11 +4,12 @@ from importlib import resources
 from pathlib import Path
 from typing import Iterable
 
-from ..._cli.logging_setup import exit_with_code, log_step
+from ..._cli import CompilerExit, log_step
 from ...config import Py2GluaConfig
 from ..py.ir_builder import PyIRBuilder, PyIRFile
 from .import_resolver import ImportResolver
 from .passes.analysis import (
+    DisallowWithAsPass,
     ExtractRealmDirectivePass,
     ImportValidationPass,
     NoInlineRecursionPass,
@@ -49,7 +50,8 @@ class Compiler:
         ResolveUsesPass,
         RewriteToSymlinksPass,
         # ===
-        NoInlineRecursionPass,
+        NoInlineRecursionPass,  # Запрет рекурсии некоторых инлайн подстановок
+        DisallowWithAsPass,  # Запрет with as
     ]
 
     lowering_passes = [
@@ -66,23 +68,34 @@ class Compiler:
         root = Py2GluaConfig.source
 
         if not root.exists():
-            exit_with_code(1, f"Папка проекта не найдена: {root}")
+            CompilerExit.user_error(
+                f"Папка проекта не найдена: {root}",
+                show_path=False,
+                show_pos=False,
+            )
 
         if not root.is_dir():
-            exit_with_code(1, f"Указанный путь не является папкой: {root}")
+            CompilerExit.user_error(
+                f"Указанный путь не является папкой: {root}",
+                show_path=False,
+                show_pos=False,
+            )
 
         project_files = sorted(p.resolve() for p in root.rglob("*.py") if p.is_file())
 
         if not project_files:
-            exit_with_code(1, f"В проекте нет ни одного .py файла: {root}")
+            CompilerExit.user_error(
+                f"В проекте нет ни одного .py файла: {root}",
+                show_path=False,
+                show_pos=False,
+            )
 
         try:
             internal_tr = resources.files("py2glua.glua")
 
         except Exception as e:
-            exit_with_code(
-                3,
-                f"Не удалось найти internal-пакет py2glua.glua: {e}",
+            CompilerExit.internal_error(
+                f"Не удалось найти internal-пакет py2glua.glua: {e}"
             )
             raise AssertionError("unreachable")
 
@@ -133,9 +146,8 @@ class Compiler:
 
                     if not entered:
                         if state.get(path) == VISITING:
-                            exit_with_code(
-                                3,
-                                f"Сбой обхода зависимостей: {path}",
+                            CompilerExit.internal_error(
+                                f"Сбой обхода зависимостей: {path}"
                             )
                             raise AssertionError("unreachable")
 
@@ -175,9 +187,10 @@ class Compiler:
                             call_stack,
                             index_in_stack,
                         )
-                        exit_with_code(
-                            1,
+                        CompilerExit.user_error(
                             "Обнаружена циклическая зависимость импортов:\n" + cycle,
+                            show_path=False,
+                            show_pos=False,
                         )
                         raise AssertionError("unreachable")
 
@@ -200,8 +213,7 @@ class Compiler:
                 ir = p.run(ir)
 
             except Exception as e:
-                exit_with_code(
-                    3,
+                CompilerExit.internal_error(
                     "Ошибка normalize\n"
                     f"Файл: {ir.path}\n"
                     f"Pass: {p.__name__}\n"
@@ -225,8 +237,7 @@ class Compiler:
                     p.run(ir, ctx)
 
                 except Exception as e:
-                    exit_with_code(
-                        3,
+                    CompilerExit.internal_error(
                         f"Ошибка analysis\n"
                         f"Файл: {ir.path}\n"
                         f"Pass: {p.__name__}\n"
@@ -249,8 +260,7 @@ class Compiler:
                     p.run(ir, ctx)
 
                 except Exception as e:
-                    exit_with_code(
-                        3,
+                    CompilerExit.internal_error(
                         f"Ошибка lowering\n"
                         f"Файл: {ir.path}\n"
                         f"Pass: {p.__name__}\n"
@@ -271,8 +281,7 @@ class Compiler:
                     p.run(ir, ctx)
 
                 except Exception as e:
-                    exit_with_code(
-                        3,
+                    CompilerExit.internal_error(
                         f"Ошибка project\nPass: {p.__name__}\nОшибка: {e}",
                     )
                     raise AssertionError("unreachable")
@@ -304,7 +313,7 @@ class Compiler:
             return path.read_text(encoding="utf-8")
 
         except Exception:
-            exit_with_code(2, f"Не удалось прочитать файл: {path}")
+            CompilerExit.system_error(f"Не удалось прочитать файл: {path}")
 
         raise AssertionError("unreachable")
 
@@ -318,14 +327,14 @@ class Compiler:
             )
 
         except SyntaxError as e:
-            exit_with_code(
-                1,
-                f"Синтаксическая ошибка\nФайл: {path}\n{e}",
+            CompilerExit.user_error(
+                f"Синтаксическая ошибка\n{e}",
+                path=path,
+                show_pos=False,
             )
 
         except Exception as e:
-            exit_with_code(
-                3,
+            CompilerExit.internal_error(
                 f"Ошибка при построении IR для {path}: {e}",
             )
 

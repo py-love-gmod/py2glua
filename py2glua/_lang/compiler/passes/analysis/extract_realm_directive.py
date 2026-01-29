@@ -1,4 +1,4 @@
-from ....._cli.logging_setup import exit_with_code
+from ....._cli import CompilerExit
 from ....py.ir_dataclass import (
     FileRealm,
     PyIRAssign,
@@ -44,21 +44,19 @@ class ExtractRealmDirectivePass:
             name = expr.value
 
         else:
-            exit_with_code(
-                1,
-                f"Некорректное значение __realm__\n"
-                f"Файл: {ir.path}\n"
-                f"LINE|OFFSET: {expr.line}|{expr.offset}",
+            CompilerExit.user_error_node(
+                "Некорректное значение __realm__",
+                ir.path,
+                expr,
             )
 
         key = name.upper()  # type: ignore
 
         if key not in FileRealm.__members__:
-            exit_with_code(
-                1,
-                f"Недопустимое значение __realm__: {name}\n"
-                f"Файл: {ir.path}\n"
-                f"LINE|OFFSET: {expr.line}|{expr.offset}",
+            CompilerExit.user_error_node(
+                f"Недопустимое значение __realm__: {name}",
+                ir.path,
+                expr,
             )
 
         ir.realm = FileRealm[key]

@@ -1,4 +1,4 @@
-from ....._cli.logging_setup import exit_with_code
+from ....._cli import CompilerExit
 from ....py.ir_dataclass import PyIRAssign, PyIRFile, PyIRVarUse
 
 
@@ -22,11 +22,10 @@ class RealmDirectiveValidatePass:
                 continue
 
             if realm_assign is not None:
-                exit_with_code(
-                    1,
-                    f"`__realm__` может быть объявлен только один раз\n"
-                    f"Файл: {ir.path}\n"
-                    f"LINE|OFFSET: {node.line}|{node.offset}",
+                CompilerExit.user_error_node(
+                    "__realm__ может быть объявлен только один раз",
+                    ir.path,
+                    node,
                 )
 
             realm_assign = node
@@ -41,9 +40,8 @@ class RealmDirectiveValidatePass:
             if realm_assign is not None and node is realm_assign.targets[0]:
                 continue
 
-            exit_with_code(
-                1,
-                f"`__realm__` является директивой файла и недоступен в коде\n"
-                f"Файл: {ir.path}\n"
-                f"LINE|OFFSET: {node.line}|{node.offset}",
+            CompilerExit.user_error_node(
+                "__realm__ является директивой файла и недоступен в коде",
+                ir.path,
+                node,
             )

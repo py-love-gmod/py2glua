@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Tuple
 
-from ....._cli.logging_setup import exit_with_code
+from ....._cli import CompilerExit
 from ....py.ir_dataclass import (
     PyIRCall,
     PyIRFile,
@@ -12,6 +12,8 @@ from ....py.ir_dataclass import (
     PyIRNode,
 )
 from ..analysis.symlinks import PyIRSymLink, SymbolId, SymLinkContext
+from ..clone_utils import clone_with_pos
+from ..macro_utils import MacroUtils
 
 
 @dataclass(frozen=True)
@@ -50,28 +52,33 @@ class NormalizeCallArgumentsPass:
 
     @staticmethod
     def run(ir: PyIRFile, ctx: SymLinkContext) -> None:
-        NormalizeCallArgumentsPass._ensure_ctx(ctx)
+        MacroUtils.ensure_pass_ctx(
+            ctx,
+            **{
+                NormalizeCallArgumentsPass._CTX_SEEN: set(),
+                NormalizeCallArgumentsPass._CTX_DONE: False,
+                NormalizeCallArgumentsPass._CTX_FUNCS: {},
+                NormalizeCallArgumentsPass._CTX_CALLS: [],
+            },
+        )
 
         if ir.path is not None:
             getattr(ctx, NormalizeCallArgumentsPass._CTX_SEEN).add(ir.path.resolve())
 
         NormalizeCallArgumentsPass._collect_functions(ir, ctx)
         NormalizeCallArgumentsPass._collect_calls(ir, ctx)
-        NormalizeCallArgumentsPass._maybe_finalize(ctx)
 
-    @staticmethod
-    def _ensure_ctx(ctx: SymLinkContext) -> None:
-        if not hasattr(ctx, NormalizeCallArgumentsPass._CTX_SEEN):
-            setattr(ctx, NormalizeCallArgumentsPass._CTX_SEEN, set())
-
-        if not hasattr(ctx, NormalizeCallArgumentsPass._CTX_DONE):
-            setattr(ctx, NormalizeCallArgumentsPass._CTX_DONE, False)
-
-        if not hasattr(ctx, NormalizeCallArgumentsPass._CTX_FUNCS):
-            setattr(ctx, NormalizeCallArgumentsPass._CTX_FUNCS, {})
-
-        if not hasattr(ctx, NormalizeCallArgumentsPass._CTX_CALLS):
-            setattr(ctx, NormalizeCallArgumentsPass._CTX_CALLS, [])
+        if MacroUtils.ready_to_finalize(
+            ctx,
+            seen_key=NormalizeCallArgumentsPass._CTX_SEEN,
+            done_key=NormalizeCallArgumentsPass._CTX_DONE,
+        ):
+            funcs: Dict[int, _FnSigInfo] = getattr(
+                ctx, NormalizeCallArgumentsPass._CTX_FUNCS
+            )
+            calls: list[_CallJob] = getattr(ctx, NormalizeCallArgumentsPass._CTX_CALLS)
+            for job in calls:
+                NormalizeCallArgumentsPass._normalize_call(job.call, job.file, funcs)
 
     @staticmethod
     def _func_symbol_id(fn: PyIRFunctionDef, ctx: SymLinkContext) -> int | None:
@@ -119,71 +126,6 @@ class NormalizeCallArgumentsPass:
                 calls.append(_CallJob(call=node, file=ir.path))
 
     @staticmethod
-    def _maybe_finalize(ctx: SymLinkContext) -> None:
-        if getattr(ctx, NormalizeCallArgumentsPass._CTX_DONE):
-            return
-
-        all_paths = {p.resolve() for p in getattr(ctx, "_all_paths", set()) if p}
-        seen = getattr(ctx, NormalizeCallArgumentsPass._CTX_SEEN)
-        if all_paths and seen != all_paths:
-            return
-
-        setattr(ctx, NormalizeCallArgumentsPass._CTX_DONE, True)
-
-        funcs: Dict[int, _FnSigInfo] = getattr(
-            ctx, NormalizeCallArgumentsPass._CTX_FUNCS
-        )
-        calls: list[_CallJob] = getattr(ctx, NormalizeCallArgumentsPass._CTX_CALLS)
-
-        for job in calls:
-            NormalizeCallArgumentsPass._normalize_call(job.call, job.file, funcs)
-
-    @staticmethod
-    def _err_ctx(file: Path | None, line: int | None, offset: int | None) -> str:
-        return f"Файл: {file}\nLINE|OFFSET: {line}|{offset}"
-
-    @staticmethod
-    def _clone_node_set_pos(
-        node: PyIRNode, *, line: int | None, offset: int | None
-    ) -> PyIRNode:
-        from dataclasses import fields, is_dataclass
-
-        def clone_value(v):
-            if isinstance(v, PyIRNode):
-                return clone_node(v)
-
-            if isinstance(v, list):
-                return [clone_value(x) for x in v]
-
-            if isinstance(v, dict):
-                return {k: clone_value(x) for k, x in v.items()}
-
-            if isinstance(v, tuple):
-                return tuple(clone_value(x) for x in v)
-
-            return v
-
-        def clone_node(n: PyIRNode) -> PyIRNode:
-            if not is_dataclass(n):
-                return n
-
-            cls = n.__class__
-            kwargs = {}
-            for f in fields(n):
-                if f.name == "line":
-                    kwargs[f.name] = line
-
-                elif f.name == "offset":
-                    kwargs[f.name] = offset
-
-                else:
-                    kwargs[f.name] = clone_value(getattr(n, f.name))
-
-            return cls(**kwargs)
-
-        return clone_node(node)
-
-    @staticmethod
     def _normalize_call(
         call: PyIRCall,
         file: Path | None,
@@ -200,12 +142,12 @@ class NormalizeCallArgumentsPass:
         nparams = len(param_names)
 
         if len(call.args_p) > nparams:
-            exit_with_code(
-                1,
+            CompilerExit.user_error_node(
                 "Слишком много позиционных аргументов при вызове функции.\n"
                 f"Функция: {fn.name}\n"
-                f"Ожидается: {nparams}, получено: {len(call.args_p)}\n"
-                + NormalizeCallArgumentsPass._err_ctx(file, call.line, call.offset),
+                f"Ожидается: {nparams}, получено: {len(call.args_p)}",
+                file,
+                call,
             )
             assert False
 
@@ -217,22 +159,22 @@ class NormalizeCallArgumentsPass:
         for k, v in call.args_kw.items():
             idx = fn.param_index.get(k)
             if idx is None:
-                exit_with_code(
-                    1,
+                CompilerExit.user_error_node(
                     "Передан неизвестный именованный аргумент при вызове функции.\n"
                     f"Функция: {fn.name}\n"
-                    f"Аргумент: {k}\n"
-                    + NormalizeCallArgumentsPass._err_ctx(file, call.line, call.offset),
+                    f"Аргумент: {k}",
+                    file,
+                    call,
                 )
                 assert False
 
             if slots[idx] is not None:
-                exit_with_code(
-                    1,
+                CompilerExit.user_error_node(
                     "Параметр передан дважды (позиционно и/или по имени).\n"
                     f"Функция: {fn.name}\n"
-                    f"Параметр: {k}\n"
-                    + NormalizeCallArgumentsPass._err_ctx(file, call.line, call.offset),
+                    f"Параметр: {k}",
+                    file,
+                    call,
                 )
                 assert False
 
@@ -244,20 +186,20 @@ class NormalizeCallArgumentsPass:
 
             d = fn.default_expr[i]
             if d is None:
-                exit_with_code(
-                    1,
+                CompilerExit.user_error_node(
                     "Не передан обязательный аргумент.\n"
                     f"Функция: {fn.name}\n"
-                    f"Параметр: {param_names[i]}\n"
-                    + NormalizeCallArgumentsPass._err_ctx(file, call.line, call.offset),
+                    f"Параметр: {param_names[i]}",
+                    file,
+                    call,
                 )
                 assert False
 
-            slots[i] = NormalizeCallArgumentsPass._clone_node_set_pos(
+            slots[i] = clone_with_pos(
                 d,
                 line=call.line,
                 offset=call.offset,
             )
 
-        call.args_p = slots  # type: ignore
+        call.args_p = slots  # type: ignore[assignment]
         call.args_kw = {}

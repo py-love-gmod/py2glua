@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ....._cli.logging_setup import exit_with_code
+from ....._cli import CompilerExit
 from ....py.ir_builder import PyIRFile
 from ....py.ir_dataclass import (
     PyIRClassDef,
@@ -99,10 +99,9 @@ class AttachDecoratorsPass:
 
     @staticmethod
     def _decorator_error(dec: PyIRDecorator, file_path: Path | None) -> None:
-        exit_with_code(
-            1,
-            "Декоратор не может быть применён к этому выражению\n"
-            f"Файл: {file_path}\n"
-            f"Строка: {dec.line}, позиция: {dec.offset}",
+        CompilerExit.user_error_node(
+            "Декоратор не может быть применён к этому выражению",
+            file_path,
+            dec,
         )
         raise AssertionError("unreachable")

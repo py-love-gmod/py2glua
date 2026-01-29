@@ -2,7 +2,7 @@ import argparse
 import shutil
 from pathlib import Path
 
-from ._cli.logging_setup import exit_with_code, log_step, logger, setup_logging
+from ._cli import CompilerExit, log_step, logger, setup_logging
 from ._lang.compiler import Compiler
 from ._lang.lua_emiter import LuaEmitter
 from .config import Py2GluaConfig
@@ -73,7 +73,7 @@ def _build(src: Path, out: Path) -> None:
     with log_step("[5/5] Генерация GLua"):
         if out.exists():
             if not out.is_dir():
-                exit_with_code(2, f"Путь build не является директорией: {out}")
+                CompilerExit.system_error(f"Путь build не является директорией: {out}")
 
             logger.debug("Очистка build директории...")
             shutil.rmtree(out)
@@ -82,7 +82,7 @@ def _build(src: Path, out: Path) -> None:
 
         for ir in project_ir:
             if ir.path is None:
-                exit_with_code(3, "Внутренняя ошибка: IR-файл без path")
+                CompilerExit.internal_error("Внутренняя ошибка: IR-файл без path")
 
             rel = ir.path.relative_to(src)  # type: ignore
             out_path = out / rel.with_suffix(".lua")
@@ -118,13 +118,17 @@ Debug  : {Py2GluaConfig.debug}
     match args.cmd:
         case "build":
             _build(Py2GluaConfig.source, Py2GluaConfig.output)
-            exit_with_code(0)
+            CompilerExit.generic(0)
 
         case "version":
             print(Py2GluaConfig.version())
-            exit_with_code(0)
+            CompilerExit.generic(0)
 
         case _:
-            exit_with_code(1, "Неизвестный параметр консоли")
+            CompilerExit.user_error(
+                "Неизвестный параметр консоли",
+                show_path=False,
+                show_pos=False,
+            )
 
-    exit_with_code(3)
+    CompilerExit.internal_error("Недостижимо")
