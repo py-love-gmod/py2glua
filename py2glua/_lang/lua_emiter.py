@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Final
 
 from .._lang.compiler.passes.analysis.symlinks import PyIRSymLink
-from .._lang.compiler.passes.lowering.rewrite_anonymous_functions import PyIRFnExpr
 from .py.ir_dataclass import (
     PyAugAssignType,
     PyBinOPType,
@@ -228,7 +227,6 @@ class LuaEmitter:
                 PyIRBinOP,
                 PyIRUnaryOP,
                 PyIRSymLink,
-                PyIRFnExpr,
             ),
         ):
             self._maybe_blankline_before("stmt", top_level=top_level)
@@ -334,41 +332,7 @@ class LuaEmitter:
         v = self._expr(node.value)
         self._wl(f"{t} = ({t} {op} {v})")
 
-    def _emit_fn_expr(self, node: PyIRFnExpr) -> str:
-        args = ", ".join(node.signature.keys())
-        lines: list[str] = [f"function({args})"]
-
-        old_buf = self._buf
-        old_indent = self._indent
-        old_prev = self._prev_top_kind
-
-        tmp: list[str] = []
-        self._buf = tmp
-        self._prev_top_kind = None
-        self._indent = 1
-
-        if not node.body:
-            self._wl("-- pass")
-
-        else:
-            for st in node.body:
-                self._stmt(st, top_level=False)
-
-        self._buf = old_buf
-        self._indent = old_indent
-        self._prev_top_kind = old_prev
-
-        body = "".join(tmp).rstrip("\n")
-        if body:
-            lines.extend(body.splitlines())
-
-        lines.append("end")
-        return "\n".join(lines)
-
     def _expr(self, node: PyIRNode) -> str:
-        if isinstance(node, PyIRFnExpr):
-            return self._emit_fn_expr(node)
-
         if isinstance(node, PyIRAttribute):
             return f"{self._expr(node.value)}.{node.attr}"
 
@@ -419,8 +383,6 @@ class LuaEmitter:
         args = ", ".join(self._expr(a) for a in node.args_p)
 
         func_s = self._expr(node.func)
-        if isinstance(node.func, PyIRFnExpr):
-            func_s = f"({func_s})"
 
         return f"{func_s}({args})"
 

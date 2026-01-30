@@ -102,7 +102,6 @@ class ImportResolver:
                     path=current_file,
                     show_pos=False,
                 )
-                raise AssertionError("unreachable")
 
             deps.update(resolved.deps)
 
@@ -122,7 +121,6 @@ class ImportResolver:
                     f"Импорт: {'.'.join(modules)}\n",
                     path=current_file,
                 )
-                raise AssertionError("unreachable")
 
             d0 = deps[0]
             if self._is_within(d0, self.project_root):
@@ -177,7 +175,6 @@ class ImportResolver:
                 path=current_file,
                 show_pos=False,
             )
-            raise AssertionError("unreachable")
 
         return sorted(deps)
 
@@ -220,7 +217,6 @@ class ImportResolver:
                 path=parent,
                 show_pos=False,
             )
-            raise AssertionError("unreachable")
 
         return sorted(deps)
 
@@ -270,7 +266,6 @@ class ImportResolver:
                 path=current_file,
                 show_pos=False,
             )
-            raise AssertionError("unreachable")
 
         return sorted(deps)
 
@@ -309,7 +304,6 @@ class ImportResolver:
                     path=current_file,
                     node=imp,
                 )
-                raise AssertionError("unreachable")
 
     def _is_internal_namespace(self, modules: list[str]) -> bool:
         return len(modules) >= 2 and (modules[0], modules[1]) == self._INTERNAL_PREFIX

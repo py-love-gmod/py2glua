@@ -70,7 +70,7 @@ def _build(src: Path, out: Path) -> None:
 
     emitter = LuaEmitter()
 
-    with log_step("[5/5] Генерация GLua"):
+    with log_step("[7/7] Генерация GLua..."):
         if out.exists():
             if not out.is_dir():
                 CompilerExit.system_error(f"Путь build не является директорией: {out}")
@@ -130,5 +130,3 @@ Debug  : {Py2GluaConfig.debug}
                 show_path=False,
                 show_pos=False,
             )
-
-    CompilerExit.internal_error("Недостижимо")

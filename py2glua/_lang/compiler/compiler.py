@@ -2,19 +2,11 @@ from __future__ import annotations
 
 from importlib import resources
 from pathlib import Path
-from typing import Iterable
 
 from ..._cli import CompilerExit, log_step
 from ...config import Py2GluaConfig
 from ..py.ir_builder import PyIRBuilder, PyIRFile
 from .import_resolver import ImportResolver
-from .passes.analysis import (
-    DisallowWithAsPass,
-    ExtractRealmDirectivePass,
-    ImportValidationPass,
-    NoInlineRecursionPass,
-    RealmDirectiveValidatePass,
-)
 from .passes.analysis.symlinks import (
     BuildScopesPass,
     CollectDefsPass,
@@ -22,15 +14,15 @@ from .passes.analysis.symlinks import (
     RewriteToSymlinksPass,
     SymLinkContext,
 )
-from .passes.lowering import (
-    NormalizeCallArgumentsPass,
-    RewriteAnonymousFunctionsPass,
-    RewriteContextManagerWithPass,
-    RewriteWithConditionPass,
-)
 from .passes.normalize import (
     AttachDecoratorsPass,
     NormalizeImportsPass,
+)
+from .passes.sanity_check import (
+    ImportSanityCheckPass,
+    RealmDirectiveSanityCheckPass,
+    RecursionSanityCheckPass,
+    WithSanityCheckPass,
 )
 
 
@@ -40,29 +32,29 @@ class Compiler:
         AttachDecoratorsPass,
     ]
 
+    sanity_check_passes = [
+        ImportSanityCheckPass,  # Запрет import внутри блоков
+        WithSanityCheckPass,  # Запрет with блоков с as
+        RealmDirectiveSanityCheckPass,  # Проверка корректности __realm__
+        RecursionSanityCheckPass,  # Запрещает рекурсию экспанд блоков
+    ]
+
+    expand_passes = []
+
     analysis_passes = [
-        ImportValidationPass,  # Валидация импортов
-        RealmDirectiveValidatePass,  # Валидация __realm__
-        ExtractRealmDirectivePass,  # Извлечение __realm__
         # === Блок simlinks
         BuildScopesPass,
         CollectDefsPass,
         ResolveUsesPass,
         RewriteToSymlinksPass,
         # ===
-        NoInlineRecursionPass,  # Запрет рекурсии некоторых инлайн подстановок
-        DisallowWithAsPass,  # Запрет with as
     ]
 
-    lowering_passes = [
-        RewriteWithConditionPass,  # with == if
-        NormalizeCallArgumentsPass,  # Нормализация аргументов
-        RewriteContextManagerWithPass,  # Замена with конструкций
-        RewriteAnonymousFunctionsPass,  # Анонимки
-    ]
+    lowering_passes = []
 
     project_passes = []
 
+    # region сборка исходников
     @classmethod
     def _validate_project(cls):
         root = Py2GluaConfig.source
@@ -97,7 +89,6 @@ class Compiler:
             CompilerExit.internal_error(
                 f"Не удалось найти internal-пакет py2glua.glua: {e}"
             )
-            raise AssertionError("unreachable")
 
         return root, internal_tr, project_files
 
@@ -149,7 +140,7 @@ class Compiler:
                             CompilerExit.internal_error(
                                 f"Сбой обхода зависимостей: {path}"
                             )
-                            raise AssertionError("unreachable")
+                            raise AssertionError("uneachable")
 
                         state[path] = VISITING
                         index_in_stack[path] = len(call_stack)
@@ -192,7 +183,6 @@ class Compiler:
                             show_path=False,
                             show_pos=False,
                         )
-                        raise AssertionError("unreachable")
 
                     if dep not in state:
                         frames.append((dep, [], 0, False))
@@ -201,6 +191,8 @@ class Compiler:
             list(project_ir.values()),
             list(internal_ir.values()),
         )
+
+    # endregion
 
     # region passes
     @classmethod
@@ -214,94 +206,78 @@ class Compiler:
 
             except Exception as e:
                 CompilerExit.internal_error(
-                    "Ошибка normalize\n"
+                    "Ошибка нормализации\n"
                     f"Файл: {ir.path}\n"
                     f"Pass: {p.__name__}\n"
                     f"Ошибка: {e}",
                 )
-                raise AssertionError("unreachable")
 
         return ir
 
     @classmethod
-    def run_analysis(
+    def _run_sanity_check(
         cls,
-        project_ir: Iterable[PyIRFile],
-        internal_ir: Iterable[PyIRFile],
+        project_ir: list,
+        internal_ir: list,
+    ) -> None:
+        for p in cls.sanity_check_passes:
+            for ir in (*internal_ir, *project_ir):
+                try:
+                    p.run(ir)
+
+                except Exception as e:
+                    CompilerExit.internal_error(
+                        "Ошибка валидации\n"
+                        f"Файл: {ir.path}\n"
+                        f"Pass: {p.__name__}\n"
+                        f"Ошибка: {e}",
+                    )
+
+    @classmethod
+    def _run_analysis(
+        cls,
+        project_ir: list,
+        internal_ir: list,
     ) -> SymLinkContext:
-        ctx = SymLinkContext()
+        slctx = SymLinkContext()
 
         for p in cls.analysis_passes:
             for ir in (*internal_ir, *project_ir):
                 try:
-                    p.run(ir, ctx)
+                    p.run(ir, slctx)
 
                 except Exception as e:
                     CompilerExit.internal_error(
-                        f"Ошибка analysis\n"
+                        f"Ошибка анализа\n"
                         f"Файл: {ir.path}\n"
                         f"Pass: {p.__name__}\n"
                         f"Ошибка: {e}",
                     )
-                    raise AssertionError("unreachable")
 
-        return ctx
-
-    @classmethod
-    def run_lowering(
-        cls,
-        project_ir: Iterable[PyIRFile],
-        internal_ir: Iterable[PyIRFile],
-        ctx: SymLinkContext,
-    ) -> None:
-        for p in cls.lowering_passes:
-            for ir in (*internal_ir, *project_ir):
-                try:
-                    p.run(ir, ctx)
-
-                except Exception as e:
-                    CompilerExit.internal_error(
-                        f"Ошибка lowering\n"
-                        f"Файл: {ir.path}\n"
-                        f"Pass: {p.__name__}\n"
-                        f"Ошибка: {e}",
-                    )
-                    raise AssertionError("unreachable")
-
-    @classmethod
-    def run_project(
-        cls,
-        project_ir: Iterable[PyIRFile],
-        internal_ir: Iterable[PyIRFile],
-        ctx: SymLinkContext,
-    ) -> None:
-        for p in cls.project_passes:
-            for ir in (internal_ir, project_ir):
-                try:
-                    p.run(ir, ctx)
-
-                except Exception as e:
-                    CompilerExit.internal_error(
-                        f"Ошибка project\nPass: {p.__name__}\nОшибка: {e}",
-                    )
-                    raise AssertionError("unreachable")
+        return slctx
 
     # endregion
 
     # public API
     @classmethod
     def build(cls) -> list[PyIRFile]:
-        with log_step("[1/5] Подготовка"):
+        with log_step("[1/7] Сборка исходников..."):
             project_ir, internal_ir = cls.build_from_src()
 
-        with log_step("[2/5] Анализ"):
-            ctx = cls.run_analysis(project_ir=project_ir, internal_ir=internal_ir)
+        with log_step("[2/7] Проверка валидности..."):
+            cls._run_sanity_check(project_ir, internal_ir)
 
-        with log_step("[3/5] Сборка"):
-            cls.run_lowering(project_ir=project_ir, internal_ir=internal_ir, ctx=ctx)
+        with log_step("[3/7] Развёртка..."):
+            pass
 
-        with log_step("[4/5] Финализация"):
-            cls.run_project(project_ir=project_ir, internal_ir=internal_ir, ctx=ctx)
+        with log_step("[4/7] Анализ..."):
+            slctx = cls._run_analysis(project_ir, internal_ir)  # noqa: F841
+
+        with log_step("[5/7] Упрощение..."):
+            pass
+
+        with log_step("[6/7] Сборка..."):
+            pass
 
         project_ir.sort(key=lambda f: str(f.path))
         return project_ir
@@ -314,8 +290,6 @@ class Compiler:
 
         except Exception:
             CompilerExit.system_error(f"Не удалось прочитать файл: {path}")
-
-        raise AssertionError("unreachable")
 
     @classmethod
     def _build_one(cls, path: Path) -> PyIRFile:
@@ -337,8 +311,6 @@ class Compiler:
             CompilerExit.internal_error(
                 f"Ошибка при построении IR для {path}: {e}",
             )
-
-        raise AssertionError("unreachable")
 
     @staticmethod
     def _format_cycle(

@@ -56,7 +56,11 @@ class AttachDecoratorsPass:
 
             if isinstance(node, PyIRIf):
                 if pending:
-                    cls._decorator_error(pending[0], file_path)
+                    CompilerExit.user_error_node(
+                        "Декоратор не может быть применён к этому выражению",
+                        file_path,
+                        pending[0],
+                    )
 
                 cls._process_block(node.body, file_path)
                 cls._process_block(node.orelse, file_path)
@@ -65,7 +69,11 @@ class AttachDecoratorsPass:
 
             if isinstance(node, PyIRFor):
                 if pending:
-                    cls._decorator_error(pending[0], file_path)
+                    CompilerExit.user_error_node(
+                        "Декоратор не может быть применён к этому выражению",
+                        file_path,
+                        pending[0],
+                    )
 
                 cls._process_block(node.body, file_path)
                 new_body.append(node)
@@ -73,7 +81,11 @@ class AttachDecoratorsPass:
 
             if isinstance(node, PyIRWhile):
                 if pending:
-                    cls._decorator_error(pending[0], file_path)
+                    CompilerExit.user_error_node(
+                        "Декоратор не может быть применён к этому выражению",
+                        file_path,
+                        pending[0],
+                    )
 
                 cls._process_block(node.body, file_path)
                 new_body.append(node)
@@ -81,27 +93,30 @@ class AttachDecoratorsPass:
 
             if isinstance(node, PyIRWith):
                 if pending:
-                    cls._decorator_error(pending[0], file_path)
+                    CompilerExit.user_error_node(
+                        "Декоратор не может быть применён к этому выражению",
+                        file_path,
+                        pending[0],
+                    )
 
                 cls._process_block(node.body, file_path)
                 new_body.append(node)
                 continue
 
             if pending:
-                cls._decorator_error(pending[0], file_path)
+                CompilerExit.user_error_node(
+                    "Декоратор не может быть применён к этому выражению",
+                    file_path,
+                    pending[0],
+                )
 
             new_body.append(node)
 
         if pending:
-            cls._decorator_error(pending[0], file_path)
+            CompilerExit.user_error_node(
+                "Декоратор не может быть применён к этому выражению",
+                file_path,
+                pending[0],
+            )
 
         body[:] = new_body
-
-    @staticmethod
-    def _decorator_error(dec: PyIRDecorator, file_path: Path | None) -> None:
-        CompilerExit.user_error_node(
-            "Декоратор не может быть применён к этому выражению",
-            file_path,
-            dec,
-        )
-        raise AssertionError("unreachable")

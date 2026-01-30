@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 from .._lang.py.ir_builder import PyIRNode
 from .logging_setup import logger
@@ -11,7 +12,7 @@ class CompilerExit:
         cls,
         code: int,
         msg: str | None = None,
-    ) -> None:
+    ) -> NoReturn:
         if msg:
             if code == 0:
                 logger.info(msg)
@@ -32,7 +33,7 @@ class CompilerExit:
         *,
         show_path: bool = True,
         show_pos: bool = True,
-    ) -> None:
+    ) -> NoReturn:
         log_msg = msg
         if show_path:
             if path is None:
@@ -56,7 +57,7 @@ class CompilerExit:
         *,
         show_path: bool = True,
         show_pos: bool = True,
-    ) -> None:
+    ) -> NoReturn:
         cls.user_error(
             msg,
             path,
@@ -73,7 +74,7 @@ class CompilerExit:
         msg: str,
         *,
         critical: bool = False,
-    ) -> None:
+    ) -> NoReturn:
         if critical:
             logger.critical(msg)
         else:
@@ -83,9 +84,9 @@ class CompilerExit:
         sys.exit(code)
 
     @classmethod
-    def system_error(cls, msg: str, is_critical: bool = False) -> None:
+    def system_error(cls, msg: str, is_critical: bool = False) -> NoReturn:
         cls._exit_with_log(2, msg, critical=is_critical)
 
     @classmethod
-    def internal_error(cls, msg: str, is_critical: bool = False) -> None:
+    def internal_error(cls, msg: str, is_critical: bool = False) -> NoReturn:
         cls._exit_with_log(3, msg, critical=is_critical)
