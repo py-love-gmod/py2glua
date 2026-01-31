@@ -14,6 +14,13 @@ from .passes.analysis.symlinks import (
     RewriteToSymlinksPass,
     SymLinkContext,
 )
+from .passes.expand import (
+    CollectContextManagersPass,
+    CollectLocalSignaturesPass,
+    ExpandContext,
+    NormalizeCallArgumentsPass,
+    RewriteWithContextManagerPass,
+)
 from .passes.normalize import (
     AttachDecoratorsPass,
     NormalizeImportsPass,
@@ -39,7 +46,12 @@ class Compiler:
         RecursionSanityCheckPass,  # Запрещает рекурсию экспанд блоков
     ]
 
-    expand_passes = []
+    expand_passes = [
+        CollectLocalSignaturesPass,  # kwargs args нормализация
+        NormalizeCallArgumentsPass,  # kwargs args нормализация
+        CollectContextManagersPass,  # with развёртка
+        RewriteWithContextManagerPass,  # with развёртка
+    ]
 
     analysis_passes = [
         # === Блок simlinks
@@ -234,6 +246,27 @@ class Compiler:
                     )
 
     @classmethod
+    def _run_expand(
+        cls,
+        project_ir: list,
+        internal_ir: list,
+    ) -> None:
+        ectx = ExpandContext()
+
+        for p in cls.expand_passes:
+            for ir in (*internal_ir, *project_ir):
+                try:
+                    ir = p.run(ir, ectx)
+
+                except Exception as e:
+                    CompilerExit.internal_error(
+                        "Ошибка развёртки\n"
+                        f"Файл: {ir.path}\n"
+                        f"Pass: {p.__name__}\n"
+                        f"Ошибка: {e}",
+                    )
+
+    @classmethod
     def _run_analysis(
         cls,
         project_ir: list,
@@ -268,7 +301,7 @@ class Compiler:
             cls._run_sanity_check(project_ir, internal_ir)
 
         with log_step("[3/7] Развёртка..."):
-            pass
+            cls._run_expand(project_ir, internal_ir)
 
         with log_step("[4/7] Анализ..."):
             slctx = cls._run_analysis(project_ir, internal_ir)  # noqa: F841
