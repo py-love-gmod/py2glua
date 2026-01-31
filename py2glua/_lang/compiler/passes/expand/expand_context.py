@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Tuple
 
 from ....py.ir_dataclass import PyIRFunctionDef, PyIRNode
+from ...compiler_ir import PyIRFunctionExpr
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,7 @@ class FnSig:
     params: Tuple[str, ...]
     defaults: Dict[str, PyIRNode]
 
+
 @dataclass(frozen=True)
 class InlineTemplate:
     fn: PyIRFunctionDef
@@ -32,6 +34,8 @@ class ExpandContext:
     fn_sigs: Dict[str, FnSig] = field(default_factory=dict)
 
     inline_templates: Dict[str, InlineTemplate] = field(default_factory=dict)
+
+    anonymous_templates: Dict[str, PyIRFunctionExpr] = field(default_factory=dict)
 
     tmp_counter: int = 0
 

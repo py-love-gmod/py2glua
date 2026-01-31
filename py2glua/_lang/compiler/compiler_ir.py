@@ -44,3 +44,21 @@ class PyIRGoto(PyIRNode):
 
     def walk(self):
         yield self
+
+
+@dataclass
+class PyIRFunctionExpr(PyIRNode):
+    """
+    Lua function literal (expression):
+        function(args) ... end
+
+    signature: как у PyIRFunctionDef.signature
+    """
+
+    signature: dict[str, tuple[str | None, PyIRNode | None]]
+    body: list[PyIRNode] = field(default_factory=list)
+
+    def walk(self):
+        yield self
+        for n in self.body:
+            yield from n.walk()

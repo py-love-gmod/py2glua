@@ -20,6 +20,7 @@ from ....py.ir_dataclass import (
     PyIRVarUse,
     PyIRWithItem,
 )
+from ...compiler_ir import PyIRFunctionExpr
 
 
 # IR-нода симлинка
@@ -286,7 +287,6 @@ class BuildScopesPass:
         if ir.path is not None:
             ctx._all_paths.add(ir.path)
 
-        # стабилизируем uid заранее
         for n in ir.walk():
             ctx.uid(n)
 
@@ -294,6 +294,31 @@ class BuildScopesPass:
         file_uid = ctx.uid(ir)
         ctx.node_scope[file_uid] = file_scope
         ctx.file_scope[file_uid] = file_scope
+
+        def iter_children_direct(node: PyIRNode):
+            if not is_dataclass(node):
+                return
+
+            for f in fields(node):
+                v = getattr(node, f.name)
+
+                if isinstance(v, PyIRNode):
+                    yield v
+                    continue
+
+                if isinstance(v, list):
+                    for x in v:
+                        if isinstance(x, PyIRNode):
+                            yield x
+
+                    continue
+
+                if isinstance(v, dict):
+                    for x in v.values():
+                        if isinstance(x, PyIRNode):
+                            yield x
+
+                    continue
 
         def walk(node: PyIRNode, scope: ScopeId) -> None:
             node_uid = ctx.uid(node)
@@ -305,6 +330,15 @@ class BuildScopesPass:
 
                 for d in node.decorators:
                     walk(d, scope)
+
+                for b in node.body:
+                    walk(b, body_scope)
+
+                return
+
+            if isinstance(node, PyIRFunctionExpr):
+                body_scope = ctx.new_scope(parent=scope, file=ir.path, kind="function")
+                ctx.fn_body_scope[node_uid] = body_scope
 
                 for b in node.body:
                     walk(b, body_scope)
@@ -323,13 +357,9 @@ class BuildScopesPass:
 
                 for n2 in node.body:
                     walk(n2, body_scope)
-
                 return
 
-            for ch in node.walk():
-                if ch is node:
-                    continue
-
+            for ch in iter_children_direct(node):
                 walk(ch, scope)
 
         for n in ir.body:
@@ -383,6 +413,14 @@ class CollectDefsPass:
 
                 continue
 
+            if isinstance(node, PyIRFunctionExpr):
+                fn_uid = ctx.uid(node)
+                body_scope = ctx.fn_body_scope.get(fn_uid, sc)
+                for arg in node.signature.keys():
+                    define(body_scope, arg, node)
+
+                continue
+
             if isinstance(node, PyIRClassDef):
                 define(sc, node.name, node)
                 continue
@@ -390,6 +428,7 @@ class CollectDefsPass:
             if isinstance(node, PyIRAssign):
                 for t in node.targets:
                     define_if_simple_name(sc, t)
+
                 continue
 
             if isinstance(node, PyIRAugAssign):
@@ -403,6 +442,7 @@ class CollectDefsPass:
             if isinstance(node, PyIRWithItem):
                 if node.optional_vars is not None:
                     define_if_simple_name(sc, node.optional_vars)
+
                 continue
 
             if isinstance(node, PyIRImport):
@@ -417,7 +457,7 @@ class CollectDefsPass:
                 continue
 
 
-# Pass 3: resolve VarUse (best-effort)
+# Pass 3: resolve VarUse
 class ResolveUsesPass:
     @staticmethod
     def run(ir: PyIRFile, ctx: SymLinkContext) -> None:
@@ -436,7 +476,7 @@ class ResolveUsesPass:
             ctx.var_links[uid] = link
 
 
-# Pass 4: rewrite + collapse qualified attrs to module exports
+# Pass 4: rewrite + collapse attrs to exports
 class RewriteToSymlinksPass:
     @staticmethod
     def run(ir: PyIRFile, ctx: SymLinkContext) -> PyIRFile:
@@ -490,7 +530,6 @@ class RewriteToSymlinksPass:
             if len(parts) < 2:
                 return n
 
-            # module = parts[:j], export = parts[j], rest = parts[j+1:]
             for j in range(len(parts) - 1, 0, -1):
                 module = ".".join(parts[:j])
                 export = parts[j]
@@ -504,8 +543,6 @@ class RewriteToSymlinksPass:
                 if target is None:
                     continue
 
-                # guard: не делаем module.export -> sym(export), если module.export является модулем
-                # и у нас есть хвост (иначе получим <sym x>.GG)
                 next_module = f"{module}.{export}"
                 if rest and next_module in ctx.module_exports:
                     continue
@@ -530,7 +567,6 @@ class RewriteToSymlinksPass:
             return n
 
         def rw(node: PyIRNode, *, store: bool) -> PyIRNode:
-            # VarUse -> SymLink
             if isinstance(node, PyIRVarUse):
                 uid = ctx.uid(node)
                 link = ctx.var_links.get(uid)
@@ -549,19 +585,16 @@ class RewriteToSymlinksPass:
                     decl_line=sym.decl_line,
                 )
 
-            # Attribute: сначала переписываем базу, потом пробуем схлопнуть
             if isinstance(node, PyIRAttribute):
                 node.value = rw(node.value, store=False)
                 return try_collapse_attr(node)
 
-            # Call: чтобы func тоже переписывался
             if isinstance(node, PyIRCall):
                 node.func = rw(node.func, store=False)
                 node.args_p = [rw(a, store=False) for a in node.args_p]
                 node.args_kw = {k: rw(v, store=False) for k, v in node.args_kw.items()}
                 return node
 
-            # store-context nodes
             if isinstance(node, PyIRAssign):
                 node.targets = [rw(t, store=True) for t in node.targets]
                 node.value = rw(node.value, store=False)
@@ -582,22 +615,23 @@ class RewriteToSymlinksPass:
                 node.context_expr = rw(node.context_expr, store=False)
                 if node.optional_vars is not None:
                     node.optional_vars = rw(node.optional_vars, store=True)
-
                 return node
 
-            # function/class
             if isinstance(node, PyIRFunctionDef):
-                node.decorators = [rw(d, store=False) for d in node.decorators]  # pyright: ignore[reportAttributeAccessIssue]
+                node.decorators = [rw(d, store=False) for d in node.decorators]  # pyright: ignore
+                node.body = [rw(n, store=False) for n in node.body]
+                return node
+
+            if isinstance(node, PyIRFunctionExpr):
                 node.body = [rw(n, store=False) for n in node.body]
                 return node
 
             if isinstance(node, PyIRClassDef):
-                node.decorators = [rw(d, store=False) for d in node.decorators]  # pyright: ignore[reportAttributeAccessIssue]
+                node.decorators = [rw(d, store=False) for d in node.decorators]  # pyright: ignore
                 node.bases = [rw(b, store=False) for b in node.bases]
                 node.body = [rw(n, store=False) for n in node.body]
                 return node
 
-            # generic dataclass recursion
             if is_dataclass(node):
                 for f in fields(node):
                     v = getattr(node, f.name)

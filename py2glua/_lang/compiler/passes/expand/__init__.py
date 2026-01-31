@@ -1,3 +1,4 @@
+from .anonymous import CollectAnonymousFunctionsPass, RewriteAnonymousFunctionsPass
 from .context_manager import CollectContextManagersPass, RewriteWithContextManagerPass
 from .expand_context import ExpandContext
 from .inline import CollectInlineFunctionsPass, RewriteInlineCallsPass

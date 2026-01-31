@@ -37,7 +37,16 @@ class ReturnBuilder:
         expr = StatementBuilder._parse_expression(stream)
 
         if not stream.eof():
-            raise SyntaxError("Invalid expression in return")
+            from ...._cli import CompilerExit
+
+            CompilerExit.user_error(
+                "Неподдерживаемое выражение в return.\n"
+                "Вероятно, используется форма, которая пока не поддерживается ",
+                path=None,
+                line=line,
+                offset=col,
+                show_path=False,
+            )
 
         return [
             PyIRReturn(

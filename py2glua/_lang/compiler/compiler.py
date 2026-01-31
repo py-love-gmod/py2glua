@@ -15,11 +15,13 @@ from .passes.analysis.symlinks import (
     SymLinkContext,
 )
 from .passes.expand import (
+    CollectAnonymousFunctionsPass,
     CollectContextManagersPass,
     CollectInlineFunctionsPass,
     CollectLocalSignaturesPass,
     ExpandContext,
     NormalizeCallArgumentsPass,
+    RewriteAnonymousFunctionsPass,
     RewriteInlineCallsPass,
     RewriteWithContextManagerPass,
 )
@@ -55,6 +57,8 @@ class Compiler:
         RewriteWithContextManagerPass,  # with развёртка
         CollectInlineFunctionsPass,  # inline
         RewriteInlineCallsPass,  # inline
+        CollectAnonymousFunctionsPass,  # anonymous обработка
+        RewriteAnonymousFunctionsPass,  # anonymous обработка
     ]
 
     analysis_passes = [

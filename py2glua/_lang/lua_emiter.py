@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from .._lang.compiler.passes.analysis.symlinks import PyIRSymLink
-from .compiler.compiler_ir import PyIRDo, PyIRGoto, PyIRLabel
+from .compiler.compiler_ir import PyIRDo, PyIRFunctionExpr, PyIRGoto, PyIRLabel
 from .py.ir_dataclass import (
     PyAugAssignType,
     PyBinOPType,
@@ -184,7 +184,6 @@ class LuaEmitter:
             self._blankline_after_block()
             return
 
-        # === Lua-control nodes (inline support) ===
         if isinstance(node, PyIRDo):
             self._maybe_blankline_before("ctrl", top_level=top_level)
             self._emit_do(node)
@@ -201,7 +200,6 @@ class LuaEmitter:
             self._wl(f"goto {node.label}")
             return
 
-        # === Control flow ===
         if isinstance(node, PyIRIf):
             self._maybe_blankline_before("ctrl", top_level=top_level)
             self._emit_if(node)
@@ -219,11 +217,10 @@ class LuaEmitter:
 
         if isinstance(node, PyIRReturn):
             self._maybe_blankline_before("stmt", top_level=top_level)
-            val = getattr(node, "value", None)
-            if val is None:
+            if node.value is None:
                 self._wl("return")
             else:
-                self._wl(f"return {self._expr(val)}")
+                self._wl(f"return {self._expr(node.value)}")
             return
 
         if isinstance(node, PyIRBreak):
@@ -241,7 +238,6 @@ class LuaEmitter:
             self._wl(self._leak("with-statement"))
             return
 
-        # expression-as-statement
         if isinstance(
             node,
             (
@@ -252,6 +248,7 @@ class LuaEmitter:
                 PyIRBinOP,
                 PyIRUnaryOP,
                 PyIRSymLink,
+                PyIRFunctionExpr,
             ),
         ):
             self._maybe_blankline_before("stmt", top_level=top_level)
@@ -401,13 +398,33 @@ class LuaEmitter:
         if isinstance(node, PyIRTuple):
             return self._emit_tuple(node)
 
+        if isinstance(node, PyIRFunctionExpr):
+            return self._emit_function_expr(node)
+
         return self._leak(type(node).__name__)
+
+    def _emit_function_expr(self, fn: PyIRFunctionExpr) -> str:
+        args = ", ".join(fn.signature.keys())
+        if not fn.body:
+            return f"function({args}) end"
+
+        sub = LuaEmitter()
+        sub._indent = 1
+        for st in fn.body:
+            sub._stmt(st, top_level=False)
+
+        body = "".join(sub._buf).rstrip("\n")
+        return f"function({args})\n{body}\nend"
 
     def _call(self, node: PyIRCall) -> str:
         if node.args_kw:
             return self._leak("call with kwargs")
 
         args = ", ".join(self._expr(a) for a in node.args_p)
+
+        if isinstance(node.func, PyIRFunctionExpr):
+            return f"({self._expr(node.func)})({args})"
+
         func_s = self._expr(node.func)
         return f"{func_s}({args})"
 
