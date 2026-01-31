@@ -1,0 +1,621 @@
+from __future__ import annotations
+
+from copy import deepcopy
+from dataclasses import fields, is_dataclass
+from typing import Dict, List, Set, Tuple
+
+from .....glua.core.types import nil
+from ....py.ir_dataclass import (
+    PyIRAssign,
+    PyIRAttribute,
+    PyIRCall,
+    PyIRConstant,
+    PyIRDecorator,
+    PyIRFile,
+    PyIRFor,
+    PyIRFunctionDef,
+    PyIRIf,
+    PyIRNode,
+    PyIRReturn,
+    PyIRVarUse,
+    PyIRWhile,
+    PyIRWith,
+)
+from ...compiler_ir import PyIRDo, PyIRGoto, PyIRLabel
+from .expand_context import ExpandContext, InlineTemplate
+
+_CD_PREFIX = (
+    "py2glua",
+    "glua",
+    "core",
+    "compiler_directive",
+    "CompilerDirective",
+)
+
+
+def _attr_chain_parts(node: PyIRNode) -> List[str] | None:
+    names_rev: List[str] = []
+    cur: PyIRNode = node
+
+    while isinstance(cur, PyIRAttribute):
+        names_rev.append(cur.attr)
+        cur = cur.value
+
+    if not isinstance(cur, PyIRVarUse):
+        return None
+
+    names_rev.append(cur.name)
+    names_rev.reverse()
+    return names_rev
+
+
+def _is_compiler_directive_attr(attr: PyIRAttribute, *, method: str) -> bool:
+    if attr.attr != method:
+        return False
+
+    parts = _attr_chain_parts(attr.value)
+    if parts is None:
+        return False
+
+    return tuple(parts) == _CD_PREFIX
+
+
+def _compiler_directive_kind(dec: PyIRDecorator) -> str | None:
+    expr = dec.exper
+
+    if isinstance(expr, PyIRAttribute):
+        if _is_compiler_directive_attr(expr, method="inline"):
+            return "inline"
+
+        return None
+
+    if isinstance(expr, PyIRCall):
+        f = expr.func
+        if isinstance(f, PyIRAttribute):
+            if _is_compiler_directive_attr(f, method="inline"):
+                return "inline"
+
+        return None
+
+    return None
+
+
+def _collect_target_names(node: PyIRNode, out: Set[str]) -> None:
+    if isinstance(node, PyIRVarUse):
+        out.add(node.name)
+
+
+def _collect_locals_in_body(stmts: List[PyIRNode], out: Set[str]) -> None:
+    for st in stmts:
+        if isinstance(st, PyIRAssign):
+            for t in st.targets:
+                _collect_target_names(t, out)
+            continue
+
+        if isinstance(st, PyIRFor):
+            _collect_target_names(st.target, out)
+            _collect_locals_in_body(st.body, out)
+            continue
+
+        if isinstance(st, PyIRIf):
+            _collect_locals_in_body(st.body, out)
+            _collect_locals_in_body(st.orelse, out)
+            continue
+
+        if isinstance(st, PyIRWhile):
+            _collect_locals_in_body(st.body, out)
+            continue
+
+        if isinstance(st, PyIRWith):
+            _collect_locals_in_body(st.body, out)
+            continue
+
+        if isinstance(st, PyIRFunctionDef):
+            continue
+
+
+class CollectInlineFunctionsPass:
+    @staticmethod
+    def run(ir: PyIRFile, ctx: ExpandContext) -> None:
+        for st in ir.body:
+            if not isinstance(st, PyIRFunctionDef):
+                continue
+
+            if not any(_compiler_directive_kind(d) == "inline" for d in st.decorators):
+                continue
+
+            params = tuple(st.signature.keys())
+
+            locals_set: Set[str] = set(params)
+            _collect_locals_in_body(st.body, locals_set)
+
+            ctx.inline_templates[st.name] = InlineTemplate(
+                fn=st,
+                params=params,
+                locals=tuple(sorted(locals_set)),
+            )
+
+
+def _mk_var(name: str, ref: PyIRNode) -> PyIRVarUse:
+    return PyIRVarUse(line=ref.line, offset=ref.offset, name=name)
+
+
+def _mk_assign(target: PyIRNode, value: PyIRNode, ref: PyIRNode) -> PyIRAssign:
+    return PyIRAssign(
+        line=ref.line,
+        offset=ref.offset,
+        targets=[target],
+        value=value,
+    )
+
+
+def _mk_nil(ref: PyIRNode) -> PyIRConstant:
+    return PyIRConstant(line=ref.line, offset=ref.offset, value=nil)
+
+
+def _mk_do(body: List[PyIRNode], ref: PyIRNode) -> PyIRDo:
+    return PyIRDo(line=ref.line, offset=ref.offset, body=body)
+
+
+def _mk_label(name: str, ref: PyIRNode) -> PyIRLabel:
+    return PyIRLabel(line=ref.line, offset=ref.offset, name=name)
+
+
+def _mk_goto(label: str, ref: PyIRNode) -> PyIRGoto:
+    return PyIRGoto(line=ref.line, offset=ref.offset, label=label)
+
+
+def _rename_vars(node: PyIRNode, rename: Dict[str, str]) -> PyIRNode:
+    if isinstance(node, PyIRVarUse):
+        nn = rename.get(node.name)
+        if nn is None:
+            return deepcopy(node)
+
+        return PyIRVarUse(line=node.line, offset=node.offset, name=nn)
+
+    if not is_dataclass(node):
+        return deepcopy(node)
+
+    kw = {}
+    for f in fields(node):
+        v = getattr(node, f.name)
+
+        if isinstance(v, PyIRNode):
+            kw[f.name] = _rename_vars(v, rename)
+            continue
+
+        if isinstance(v, list) and v and all(isinstance(x, PyIRNode) for x in v):
+            kw[f.name] = [_rename_vars(x, rename) for x in v]
+            continue
+
+        if (
+            isinstance(v, dict)
+            and v
+            and all(isinstance(x, PyIRNode) for x in v.values())
+        ):
+            kw[f.name] = {k: _rename_vars(x, rename) for k, x in v.items()}
+            continue
+
+        kw[f.name] = deepcopy(v)
+
+    return type(node)(**kw)
+
+
+def _has_any_return(stmts: List[PyIRNode]) -> bool:
+    for st in stmts:
+        if isinstance(st, PyIRReturn):
+            return True
+
+        if isinstance(st, PyIRIf):
+            if _has_any_return(st.body) or _has_any_return(st.orelse):
+                return True
+
+        elif isinstance(st, PyIRWhile):
+            if _has_any_return(st.body):
+                return True
+
+        elif isinstance(st, PyIRFor):
+            if _has_any_return(st.body):
+                return True
+
+        elif isinstance(st, PyIRWith):
+            if _has_any_return(st.body):
+                return True
+
+    return False
+
+
+def _has_return_inside_nested(stmts: List[PyIRNode]) -> bool:
+    for st in stmts:
+        if isinstance(st, PyIRReturn):
+            return True
+
+        if isinstance(st, PyIRIf):
+            if _has_return_inside_nested(st.body) or _has_return_inside_nested(
+                st.orelse
+            ):
+                return True
+
+        elif isinstance(st, PyIRWhile):
+            if _has_return_inside_nested(st.body):
+                return True
+
+        elif isinstance(st, PyIRFor):
+            if _has_return_inside_nested(st.body):
+                return True
+
+        elif isinstance(st, PyIRWith):
+            if _has_return_inside_nested(st.body):
+                return True
+
+    return False
+
+
+def _needs_label(stmts: List[PyIRNode]) -> bool:
+    for i, st in enumerate(stmts):
+        if isinstance(st, PyIRReturn):
+            if i != len(stmts) - 1:
+                return True
+
+        if isinstance(st, PyIRIf):
+            if _has_return_inside_nested(st.body) or _has_return_inside_nested(
+                st.orelse
+            ):
+                return True
+
+        elif isinstance(st, PyIRWhile):
+            if _has_return_inside_nested(st.body):
+                return True
+
+        elif isinstance(st, PyIRFor):
+            if _has_return_inside_nested(st.body):
+                return True
+
+        elif isinstance(st, PyIRWith):
+            if _has_return_inside_nested(st.body):
+                return True
+
+    return False
+
+
+def _rewrite_returns_no_label(
+    stmts: List[PyIRNode],
+    *,
+    ret_store: PyIRNode | None,
+    ref: PyIRNode,
+) -> List[PyIRNode]:
+    out: List[PyIRNode] = []
+    for st in stmts:
+        if isinstance(st, PyIRReturn):
+            if ret_store is not None:
+                out.append(_mk_assign(ret_store, deepcopy(st.value), ref))
+
+            continue
+
+        out.append(st)
+
+    return out
+
+
+def _rewrite_returns_with_label(
+    stmts: List[PyIRNode],
+    *,
+    ret_store: PyIRNode | None,
+    end_label: str,
+    ref: PyIRNode,
+    top_level: bool,
+) -> List[PyIRNode]:
+    out: List[PyIRNode] = []
+
+    for st in stmts:
+        if isinstance(st, PyIRReturn):
+            if ret_store is not None:
+                out.append(_mk_assign(ret_store, deepcopy(st.value), ref))
+
+            out.append(_mk_goto(end_label, ref))
+            continue
+
+        if isinstance(st, PyIRIf):
+            st.body = _rewrite_returns_with_label(
+                st.body,
+                ret_store=ret_store,
+                end_label=end_label,
+                ref=ref,
+                top_level=False,
+            )
+            st.orelse = _rewrite_returns_with_label(
+                st.orelse,
+                ret_store=ret_store,
+                end_label=end_label,
+                ref=ref,
+                top_level=False,
+            )
+            out.append(st)
+            continue
+
+        if isinstance(st, PyIRWhile):
+            st.body = _rewrite_returns_with_label(
+                st.body,
+                ret_store=ret_store,
+                end_label=end_label,
+                ref=ref,
+                top_level=False,
+            )
+            out.append(st)
+            continue
+
+        if isinstance(st, PyIRFor):
+            st.body = _rewrite_returns_with_label(
+                st.body,
+                ret_store=ret_store,
+                end_label=end_label,
+                ref=ref,
+                top_level=False,
+            )
+            out.append(st)
+            continue
+
+        if isinstance(st, PyIRWith):
+            st.body = _rewrite_returns_with_label(
+                st.body,
+                ret_store=ret_store,
+                end_label=end_label,
+                ref=ref,
+                top_level=False,
+            )
+            out.append(st)
+            continue
+
+        out.append(st)
+
+    if (
+        top_level
+        and out
+        and isinstance(out[-1], PyIRGoto)
+        and out[-1].label == end_label
+    ):
+        out.pop()
+
+    return out
+
+
+class RewriteInlineCallsPass:
+    @staticmethod
+    def run(ir: PyIRFile, ctx: ExpandContext) -> PyIRFile:
+        ir.body = RewriteInlineCallsPass._rewrite_stmt_list(ir, ir.body, ctx)
+        return ir
+
+    @staticmethod
+    def _rewrite_stmt_list(
+        ir: PyIRFile, stmts: List[PyIRNode], ctx: ExpandContext
+    ) -> List[PyIRNode]:
+        out: List[PyIRNode] = []
+        for st in stmts:
+            out.extend(RewriteInlineCallsPass._rewrite_stmt(ir, st, ctx))
+
+        return out
+
+    @staticmethod
+    def _rewrite_stmt(ir: PyIRFile, st: PyIRNode, ctx: ExpandContext) -> List[PyIRNode]:
+        if isinstance(st, PyIRIf):
+            pro, test = RewriteInlineCallsPass._rewrite_expr(ir, st.test, ctx)
+            st.test = test
+            st.body = RewriteInlineCallsPass._rewrite_stmt_list(ir, st.body, ctx)
+            st.orelse = RewriteInlineCallsPass._rewrite_stmt_list(ir, st.orelse, ctx)
+            return pro + [st]
+
+        if isinstance(st, PyIRWhile):
+            pro, test = RewriteInlineCallsPass._rewrite_expr(ir, st.test, ctx)
+            st.test = test
+            st.body = RewriteInlineCallsPass._rewrite_stmt_list(ir, st.body, ctx)
+            return pro + [st]
+
+        if isinstance(st, PyIRFor):
+            pro_iter, it = RewriteInlineCallsPass._rewrite_expr(ir, st.iter, ctx)
+            st.iter = it
+            st.body = RewriteInlineCallsPass._rewrite_stmt_list(ir, st.body, ctx)
+            return pro_iter + [st]
+
+        if isinstance(st, PyIRWith):
+            pro: List[PyIRNode] = []
+            for item in st.items:
+                p, e = RewriteInlineCallsPass._rewrite_expr(ir, item.context_expr, ctx)
+                pro.extend(p)
+                item.context_expr = e
+
+            st.body = RewriteInlineCallsPass._rewrite_stmt_list(ir, st.body, ctx)
+            return pro + [st]
+
+        if isinstance(st, PyIRFunctionDef):
+            st.body = RewriteInlineCallsPass._rewrite_stmt_list(ir, st.body, ctx)
+            return [st]
+
+        if (
+            isinstance(st, PyIRAssign)
+            and len(st.targets) == 1
+            and isinstance(st.targets[0], PyIRVarUse)
+        ):
+            t0 = st.targets[0]
+            if isinstance(st.value, PyIRCall):
+                inl = RewriteInlineCallsPass._maybe_inline_assign_into_target(
+                    st.value, ctx, target=t0
+                )
+                if inl is not None:
+                    return inl
+
+            pro, v = RewriteInlineCallsPass._rewrite_expr(ir, st.value, ctx)
+            st.value = v
+            return pro + [st]
+
+        if isinstance(st, PyIRAssign):
+            pro, v = RewriteInlineCallsPass._rewrite_expr(ir, st.value, ctx)
+            st.value = v
+            return pro + [st]
+
+        if isinstance(st, PyIRReturn):
+            pro, v = RewriteInlineCallsPass._rewrite_expr(ir, st.value, ctx)
+            st.value = v
+            return pro + [st]
+
+        if isinstance(st, PyIRCall):
+            inl = RewriteInlineCallsPass._maybe_inline_stmt(st, ctx)
+            if inl is not None:
+                return inl
+
+            pro, expr = RewriteInlineCallsPass._rewrite_expr(ir, st, ctx)
+            return pro + [expr]
+
+        return [st]
+
+    @staticmethod
+    def _rewrite_expr(
+        ir: PyIRFile, expr: PyIRNode, ctx: ExpandContext
+    ) -> Tuple[List[PyIRNode], PyIRNode]:
+        if isinstance(expr, PyIRCall):
+            return RewriteInlineCallsPass._maybe_inline_expr(expr, ctx)
+
+        if not is_dataclass(expr):
+            return [], expr
+
+        pro: List[PyIRNode] = []
+        for f in fields(expr):
+            v = getattr(expr, f.name)
+
+            if isinstance(v, PyIRNode):
+                p, nv = RewriteInlineCallsPass._rewrite_expr(ir, v, ctx)
+                pro.extend(p)
+                setattr(expr, f.name, nv)
+                continue
+
+            if isinstance(v, list) and v and all(isinstance(x, PyIRNode) for x in v):
+                new_list: List[PyIRNode] = []
+                for x in v:
+                    p, nx = RewriteInlineCallsPass._rewrite_expr(ir, x, ctx)
+                    pro.extend(p)
+                    new_list.append(nx)
+
+                setattr(expr, f.name, new_list)
+                continue
+
+            if (
+                isinstance(v, dict)
+                and v
+                and all(isinstance(x, PyIRNode) for x in v.values())
+            ):
+                new_dict: Dict[str, PyIRNode] = {}
+                for k, x in v.items():
+                    p, nx = RewriteInlineCallsPass._rewrite_expr(ir, x, ctx)
+                    pro.extend(p)
+                    new_dict[k] = nx
+
+                setattr(expr, f.name, new_dict)
+                continue
+
+        return pro, expr
+
+    @staticmethod
+    def _maybe_inline_stmt(call: PyIRCall, ctx: ExpandContext) -> List[PyIRNode] | None:
+        if not isinstance(call.func, PyIRVarUse):
+            return None
+
+        tmpl = ctx.inline_templates.get(call.func.name)
+        if tmpl is None:
+            return None
+
+        block = RewriteInlineCallsPass._build_inline_do(call, ctx, tmpl, ret_store=None)
+        return [block]
+
+    @staticmethod
+    def _maybe_inline_assign_into_target(
+        call: PyIRCall, ctx: ExpandContext, *, target: PyIRVarUse
+    ) -> List[PyIRNode] | None:
+        if not isinstance(call.func, PyIRVarUse):
+            return None
+
+        tmpl = ctx.inline_templates.get(call.func.name)
+        if tmpl is None:
+            return None
+
+        pre = [_mk_assign(target, _mk_nil(call), call)]
+        block = RewriteInlineCallsPass._build_inline_do(
+            call, ctx, tmpl, ret_store=target
+        )
+        return pre + [block]  # type: ignore
+
+    @staticmethod
+    def _maybe_inline_expr(
+        call: PyIRCall, ctx: ExpandContext
+    ) -> Tuple[List[PyIRNode], PyIRNode]:
+        if not isinstance(call.func, PyIRVarUse):
+            return [], call
+
+        tmpl = ctx.inline_templates.get(call.func.name)
+        if tmpl is None:
+            return [], call
+
+        tmp = ctx.new_tmp_name()
+        tmp_var = _mk_var(tmp, call)
+
+        pre = [_mk_assign(tmp_var, _mk_nil(call), call)]
+        block = RewriteInlineCallsPass._build_inline_do(
+            call, ctx, tmpl, ret_store=tmp_var
+        )
+        return pre + [block], tmp_var  # type: ignore
+
+    @staticmethod
+    def _build_inline_do(
+        call: PyIRCall,
+        ctx: ExpandContext,
+        tmpl: InlineTemplate,
+        *,
+        ret_store: PyIRNode | None,
+    ) -> PyIRDo:
+        prefix = ctx.new_inline_prefix()
+        rename: Dict[str, str] = {name: f"{prefix}_{name}" for name in tmpl.locals}
+
+        body = [_rename_vars(deepcopy(st), rename) for st in tmpl.fn.body]
+        do_body: List[PyIRNode] = []
+
+        param_set = set(tmpl.params)
+        for name in tmpl.locals:
+            if name in param_set:
+                continue
+
+            do_body.append(_mk_assign(_mk_var(rename[name], call), _mk_nil(call), call))
+
+        args_p = call.args_p
+        args_kw = call.args_kw
+
+        for i, p in enumerate(tmpl.params):
+            arg = None
+            if i < len(args_p):
+                arg = args_p[i]
+
+            elif p in args_kw:
+                arg = args_kw[p]
+
+            if arg is None:
+                continue
+
+            do_body.append(_mk_assign(_mk_var(rename[p], call), deepcopy(arg), call))
+
+        if not _has_any_return(body):
+            do_body.extend(body)
+            return _mk_do(do_body, call)
+
+        if _needs_label(body):
+            end_label = f"{prefix}_end"
+            do_body.extend(
+                _rewrite_returns_with_label(
+                    body,
+                    ret_store=ret_store,
+                    end_label=end_label,
+                    ref=call,
+                    top_level=True,
+                )
+            )
+            do_body.append(_mk_label(end_label, call))
+            return _mk_do(do_body, call)
+
+        do_body.extend(_rewrite_returns_no_label(body, ret_store=ret_store, ref=call))
+        return _mk_do(do_body, call)

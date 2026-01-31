@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Tuple
 
-from ....py.ir_dataclass import PyIRNode
+from ....py.ir_dataclass import PyIRFunctionDef, PyIRNode
 
 
 @dataclass(frozen=True)
@@ -19,14 +19,26 @@ class FnSig:
     params: Tuple[str, ...]
     defaults: Dict[str, PyIRNode]
 
+@dataclass(frozen=True)
+class InlineTemplate:
+    fn: PyIRFunctionDef
+    params: Tuple[str, ...]
+    locals: Tuple[str, ...]
+
 
 @dataclass
 class ExpandContext:
     cm_templates: Dict[str, ContextManagerTemplate] = field(default_factory=dict)
     fn_sigs: Dict[str, FnSig] = field(default_factory=dict)
 
+    inline_templates: Dict[str, InlineTemplate] = field(default_factory=dict)
+
     tmp_counter: int = 0
 
     def new_tmp_name(self) -> str:
         self.tmp_counter += 1
         return f"__tmp_{self.tmp_counter}"
+
+    def new_inline_prefix(self) -> str:
+        self.tmp_counter += 1
+        return f"__inl_{self.tmp_counter}"

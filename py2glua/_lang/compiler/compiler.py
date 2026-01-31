@@ -16,9 +16,11 @@ from .passes.analysis.symlinks import (
 )
 from .passes.expand import (
     CollectContextManagersPass,
+    CollectInlineFunctionsPass,
     CollectLocalSignaturesPass,
     ExpandContext,
     NormalizeCallArgumentsPass,
+    RewriteInlineCallsPass,
     RewriteWithContextManagerPass,
 )
 from .passes.normalize import (
@@ -51,6 +53,8 @@ class Compiler:
         NormalizeCallArgumentsPass,  # kwargs args нормализация
         CollectContextManagersPass,  # with развёртка
         RewriteWithContextManagerPass,  # with развёртка
+        CollectInlineFunctionsPass,  # inline
+        RewriteInlineCallsPass,  # inline
     ]
 
     analysis_passes = [

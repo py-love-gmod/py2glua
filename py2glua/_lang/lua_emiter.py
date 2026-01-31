@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from .._lang.compiler.passes.analysis.symlinks import PyIRSymLink
+from .compiler.compiler_ir import PyIRDo, PyIRGoto, PyIRLabel
 from .py.ir_dataclass import (
     PyAugAssignType,
     PyBinOPType,
@@ -101,7 +102,6 @@ class LuaEmitter:
         return EmitResult(code=code)
 
     def _wl(self, s: str = "") -> None:
-        # IMPORTANT: support multiline strings; indent every line
         if not s:
             self._buf.append("\n")
             return
@@ -138,8 +138,6 @@ class LuaEmitter:
             self._wl()
 
     def _stmt(self, node: PyIRNode, *, top_level: bool) -> None:
-        # after the attach step, decorator statements should not appear;
-        # if they still do, ignore them to avoid garbage output
         if isinstance(node, PyIRDecorator):
             return
 
@@ -180,6 +178,30 @@ class LuaEmitter:
             self._blankline_after_block()
             return
 
+        if isinstance(node, PyIRClassDef):
+            self._maybe_blankline_before("class", top_level=top_level)
+            self._emit_class(node)
+            self._blankline_after_block()
+            return
+
+        # === Lua-control nodes (inline support) ===
+        if isinstance(node, PyIRDo):
+            self._maybe_blankline_before("ctrl", top_level=top_level)
+            self._emit_do(node)
+            self._blankline_after_block()
+            return
+
+        if isinstance(node, PyIRLabel):
+            self._maybe_blankline_before("ctrl", top_level=top_level)
+            self._wl(f"::{node.name}::")
+            return
+
+        if isinstance(node, PyIRGoto):
+            self._maybe_blankline_before("ctrl", top_level=top_level)
+            self._wl(f"goto {node.label}")
+            return
+
+        # === Control flow ===
         if isinstance(node, PyIRIf):
             self._maybe_blankline_before("ctrl", top_level=top_level)
             self._emit_if(node)
@@ -197,9 +219,11 @@ class LuaEmitter:
 
         if isinstance(node, PyIRReturn):
             self._maybe_blankline_before("stmt", top_level=top_level)
-            self._wl(
-                "return" if node.value is None else f"return {self._expr(node.value)}"
-            )
+            val = getattr(node, "value", None)
+            if val is None:
+                self._wl("return")
+            else:
+                self._wl(f"return {self._expr(val)}")
             return
 
         if isinstance(node, PyIRBreak):
@@ -217,6 +241,7 @@ class LuaEmitter:
             self._wl(self._leak("with-statement"))
             return
 
+        # expression-as-statement
         if isinstance(
             node,
             (
@@ -233,14 +258,16 @@ class LuaEmitter:
             self._wl(self._expr(node))
             return
 
-        if isinstance(node, PyIRClassDef):
-            self._maybe_blankline_before("class", top_level=top_level)
-            self._emit_class(node)
-            self._blankline_after_block()
-            return
-
         self._maybe_blankline_before("misc", top_level=top_level)
         self._wl(self._leak(type(node).__name__))
+
+    def _emit_do(self, node: PyIRDo) -> None:
+        self._wl("do")
+        self._indent_push()
+        for st in node.body:
+            self._stmt(st, top_level=False)
+        self._indent_pop()
+        self._wl("end")
 
     def _emit_class(self, node: PyIRClassDef) -> None:
         if node.bases:
@@ -381,9 +408,7 @@ class LuaEmitter:
             return self._leak("call with kwargs")
 
         args = ", ".join(self._expr(a) for a in node.args_p)
-
         func_s = self._expr(node.func)
-
         return f"{func_s}({args})"
 
     def _emit_list(self, node: PyIRList) -> str:
