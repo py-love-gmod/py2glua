@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import tokenize
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Callable
@@ -126,6 +129,78 @@ class PyLogicBlockBuilder:
         offset = (blk_idx + 1) - hdr_idx
         return offset, nodes[hdr_idx], nodes[blk_idx]
 
+    @staticmethod
+    def _node_pos(node: RawSyntaxNode) -> tuple[int | None, int | None]:
+        toks = [t for t in (node.tokens or []) if hasattr(t, "start")]
+        if not toks:
+            return None, None
+        line, col = toks[0].start
+        return line, col
+
+    @staticmethod
+    def _split_def_returns_annotation(header: RawSyntaxNode) -> None:
+        """
+        Normalize function header tokens by extracting return annotation:
+
+            def f(...) -> X:
+
+        We remove "-> X" part from header.tokens so signature parser doesn't choke.
+        We also attach:
+            header._returns_tokens : list[tokenize.TokenInfo]
+            header._returns_str    : str
+
+        This allows later IR builder to read the return type without parsing '->'.
+        """
+        toks = [t for t in (header.tokens or []) if isinstance(t, tokenize.TokenInfo)]
+        if not toks:
+            return
+
+        # Track parentheses balance to find top-level '->' and ':'.
+        paren = 0
+        arrow_i: int | None = None
+        colon_i: int | None = None
+
+        for i, t in enumerate(toks):
+            s = t.string
+            if s in ("(", "[", "{"):
+                paren += 1
+            elif s in (")", "]", "}"):
+                paren = max(0, paren - 1)
+
+            if paren == 0:
+                if s == "->" and arrow_i is None:
+                    arrow_i = i
+                    continue
+                if s == ":":
+                    colon_i = i  # header builder includes ':'; likely last, but keep last seen
+
+        if arrow_i is None:
+            return
+
+        if colon_i is None or colon_i <= arrow_i:
+            line, col = toks[arrow_i].start
+            raise SyntaxError(
+                "Некорректная аннотация возврата функции: ожидался ':' после '->'.\n"
+                f"LINE|OFFSET: {line}|{col}"
+            )
+
+        ret_tokens = toks[arrow_i + 1 : colon_i]
+        if not ret_tokens:
+            line, col = toks[arrow_i].start
+            raise SyntaxError(
+                "Пустая аннотация возврата функции после '->'.\n"
+                f"LINE|OFFSET: {line}|{col}"
+            )
+
+        # Save for downstream consumers
+        setattr(header, "_returns_tokens", ret_tokens)
+        setattr(header, "_returns_str", "".join(t.string for t in ret_tokens))
+
+        # Rebuild header.tokens without '-> ...'
+        # Keep everything before arrow, and everything from ':' onward (including ':')
+        new_toks = toks[:arrow_i] + toks[colon_i:]
+        header.tokens = new_toks
+
     # endregion
 
     # region Core block builder
@@ -166,8 +241,14 @@ class PyLogicBlockBuilder:
             node = nodes[i]
 
             if node.kind in illegal_solo:
+                line, col = cls._node_pos(node)
+                pos = (
+                    f"LINE|OFFSET: {line}|{col}"
+                    if line is not None
+                    else "LINE|OFFSET: 0|0"
+                )
                 raise SyntaxError(
-                    f"Unexpected {node.kind.name} without matching header."
+                    f"Неожиданный {node.kind.name} без хедер конструкции.\n{pos}"
                 )
 
             func = dispatch.get(node.kind)

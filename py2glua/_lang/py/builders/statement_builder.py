@@ -1136,9 +1136,9 @@ class StatementBuilder:
                     nxt = stream.peek()
                     if nxt and nxt.type == tokenize.OP and nxt.string == ")":
                         break
-                    
+
                     continue
-                
+
                 break
 
         stream.expect_op(")")

@@ -74,6 +74,8 @@ _HEADER_KEYWORDS = {
 
 
 class PyParser:
+    _CHAIN_CONTINUATIONS = {"elif", "else", "except", "finally"}
+
     @classmethod
     def parse(cls, source: str) -> list[RawSyntaxNode]:
         stream = cls._construct_tokens(source)
@@ -97,7 +99,6 @@ class PyParser:
         for token in tokenize.tokenize(BytesIO(source.encode("utf-8")).readline):
             if token.type == tokenize.ENCODING:
                 continue
-
             token_list.append(token)
 
         return TokenStream(token_list)
@@ -106,10 +107,36 @@ class PyParser:
 
     # region Non Terminal
     @classmethod
+    def _peek_next_significant(
+        cls, token_stream: TokenStream
+    ) -> tokenize.TokenInfo | None:
+        """
+        Peek ahead skipping NL/NEWLINE/DEDENT.
+        Does NOT skip INDENT: INDENT is significant for us.
+        """
+        j = 0
+        while True:
+            t = token_stream.peek(j)
+            if t is None:
+                return None
+            if t.type in (tokenize.NL, tokenize.NEWLINE, tokenize.DEDENT):
+                j += 1
+                continue
+            return t
+
+    @classmethod
     def _construct_raw_non_terminal(cls, token_stream: TokenStream):
         nodes: list[RawSyntaxNode] = []
         awaiting_block = False
         pending_leading: list[RawSyntaxNode] = []
+
+        chain_gap_comments: list[RawSyntaxNode] = []
+
+        def attach_pending_to_block(block: RawSyntaxNode) -> None:
+            nonlocal pending_leading
+            if pending_leading:
+                setattr(block, "_leading", list(pending_leading))
+                pending_leading.clear()
 
         while not token_stream.eof():
             tok = token_stream.peek()
@@ -119,16 +146,27 @@ class PyParser:
             tok_string = tok.string
             tok_type = tok.type
 
+            # comments
             if tok_type == tokenize.COMMENT:
                 comment = cls._build_raw_comment(token_stream)
+
                 if awaiting_block:
                     pending_leading.append(comment)
+                    continue
 
+                nxt = cls._peek_next_significant(token_stream)
+                if (
+                    nxt is not None
+                    and nxt.type == tokenize.NAME
+                    and nxt.string in cls._CHAIN_CONTINUATIONS
+                ):
+                    chain_gap_comments.append(comment)
                 else:
                     nodes.append(comment)
 
                 continue
 
+            # trivia
             if tok_type in (
                 tokenize.NL,
                 tokenize.NEWLINE,
@@ -138,6 +176,7 @@ class PyParser:
                 token_stream.advance()
                 continue
 
+            # unsupported keywords
             if tok_string in {
                 "global",
                 "nonlocal",
@@ -151,20 +190,37 @@ class PyParser:
                     f"LINE|OFFSET: {tok.start[0]}|{tok.start[1]}"
                 )
 
+            # decorator line(s)
             if tok_string == "@":
+                if chain_gap_comments:
+                    nodes.extend(chain_gap_comments)
+                    chain_gap_comments.clear()
+
                 nodes.extend(cls._build_raw_decorator(token_stream))
                 awaiting_block = False
                 pending_leading.clear()
                 continue
 
+            # headers
             if tok_string in _HEADER_KEYWORDS:
+                if tok_string in cls._CHAIN_CONTINUATIONS and chain_gap_comments:
+                    pending_leading.extend(chain_gap_comments)
+                    chain_gap_comments.clear()
+
+                if tok_string not in cls._CHAIN_CONTINUATIONS and chain_gap_comments:
+                    nodes.extend(chain_gap_comments)
+                    chain_gap_comments.clear()
+
                 func = getattr(cls, f"_build_raw_{tok_string}")
                 res = func(token_stream)
 
                 if isinstance(res, tuple):
                     header, block = res
+                    attach_pending_to_block(block)
+
                     nodes.append(header)
                     nodes.append(block)
+
                     awaiting_block = False
                     pending_leading.clear()
 
@@ -180,14 +236,23 @@ class PyParser:
                 continue
 
             if tok_type == tokenize.INDENT:
+                if chain_gap_comments:
+                    nodes.extend(chain_gap_comments)
+                    chain_gap_comments.clear()
+
                 block = cls._build_raw_indent(token_stream)
-                if awaiting_block and pending_leading:
-                    setattr(block, "_leading", pending_leading)
+
+                if awaiting_block:
+                    attach_pending_to_block(block)
 
                 awaiting_block = False
-                pending_leading = []
+                pending_leading.clear()
                 nodes.append(block)
                 continue
+
+            if chain_gap_comments:
+                nodes.extend(chain_gap_comments)
+                chain_gap_comments.clear()
 
             res = cls._build_raw_other(token_stream)
             if isinstance(res, list):
@@ -195,6 +260,10 @@ class PyParser:
 
             else:
                 nodes.append(res)
+
+        if chain_gap_comments:
+            nodes.extend(chain_gap_comments)
+            chain_gap_comments.clear()
 
         return nodes
 
@@ -281,7 +350,13 @@ class PyParser:
     ):
         header = cls._build_finish_colon(token_stream, kind)
         nxt = token_stream.peek()
-        if nxt is None or nxt.type in (tokenize.NEWLINE, tokenize.NL):
+
+        # IMPORTANT:
+        # If the next token is COMMENT, this is still a normal suite header:
+        #   if cond:  # comment
+        #       ...
+        # Treat comment like end-of-line, not inline suite.
+        if nxt is None or nxt.type in (tokenize.NEWLINE, tokenize.NL, tokenize.COMMENT):
             return header
 
         inline_tokens = []
@@ -333,7 +408,6 @@ class PyParser:
 
             if isinstance(res, list):
                 node = res[0]
-
             else:
                 node = res
 
@@ -492,7 +566,6 @@ class PyParser:
 
             if tok.type == tokenize.INDENT:
                 depth += 1
-
             elif tok.type == tokenize.DEDENT:
                 depth -= 1
                 if depth == 0:
@@ -556,10 +629,8 @@ class PyParser:
                 for t in n.tokens:
                     if isinstance(t, RawSyntaxNode):
                         new_tokens.extend(cls._expand_blocks([t]))
-
                     else:
                         new_tokens.append(t)
-
                 n.tokens = new_tokens
 
             out.append(n)

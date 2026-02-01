@@ -27,6 +27,7 @@ from .passes.expand import (
 )
 from .passes.lowering import (
     ConstFoldingPass,
+    DcePass,
     FoldCompileTimeBoolConstsPass,
     NilFoldPass,
 )
@@ -79,6 +80,7 @@ class Compiler:
         NilFoldPass,  # nil fold
         FoldCompileTimeBoolConstsPass,  # DEBUG и TYPE_CHECKING
         ConstFoldingPass,  # Конст фолдинг
+        DcePass,  # DCE
     ]
 
     project_passes = []
