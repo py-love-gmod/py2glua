@@ -50,6 +50,15 @@ class ConstFoldingPass:
     - Folds PyIRUnaryOP / PyIRBinOP when operands are constants
     - Rewrites expressions inside statements (including PyIRIf.test / PyIRWhile.test)
     - DOES NOT remove/replace statements (no branch elimination, no loop deletion)
+
+    Extra optimization:
+      - short-circuit simplification for AND/OR when LEFT side is constant:
+          (truthy_const and X)  -> X
+          (falsy_const  and X)  -> falsy_const
+          (truthy_const or  X)  -> truthy_const
+          (falsy_const  or  X)  -> X
+        This is still expression folding (no statement elimination) and is safe
+        because left side is a constant (no side effects).
     """
 
     _NO: Final[object] = object()
@@ -80,10 +89,10 @@ class ConstFoldingPass:
         def const_value(node: PyIRNode) -> object | LuaNil | object:
             if isinstance(node, PyIRConstant) and is_const_value(node.value):
                 return node.value
+
             return ConstFoldingPass._NO
 
         def eq_lua(a: object | LuaNil, b: object | LuaNil) -> bool:
-            # LuaNil != None
             if a is LuaNil:
                 return b is LuaNil
 
@@ -101,16 +110,19 @@ class ConstFoldingPass:
             if op == PyUnaryOPType.PLUS:
                 if is_num(v):
                     return v
+
                 return ConstFoldingPass._NO
 
             if op == PyUnaryOPType.MINUS:
                 if is_num(v):
                     return -cast(float | int, v)
+
                 return ConstFoldingPass._NO
 
             if op == PyUnaryOPType.BIT_INV:
                 if is_int(v):
                     return ~cast(int, v)
+
                 return ConstFoldingPass._NO
 
             return ConstFoldingPass._NO
@@ -118,21 +130,18 @@ class ConstFoldingPass:
         def try_eval_bin(
             op: PyBinOPType, a: object | LuaNil, b: object | LuaNil
         ) -> object | LuaNil | object:
-            # Logical (Lua-style: returns operand)
             if op == PyBinOPType.AND:
                 return b if lua_truthy(a) else a
 
             if op == PyBinOPType.OR:
                 return a if lua_truthy(a) else b
 
-            # Equality / inequality
             if op == PyBinOPType.EQ:
                 return eq_lua(a, b)
 
             if op == PyBinOPType.NE:
                 return not eq_lua(a, b)
 
-            # Comparisons (numbers or strings only)
             if op in (PyBinOPType.LT, PyBinOPType.LE, PyBinOPType.GT, PyBinOPType.GE):
                 if is_num(a) and is_num(b):
                     fa = float(cast(float | int, a))
@@ -140,10 +149,13 @@ class ConstFoldingPass:
 
                     if op == PyBinOPType.LT:
                         return fa < fb
+
                     if op == PyBinOPType.LE:
                         return fa <= fb
+
                     if op == PyBinOPType.GT:
                         return fa > fb
+
                     if op == PyBinOPType.GE:
                         return fa >= fb
 
@@ -152,10 +164,13 @@ class ConstFoldingPass:
                 if isinstance(a, str) and isinstance(b, str):
                     if op == PyBinOPType.LT:
                         return a < b
+
                     if op == PyBinOPType.LE:
                         return a <= b
+
                     if op == PyBinOPType.GT:
                         return a > b
+
                     if op == PyBinOPType.GE:
                         return a >= b
 
@@ -163,7 +178,6 @@ class ConstFoldingPass:
 
                 return ConstFoldingPass._NO
 
-            # Arithmetic (numbers only)
             if op in (
                 PyBinOPType.ADD,
                 PyBinOPType.SUB,
@@ -188,16 +202,19 @@ class ConstFoldingPass:
                 if op == PyBinOPType.ADD:
                     if is_int(a) and is_int(b):
                         return cast(int, a) + cast(int, b)
+
                     return aa + bb
 
                 if op == PyBinOPType.SUB:
                     if is_int(a) and is_int(b):
                         return cast(int, a) - cast(int, b)
+
                     return aa - bb
 
                 if op == PyBinOPType.MUL:
                     if is_int(a) and is_int(b):
                         return cast(int, a) * cast(int, b)
+
                     return aa * bb
 
                 if op == PyBinOPType.DIV:
@@ -209,15 +226,15 @@ class ConstFoldingPass:
                 if op == PyBinOPType.MOD:
                     if is_int(a) and is_int(b):
                         return cast(int, a) % cast(int, b)
+
                     return aa % bb
 
                 if op == PyBinOPType.POW:
-                    # FIX: keep int result when base and exponent are ints and exponent >= 0
                     if is_int(a) and is_int(b) and cast(int, b) >= 0:
                         return cast(int, a) ** cast(int, b)
+
                     return aa**bb
 
-            # Bitwise (ints only, no bool)
             if op in (
                 PyBinOPType.BIT_OR,
                 PyBinOPType.BIT_XOR,
@@ -275,6 +292,22 @@ class ConstFoldingPass:
                 node.left = fold_expr(node.left)
                 node.right = fold_expr(node.right)
 
+                if node.op in (PyBinOPType.AND, PyBinOPType.OR):
+                    lv = const_value(node.left)
+                    if lv is not ConstFoldingPass._NO:
+                        lcv = cast(object | LuaNil, lv)
+
+                        if node.op == PyBinOPType.AND:
+                            if not lua_truthy(lcv):
+                                return make_const(node, lcv)
+
+                            return node.right
+
+                        if lua_truthy(lcv):
+                            return make_const(node, lcv)
+
+                        return node.right
+
                 a = const_value(node.left)
                 b = const_value(node.right)
                 if a is not ConstFoldingPass._NO and b is not ConstFoldingPass._NO:
@@ -285,6 +318,7 @@ class ConstFoldingPass:
                     )
                     if out is not ConstFoldingPass._NO:
                         return make_const(node, cast(object | LuaNil, out))
+
                 return node
 
             if isinstance(node, PyIRAttribute):
@@ -329,7 +363,6 @@ class ConstFoldingPass:
                 node.args_kw = {k: fold_expr(v) for k, v in node.args_kw.items()}
                 return node
 
-            # PyIREmitExpr args folding (no call folding)
             if PyIREmitExpr is not None and isinstance(node, PyIREmitExpr):
                 node.args_p = [fold_expr(a) for a in node.args_p]
                 node.args_kw = {k: fold_expr(v) for k, v in node.args_kw.items()}
@@ -341,6 +374,7 @@ class ConstFoldingPass:
             out: list[PyIRNode] = []
             for s in stmts:
                 out.extend(fold_stmt(s))
+
             return out
 
         def fold_stmt(node: PyIRNode) -> list[PyIRNode]:
