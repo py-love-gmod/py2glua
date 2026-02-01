@@ -25,6 +25,9 @@ from .passes.expand import (
     RewriteInlineCallsPass,
     RewriteWithContextManagerPass,
 )
+from .passes.lowering import (
+    FoldCompileTimeBoolConstsPass,
+)
 from .passes.normalize import (
     AttachDecoratorsPass,
     NormalizeImportsPass,
@@ -70,7 +73,9 @@ class Compiler:
         # ===
     ]
 
-    lowering_passes = []
+    lowering_passes = [
+        FoldCompileTimeBoolConstsPass,  # DEBUG и TYPE_CHECKING
+    ]
 
     project_passes = []
 
@@ -297,6 +302,23 @@ class Compiler:
 
         return slctx
 
+    @classmethod
+    def _run_lowering(
+        cls, project_ir: list, internal_ir: list, slctx: SymLinkContext
+    ) -> None:
+        for p in cls.lowering_passes:
+            for ir in (*internal_ir, *project_ir):
+                try:
+                    p.run(ir, slctx)
+
+                except Exception as e:
+                    CompilerExit.internal_error(
+                        "Lowering error\n"
+                        f"File: {ir.path}\n"
+                        f"Pass: {p.__name__}\n"
+                        f"Error: {e}",
+                    )
+
     # endregion
 
     # public API
@@ -312,10 +334,10 @@ class Compiler:
             cls._run_expand(project_ir, internal_ir)
 
         with log_step("[4/7] Анализ..."):
-            slctx = cls._run_analysis(project_ir, internal_ir)  # noqa: F841
+            slctx = cls._run_analysis(project_ir, internal_ir)
 
         with log_step("[5/7] Упрощение..."):
-            pass
+            cls._run_lowering(project_ir, internal_ir, slctx)
 
         with log_step("[6/7] Сборка..."):
             pass

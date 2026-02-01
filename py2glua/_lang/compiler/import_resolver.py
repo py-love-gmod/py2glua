@@ -98,7 +98,7 @@ class ImportResolver:
             if resolved.itype == PyIRImportType.EXTERNAL:
                 CompilerExit.user_error(
                     "Внешний импорт не поддерживается\n"
-                    f"Импорт: {'.'.join(imp.modules or [])}\n",
+                    f"Импорт: {'.'.join(imp.modules or [])}",
                     path=current_file,
                     show_pos=False,
                 )
@@ -111,14 +111,20 @@ class ImportResolver:
         self._reject_star_import(imp, current_file)
 
         modules = imp.modules or []
+
         top = modules[0] if modules else None
+        if top is None:
+            top = self._best_effort_top_name(imp)
+
+        if top and self._is_stdlib_module(top):
+            return _Resolved(PyIRImportType.STD_LIB, ())
 
         if imp.level:
             deps = self._resolve_relative(imp, current_file)
             if not deps:
                 CompilerExit.user_error(
                     "Не удалось разрешить относительный импорт\n"
-                    f"Импорт: {'.'.join(modules)}\n",
+                    f"Импорт: {'.'.join(modules)}",
                     path=current_file,
                 )
 
@@ -140,9 +146,6 @@ class ImportResolver:
                 PyIRImportType.INTERNAL,
                 tuple(self._resolve_internal(imp, modules, current_file)),
             )
-
-        if top and self._is_stdlib_module(top):
-            return _Resolved(PyIRImportType.STD_LIB, ())
 
         return _Resolved(PyIRImportType.EXTERNAL, ())
 
@@ -320,3 +323,26 @@ class ImportResolver:
     @staticmethod
     def _is_stdlib_module(name: str) -> bool:
         return name in sys.stdlib_module_names or name in sys.builtin_module_names
+
+    @staticmethod
+    def _best_effort_top_name(imp: PyIRImport) -> str | None:
+        """
+        Attempt to guess a top-level module name when `imp.modules` is empty.
+        This is ONLY used to identify stdlib modules that must be ignored.
+
+        Heuristics:
+          - if modules present -> use modules[0] (handled earlier)
+          - else if this is `from X import ...` and X was not populated:
+              try to use the first imported name as a candidate.
+              (This is conservative: it may miss some stdlib imports, but should not misclassify locals.)
+        """
+        if imp.modules:
+            return imp.modules[0]
+
+        if imp.names:
+            first = imp.names[0]
+            cand = first[0] if isinstance(first, tuple) else first
+            if isinstance(cand, str) and cand:
+                return cand
+
+        return None
