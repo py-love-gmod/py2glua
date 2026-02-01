@@ -114,7 +114,7 @@ class PyIRConstant(PyIRNode):
 
     def __str__(self) -> str:
         v = self.value
-        if isinstance(v, LuaNil) or v == LuaNil:
+        if isinstance(v, LuaNil) or v is LuaNil:
             return "nil"
 
         if v is None:
