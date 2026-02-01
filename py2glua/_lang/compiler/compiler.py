@@ -26,6 +26,7 @@ from .passes.expand import (
     RewriteWithContextManagerPass,
 )
 from .passes.lowering import (
+    ConstFoldingPass,
     FoldCompileTimeBoolConstsPass,
 )
 from .passes.normalize import (
@@ -75,6 +76,7 @@ class Compiler:
 
     lowering_passes = [
         FoldCompileTimeBoolConstsPass,  # DEBUG и TYPE_CHECKING
+        ConstFoldingPass,  # Конст фолдинг
     ]
 
     project_passes = []
