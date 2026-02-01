@@ -4,8 +4,6 @@ from dataclasses import dataclass, field
 from enum import Enum, IntEnum, auto
 from pathlib import Path
 
-from ...glua.core.types import nil
-
 
 # Base
 @dataclass
@@ -103,17 +101,20 @@ class PyIRImport(PyIRNode):
 
 
 # Constants / Names
+class LuaNil:
+    __slots__ = ()
+
+
 @dataclass
 class PyIRConstant(PyIRNode):
-    value: object | nil
+    value: object | LuaNil
 
     def walk(self):
         yield self
 
     def __str__(self) -> str:
         v = self.value
-
-        if v is nil:
+        if isinstance(v, LuaNil) or v == LuaNil:
             return "nil"
 
         if v is None:

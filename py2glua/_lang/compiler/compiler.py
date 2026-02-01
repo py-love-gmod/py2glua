@@ -28,6 +28,7 @@ from .passes.expand import (
 from .passes.lowering import (
     ConstFoldingPass,
     FoldCompileTimeBoolConstsPass,
+    NilFoldPass,
 )
 from .passes.normalize import (
     AttachDecoratorsPass,
@@ -75,6 +76,7 @@ class Compiler:
     ]
 
     lowering_passes = [
+        NilFoldPass,  # nil fold
         FoldCompileTimeBoolConstsPass,  # DEBUG и TYPE_CHECKING
         ConstFoldingPass,  # Конст фолдинг
     ]

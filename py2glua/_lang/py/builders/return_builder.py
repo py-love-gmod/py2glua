@@ -1,10 +1,9 @@
 import tokenize
 from typing import Sequence
 
-from ....glua.core.types import nil
 from ...etc import TokenStream
 from ...parse import PyLogicNode
-from ..ir_dataclass import PyIRConstant, PyIRNode, PyIRReturn
+from ..ir_dataclass import LuaNil, PyIRConstant, PyIRNode, PyIRReturn
 from .statement_builder import StatementBuilder
 
 
@@ -28,7 +27,7 @@ class ReturnBuilder:
                 PyIRReturn(
                     line=line,
                     offset=col,
-                    value=PyIRConstant(line=line, offset=col, value=nil),
+                    value=PyIRConstant(line=line, offset=col, value=LuaNil),
                 )
             ]
 

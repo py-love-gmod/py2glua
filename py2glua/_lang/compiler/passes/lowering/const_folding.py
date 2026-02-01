@@ -3,9 +3,9 @@ from __future__ import annotations
 from math import floor
 from typing import Final, cast
 
-from .....glua.core.types import nil
 from ....compiler.passes.analysis.symlinks import SymLinkContext
 from ....py.ir_dataclass import (
+    LuaNil,
     PyBinOPType,
     PyIRAssign,
     PyIRAttribute,
@@ -58,39 +58,43 @@ class ConstFoldingPass:
     def run(ir: PyIRFile, ctx: SymLinkContext) -> PyIRFile:
         _ = ctx
 
-        def is_const_value(v: object | nil) -> bool:
-            return v is nil or v is None or isinstance(v, (bool, int, float, str))
+        def is_const_value(v: object | LuaNil) -> bool:
+            return v is LuaNil or v is None or isinstance(v, (bool, int, float, str))
 
-        def lua_truthy(v: object | nil) -> bool:
-            return not (v is False or v is nil or v is None)
+        def lua_truthy(v: object | LuaNil) -> bool:
+            return not (v is False or v is LuaNil or v is None)
 
-        def is_num(v: object | nil) -> bool:
+        def is_num(v: object | LuaNil) -> bool:
             return isinstance(v, (int, float)) and not isinstance(v, bool)
 
-        def is_int(v: object | nil) -> bool:
+        def is_int(v: object | LuaNil) -> bool:
             return isinstance(v, int) and not isinstance(v, bool)
 
-        def make_const(ref: PyIRNode, value: object | nil) -> PyIRConstant:
+        def make_const(ref: PyIRNode, value: object | LuaNil) -> PyIRConstant:
             return PyIRConstant(
                 line=ref.line,
                 offset=ref.offset,
                 value=value,
             )
 
-        def const_value(node: PyIRNode) -> object | nil | object:
+        def const_value(node: PyIRNode) -> object | LuaNil | object:
             if isinstance(node, PyIRConstant) and is_const_value(node.value):
                 return node.value
             return ConstFoldingPass._NO
 
-        def eq_lua(a: object | nil, b: object | nil) -> bool:
-            # nil != None
-            if a is nil:
-                return b is nil
+        def eq_lua(a: object | LuaNil, b: object | LuaNil) -> bool:
+            # LuaNil != None
+            if a is LuaNil:
+                return b is LuaNil
+
             if a is None:
                 return b is None
+
             return a == b
 
-        def try_eval_unary(op: PyUnaryOPType, v: object | nil) -> object | nil | object:
+        def try_eval_unary(
+            op: PyUnaryOPType, v: object | LuaNil
+        ) -> object | LuaNil | object:
             if op == PyUnaryOPType.NOT:
                 return not lua_truthy(v)
 
@@ -112,8 +116,8 @@ class ConstFoldingPass:
             return ConstFoldingPass._NO
 
         def try_eval_bin(
-            op: PyBinOPType, a: object | nil, b: object | nil
-        ) -> object | nil | object:
+            op: PyBinOPType, a: object | LuaNil, b: object | LuaNil
+        ) -> object | LuaNil | object:
             # Logical (Lua-style: returns operand)
             if op == PyBinOPType.AND:
                 return b if lua_truthy(a) else a
@@ -262,9 +266,9 @@ class ConstFoldingPass:
                 node.value = fold_expr(node.value)
                 v = const_value(node.value)
                 if v is not ConstFoldingPass._NO:
-                    out = try_eval_unary(node.op, cast(object | nil, v))
+                    out = try_eval_unary(node.op, cast(object | LuaNil, v))
                     if out is not ConstFoldingPass._NO:
-                        return make_const(node, cast(object | nil, out))
+                        return make_const(node, cast(object | LuaNil, out))
                 return node
 
             if isinstance(node, PyIRBinOP):
@@ -276,11 +280,11 @@ class ConstFoldingPass:
                 if a is not ConstFoldingPass._NO and b is not ConstFoldingPass._NO:
                     out = try_eval_bin(
                         node.op,
-                        cast(object | nil, a),
-                        cast(object | nil, b),
+                        cast(object | LuaNil, a),
+                        cast(object | LuaNil, b),
                     )
                     if out is not ConstFoldingPass._NO:
-                        return make_const(node, cast(object | nil, out))
+                        return make_const(node, cast(object | LuaNil, out))
                 return node
 
             if isinstance(node, PyIRAttribute):

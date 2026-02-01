@@ -445,8 +445,10 @@ class LuaEmitter:
 
             if isinstance(key, PyIRConstant) and isinstance(key.value, str):
                 k = f"[{repr(key.value)}]"
+                
             elif isinstance(key, PyIRConstant) and isinstance(key.value, (int, float)):
                 k = f"[{key.value}]"
+                
             else:
                 k = f"[{self._expr(key)}]"
 

@@ -4,8 +4,8 @@ from copy import deepcopy
 from dataclasses import fields, is_dataclass
 from typing import Dict, List, Set, Tuple
 
-from .....glua.core.types import nil
 from ....py.ir_dataclass import (
+    LuaNil,
     PyIRAssign,
     PyIRAttribute,
     PyIRCall,
@@ -152,7 +152,7 @@ def _mk_assign(target: PyIRNode, value: PyIRNode, ref: PyIRNode) -> PyIRAssign:
 
 
 def _mk_nil(ref: PyIRNode) -> PyIRConstant:
-    return PyIRConstant(line=ref.line, offset=ref.offset, value=nil)
+    return PyIRConstant(line=ref.line, offset=ref.offset, value=LuaNil)
 
 
 def _mk_do(body: List[PyIRNode], ref: PyIRNode) -> PyIRDo:
