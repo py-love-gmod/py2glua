@@ -98,6 +98,15 @@ class CompilerDirective:
         return decorator
 
     @staticmethod
+    def typeguard_nil() -> Callable:
+        """Помечает функцию как валидатор Nil. То есть после этой функции метод точно не Nil. Сделано для IsValid"""
+
+        def decorator(fn):
+            return fn
+
+        return decorator
+
+    @staticmethod
     def gmod_special_enum(
         fields: dict[
             str,
