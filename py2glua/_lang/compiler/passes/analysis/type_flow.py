@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Set, Tuple
+from typing import Callable, Dict, Iterable, List, Set, Tuple
 
 from ....._cli import logger
 from ....py.ir_dataclass import (
@@ -47,16 +47,20 @@ class TypeFlowPass:
 
     Stores in ctx (dynamic fields):
       - ctx.type_sets_by_symbol_id: dict[int, frozenset[str]]
-          Best-known type set per symbol_id (params + inferred locals).
       - ctx.type_env_by_uid: dict[int, dict[int, frozenset[str]]]
-          Flow snapshot at statement/call nodes (uid(node) -> env snapshot).
       - ctx._typeflow_warned: set[str]
-          Warn-once keys.
+
+    Extra registries in ctx (for inference):
+      - ctx.fn_return_types_by_symbol_id: dict[int, frozenset[str]]
+      - ctx.method_return_types_by_class: dict[tuple[str, str], frozenset[str]]
+      - ctx.fn_return_ann_by_symbol_id: dict[int, str|None]
+      - ctx.method_return_ann_by_class: dict[tuple[str, str], str|None]
+      - ctx.class_bases_by_name: dict[str, tuple[str, ...]]
 
     Key feature:
       - Infers local types from RETURN TYPES of functions/methods:
           x = foo()    -> x gets foo.returns
-          x = obj.m()  -> x gets m.returns resolved by receiver type (best-effort)
+          x = obj.m()  -> x gets m.returns resolved by receiver type (+bases)
 
     Narrowing:
       - if x is/== None / x is not/!= None
@@ -65,22 +69,37 @@ class TypeFlowPass:
       - if IsValid(x): true branch removes None and Nil from x type-set
       - mismatch None vs Nil checks => WARN + narrow best-effort
 
-    Notes:
-      - This pass expects symlinks already built (RewriteToSymlinksPass),
-        because we rely on PyIRSymLink.symbol_id for tracking vars.
+    Loops:
+      - while <cond>: body sees env_true (narrowed) but after loop returns original env
+      - for target in iter: body sees target type inferred from iter return annotation if possible,
+        but after loop returns original env (no guarantees)
     """
 
     TYPES_MODULE = "py2glua.glua.core.types"
     _GUARD_NAMES = {"IsValid"}
+
+    _ITERABLE_PREFIXES = (
+        "list",
+        "set",
+        "Sequence",
+        "Iterable",
+        "Iterator",
+        "List",
+        "Set",
+    )
 
     @staticmethod
     def run(ir: PyIRFile, ctx: SymLinkContext) -> None:
         type_sets, snapshots, warn_once = TypeFlowPass._ensure_storage(ctx)
         nil_ids, types_alias_ids = TypeFlowPass._collect_nil_ids(ir, ctx)
 
-        fn_ret_by_sym, method_ret_by_class = TypeFlowPass._collect_return_types(
-            ir, ctx, warn_once
-        )
+        (
+            fn_ret_by_sym,
+            method_ret_by_class,
+            fn_ret_ann_by_sym,
+            method_ret_ann_by_class,
+            class_bases_by_name,
+        ) = TypeFlowPass._collect_return_types(ir, ctx, warn_once)
 
         for node in ir.walk():
             if isinstance(node, PyIRFunctionDef):
@@ -95,6 +114,9 @@ class TypeFlowPass:
                     types_alias_ids,
                     fn_ret_by_sym,
                     method_ret_by_class,
+                    fn_ret_ann_by_sym,
+                    method_ret_ann_by_class,
+                    class_bases_by_name,
                 )
 
     @staticmethod
@@ -206,26 +228,56 @@ class TypeFlowPass:
         ir: PyIRFile,
         ctx: SymLinkContext,
         warn_once,
-    ) -> tuple[dict[int, frozenset[str]], dict[tuple[str, str], frozenset[str]]]:
+    ) -> tuple[
+        dict[int, frozenset[str]],
+        dict[tuple[str, str], frozenset[str]],
+        dict[int, str | None],
+        dict[tuple[str, str], str | None],
+        dict[str, tuple[str, ...]],
+    ]:
         """
-        Build:
-          - fn_ret_by_sym: symbol_id(func) -> return types
-          - method_ret_by_class: (ClassName, method_name) -> return types
+        Build local registries for this file and merge into ctx globals:
 
-        Uses fn.returns string produced by FunctionBuilder (already "clean").
+          - fn_ret_by_sym: symbol_id(func) -> return atoms
+          - method_ret_by_class: (ClassName, method_name) -> return atoms
+
+          - fn_ret_ann_by_sym: symbol_id(func) -> raw returns string
+          - method_ret_ann_by_class: (ClassName, method_name) -> raw returns string
+
+          - class_bases_by_name: ClassName -> tuple[BaseName,...] (best-effort, file-local)
         """
 
         fn_ret_by_sym: dict[int, frozenset[str]] = {}
         method_ret_by_class: dict[tuple[str, str], frozenset[str]] = {}
 
+        fn_ret_ann_by_sym: dict[int, str | None] = {}
+        method_ret_ann_by_class: dict[tuple[str, str], str | None] = {}
+
+        class_bases_by_name: dict[str, tuple[str, ...]] = {}
+
         file_uid = ctx.uid(ir)
         file_scope = ctx.file_scope.get(file_uid)
         if file_scope is None:
-            return fn_ret_by_sym, method_ret_by_class
+            return (
+                fn_ret_by_sym,
+                method_ret_by_class,
+                fn_ret_ann_by_sym,
+                method_ret_ann_by_class,
+                class_bases_by_name,
+            )
 
         def resolve_in_file(name: str) -> int | None:
             link = ctx.resolve(scope=file_scope, name=name)
             return link.target.value if link is not None else None
+
+        def base_name(n: PyIRNode) -> str | None:
+            if isinstance(n, PyIRVarUse):
+                return n.name
+
+            if isinstance(n, PyIRSymLink):
+                return n.name
+
+            return None
 
         for st in ir.body:
             if isinstance(st, PyIRFunctionDef):
@@ -233,19 +285,30 @@ class TypeFlowPass:
                 if sid is None:
                     continue
 
-                ret_atoms = TypeFlowPass._parse_annotation_atoms(st.returns)
-                fn_ret_by_sym[sid] = frozenset(ret_atoms)
+                fn_ret_ann_by_sym[sid] = st.returns
+                fn_ret_by_sym[sid] = frozenset(
+                    TypeFlowPass._parse_annotation_atoms(st.returns)
+                )
                 continue
 
             if isinstance(st, PyIRClassDef):
                 cls_name = st.name
 
+                bases: list[str] = []
+                for b in st.bases:
+                    bn = base_name(b)
+                    if bn is not None:
+                        bases.append(bn)
+                class_bases_by_name[cls_name] = tuple(bases)
+
                 for m in st.body:
                     if not isinstance(m, PyIRFunctionDef):
                         continue
 
-                    ret_atoms = TypeFlowPass._parse_annotation_atoms(m.returns)
-                    method_ret_by_class[(cls_name, m.name)] = frozenset(ret_atoms)
+                    method_ret_ann_by_class[(cls_name, m.name)] = m.returns
+                    method_ret_by_class[(cls_name, m.name)] = frozenset(
+                        TypeFlowPass._parse_annotation_atoms(m.returns)
+                    )
 
         global_fn_ret = getattr(ctx, "fn_return_types_by_symbol_id", None)
         if not isinstance(global_fn_ret, dict):
@@ -255,29 +318,61 @@ class TypeFlowPass:
         if not isinstance(global_method_ret, dict):
             global_method_ret = {}
 
+        global_fn_ret_ann = getattr(ctx, "fn_return_ann_by_symbol_id", None)
+        if not isinstance(global_fn_ret_ann, dict):
+            global_fn_ret_ann = {}
+
+        global_method_ret_ann = getattr(ctx, "method_return_ann_by_class", None)
+        if not isinstance(global_method_ret_ann, dict):
+            global_method_ret_ann = {}
+
+        global_class_bases = getattr(ctx, "class_bases_by_name", None)
+        if not isinstance(global_class_bases, dict):
+            global_class_bases = {}
+
         for k, v in fn_ret_by_sym.items():
             global_fn_ret[k] = v
-
         for k, v in method_ret_by_class.items():
             global_method_ret[k] = v
 
+        for k, v in fn_ret_ann_by_sym.items():
+            global_fn_ret_ann[k] = v
+        for k, v in method_ret_ann_by_class.items():
+            global_method_ret_ann[k] = v
+
+        for k, v in class_bases_by_name.items():
+            global_class_bases.setdefault(k, v)
+
         setattr(ctx, "fn_return_types_by_symbol_id", global_fn_ret)
         setattr(ctx, "method_return_types_by_class", global_method_ret)
+        setattr(ctx, "fn_return_ann_by_symbol_id", global_fn_ret_ann)
+        setattr(ctx, "method_return_ann_by_class", global_method_ret_ann)
+        setattr(ctx, "class_bases_by_name", global_class_bases)
 
-        return fn_ret_by_sym, method_ret_by_class
+        return (
+            fn_ret_by_sym,
+            method_ret_by_class,
+            fn_ret_ann_by_sym,
+            method_ret_ann_by_class,
+            class_bases_by_name,
+        )
+
+    @staticmethod
+    def _strip_ws(s: str) -> str:
+        return "".join(ch for ch in s if ch not in (" ", "\t", "\n", "\r"))
 
     @staticmethod
     def _parse_annotation_atoms(ann: str | None) -> Set[str]:
         """
-        Robust minimal atom parser for annotations produced by FunctionBuilder:
+        Minimal atom parser:
           - supports union with '|'
-          - supports direct names: None, nil, Value, Player, Entity, ...
-          - everything with [] () {} => {Value}
+          - supports direct names: None, nil, Value, Player, Entity...
+          - if contains [](){} => {Value} (we treat complex types as Value here)
         """
         if not ann:
             return {TYPE_VALUE}
 
-        s = "".join(ch for ch in ann if ch not in (" ", "\t", "\n", "\r"))
+        s = TypeFlowPass._strip_ws(ann)
         if not s:
             return {TYPE_VALUE}
 
@@ -299,6 +394,7 @@ class TypeFlowPass:
 
             elif p == "Value":
                 out.add(TYPE_VALUE)
+
             else:
                 out.add(p)
 
@@ -306,6 +402,51 @@ class TypeFlowPass:
             out.add(TYPE_VALUE)
 
         return out
+
+    @staticmethod
+    def _extract_single_generic_arg(s: str, prefix: str) -> str | None:
+        """
+        Accepts Base[T] with single top-level [] and returns T.
+        Best-effort only (no nested generics).
+        """
+        if not (s.startswith(prefix + "[") and s.endswith("]")):
+            return None
+
+        if s.count("[") != 1 or s.count("]") != 1:
+            return None
+
+        inner = s[len(prefix) + 1 : -1]
+        return inner or None
+
+    @staticmethod
+    def _parse_iterable_elem_atoms_from_ann(ann: str | None) -> Set[str] | None:
+        """
+        Extract element type atoms from list[T]/set[T]/Iterable[T]/Sequence[T] etc.
+        Returns None if not recognized.
+        """
+        if not ann:
+            return None
+
+        s = TypeFlowPass._strip_ws(ann)
+
+        lb = s.find("[")
+        if lb == -1:
+            return None
+
+        base = s[:lb]
+        if "." in base:
+            base = base.split(".")[-1]
+
+        s_norm = base + s[lb:]
+
+        for prefix in TypeFlowPass._ITERABLE_PREFIXES:
+            inner = TypeFlowPass._extract_single_generic_arg(s_norm, prefix)
+            if inner is None:
+                continue
+
+            return TypeFlowPass._parse_annotation_atoms(inner)
+
+        return None
 
     @staticmethod
     def _process_fn(
@@ -319,6 +460,9 @@ class TypeFlowPass:
         types_alias_ids: set[int],
         fn_ret_by_sym: dict[int, frozenset[str]],
         method_ret_by_class: dict[tuple[str, str], frozenset[str]],
+        fn_ret_ann_by_sym: dict[int, str | None],
+        method_ret_ann_by_class: dict[tuple[str, str], str | None],
+        class_bases_by_name: dict[str, tuple[str, ...]],
     ) -> None:
         fn_uid = ctx.uid(fn)
         body_scope = ctx.fn_body_scope.get(fn_uid)
@@ -349,6 +493,9 @@ class TypeFlowPass:
             types_alias_ids,
             fn_ret_by_sym,
             method_ret_by_class,
+            fn_ret_ann_by_sym,
+            method_ret_ann_by_class,
+            class_bases_by_name,
         )
 
     @staticmethod
@@ -364,6 +511,9 @@ class TypeFlowPass:
         types_alias_ids: set[int],
         fn_ret_by_sym: dict[int, frozenset[str]],
         method_ret_by_class: dict[tuple[str, str], frozenset[str]],
+        fn_ret_ann_by_sym: dict[int, str | None],
+        method_ret_ann_by_class: dict[tuple[str, str], str | None],
+        class_bases_by_name: dict[str, tuple[str, ...]],
     ) -> Tuple[Dict[int, Set[str]], bool]:
         cur_env = env
 
@@ -382,6 +532,9 @@ class TypeFlowPass:
                 types_alias_ids,
                 fn_ret_by_sym,
                 method_ret_by_class,
+                fn_ret_ann_by_sym,
+                method_ret_ann_by_class,
+                class_bases_by_name,
             )
             if returned:
                 return cur_env, True
@@ -401,6 +554,9 @@ class TypeFlowPass:
         types_alias_ids: set[int],
         fn_ret_by_sym: dict[int, frozenset[str]],
         method_ret_by_class: dict[tuple[str, str], frozenset[str]],
+        fn_ret_ann_by_sym: dict[int, str | None],
+        method_ret_ann_by_class: dict[tuple[str, str], str | None],
+        class_bases_by_name: dict[str, tuple[str, ...]],
     ) -> Tuple[Dict[int, Set[str]], bool]:
         if isinstance(st, PyIRReturn):
             TypeFlowPass._walk_expr(ctx, st.value, env, snapshots)
@@ -425,6 +581,9 @@ class TypeFlowPass:
                 fn_ret_by_sym,
                 method_ret_by_class,
                 warn_once,
+                fn_ret_ann_by_sym,
+                method_ret_ann_by_class,
+                class_bases_by_name,
             )
 
             env2 = dict(env)
@@ -451,6 +610,9 @@ class TypeFlowPass:
                 types_alias_ids,
                 fn_ret_by_sym,
                 method_ret_by_class,
+                fn_ret_ann_by_sym,
+                method_ret_ann_by_class,
+                class_bases_by_name,
             )
             env_else, ret_else = TypeFlowPass._walk_stmt_list(
                 ir,
@@ -464,6 +626,9 @@ class TypeFlowPass:
                 types_alias_ids,
                 fn_ret_by_sym,
                 method_ret_by_class,
+                fn_ret_ann_by_sym,
+                method_ret_ann_by_class,
+                class_bases_by_name,
             )
 
             if ret_then and not ret_else:
@@ -501,18 +666,51 @@ class TypeFlowPass:
                 types_alias_ids,
                 fn_ret_by_sym,
                 method_ret_by_class,
+                fn_ret_ann_by_sym,
+                method_ret_ann_by_class,
+                class_bases_by_name,
             )
 
             return env, False
 
         if isinstance(st, PyIRFor):
             TypeFlowPass._walk_expr(ctx, st.iter, env, snapshots)
-            TypeFlowPass._walk_expr(ctx, st.target, env, snapshots)
+
+            env_body = dict(env)
+
+            if isinstance(st.target, PyIRSymLink):
+                elem_atoms: Set[str] | None = None
+
+                if isinstance(st.iter, PyIRCall):
+                    ann_list = TypeFlowPass._infer_call_return_ann_list(
+                        ctx,
+                        st.iter,
+                        env,
+                        fn_ret_ann_by_sym,
+                        method_ret_ann_by_class,
+                        class_bases_by_name,
+                    )
+                    merged: Set[str] = set()
+                    for ann in ann_list:
+                        a = TypeFlowPass._parse_iterable_elem_atoms_from_ann(ann)
+                        if a is not None:
+                            merged |= set(a)
+                    if merged:
+                        elem_atoms = merged
+
+                if elem_atoms is None:
+                    elem_atoms = {TYPE_VALUE}
+
+                env_body[st.target.symbol_id] = set(elem_atoms)
+
+            else:
+                TypeFlowPass._walk_expr(ctx, st.target, env, snapshots)
+
             _env_body, _ = TypeFlowPass._walk_stmt_list(
                 ir,
                 ctx,
                 st.body,
-                env,
+                env_body,
                 type_sets,
                 snapshots,
                 warn_once,
@@ -520,14 +718,17 @@ class TypeFlowPass:
                 types_alias_ids,
                 fn_ret_by_sym,
                 method_ret_by_class,
+                fn_ret_ann_by_sym,
+                method_ret_ann_by_class,
+                class_bases_by_name,
             )
+
             return env, False
 
         if isinstance(st, PyIRWithItem):
             TypeFlowPass._walk_expr(ctx, st.context_expr, env, snapshots)
             if st.optional_vars is not None:
                 TypeFlowPass._walk_expr(ctx, st.optional_vars, env, snapshots)
-
             return env, False
 
         if isinstance(st, PyIRWith):
@@ -548,6 +749,9 @@ class TypeFlowPass:
                 types_alias_ids,
                 fn_ret_by_sym,
                 method_ret_by_class,
+                fn_ret_ann_by_sym,
+                method_ret_ann_by_class,
+                class_bases_by_name,
             )
             return env, False
 
@@ -596,6 +800,9 @@ class TypeFlowPass:
         fn_ret_by_sym: dict[int, frozenset[str]],
         method_ret_by_class: dict[tuple[str, str], frozenset[str]],
         warn_once,
+        fn_ret_ann_by_sym: dict[int, str | None],
+        method_ret_ann_by_class: dict[tuple[str, str], str | None],
+        class_bases_by_name: dict[str, tuple[str, ...]],
     ) -> Set[str]:
         if isinstance(expr, PyIRSymLink):
             return set(env.get(expr.symbol_id, {TYPE_VALUE}))
@@ -607,7 +814,6 @@ class TypeFlowPass:
             try:
                 if expr.value is LuaNil or isinstance(expr.value, LuaNil):  # type: ignore[arg-type]
                     return {TYPE_NIL}
-
             except TypeError:
                 if expr.value is LuaNil:
                     return {TYPE_NIL}
@@ -620,11 +826,10 @@ class TypeFlowPass:
                 ctx,
                 expr,
                 env,
-                nil_ids,
-                types_alias_ids,
                 fn_ret_by_sym,
                 method_ret_by_class,
                 warn_once,
+                class_bases_by_name,
             )
 
         return {TYPE_VALUE}
@@ -634,11 +839,10 @@ class TypeFlowPass:
         ctx: SymLinkContext,
         call: PyIRCall,
         env: Dict[int, Set[str]],
-        nil_ids: set[int],
-        types_alias_ids: set[int],
         fn_ret_by_sym: dict[int, frozenset[str]],
         method_ret_by_class: dict[tuple[str, str], frozenset[str]],
         warn_once,
+        class_bases_by_name: dict[str, tuple[str, ...]],
     ) -> Set[str]:
         if isinstance(call.func, PyIRSymLink):
             sid = call.func.symbol_id
@@ -666,7 +870,6 @@ class TypeFlowPass:
                 candidates = [
                     t for t in base_types if t not in (TYPE_NONE, TYPE_NIL, TYPE_VALUE)
                 ]
-
                 if not candidates:
                     return {TYPE_VALUE}
 
@@ -674,17 +877,21 @@ class TypeFlowPass:
                 found_any = False
 
                 for cls_name in candidates:
-                    key = (cls_name, mname)
+                    for owner in TypeFlowPass._iter_class_lineage(
+                        cls_name, class_bases_by_name
+                    ):
+                        ret = method_ret_by_class.get((owner, mname))
+                        if ret is None:
+                            global_m = getattr(
+                                ctx, "method_return_types_by_class", None
+                            )
+                            if isinstance(global_m, dict):
+                                ret = global_m.get((owner, mname))
 
-                    ret = method_ret_by_class.get(key)
-                    if ret is None:
-                        global_m = getattr(ctx, "method_return_types_by_class", None)
-                        if isinstance(global_m, dict):
-                            ret = global_m.get(key)
-
-                    if isinstance(ret, frozenset):
-                        out |= set(ret)
-                        found_any = True
+                        if isinstance(ret, frozenset):
+                            out |= set(ret)
+                            found_any = True
+                            break
 
                 if found_any:
                     return out
@@ -697,6 +904,88 @@ class TypeFlowPass:
                 return {TYPE_VALUE}
 
         return {TYPE_VALUE}
+
+    @staticmethod
+    def _infer_call_return_ann_list(
+        ctx: SymLinkContext,
+        call: PyIRCall,
+        env: Dict[int, Set[str]],
+        fn_ret_ann_by_sym: dict[int, str | None],
+        method_ret_ann_by_class: dict[tuple[str, str], str | None],
+        class_bases_by_name: dict[str, tuple[str, ...]],
+    ) -> list[str | None]:
+        """
+        Best-effort list of possible raw return annotations for call.
+        Used only for for-loop element inference.
+        """
+
+        if isinstance(call.func, PyIRSymLink):
+            sid = call.func.symbol_id
+            ann = fn_ret_ann_by_sym.get(sid)
+
+            if ann is None:
+                global_map = getattr(ctx, "fn_return_ann_by_symbol_id", None)
+                if isinstance(global_map, dict):
+                    ann = global_map.get(sid)
+
+            return [ann] if isinstance(ann, (str, type(None))) else []
+
+        if isinstance(call.func, PyIRAttribute):
+            mname = call.func.attr
+            base = call.func.value
+
+            if isinstance(base, PyIRSymLink):
+                base_types = env.get(base.symbol_id) or set()
+                candidates = [
+                    t for t in base_types if t not in (TYPE_NONE, TYPE_NIL, TYPE_VALUE)
+                ]
+                out: list[str | None] = []
+
+                global_m = getattr(ctx, "method_return_ann_by_class", None)
+                if not isinstance(global_m, dict):
+                    global_m = {}
+
+                for cls_name in candidates:
+                    for owner in TypeFlowPass._iter_class_lineage(
+                        cls_name, class_bases_by_name
+                    ):
+                        ann = method_ret_ann_by_class.get((owner, mname))
+                        if ann is None:
+                            ann = global_m.get((owner, mname))
+
+                        if isinstance(ann, (str, type(None))):
+                            out.append(ann)
+                            break
+
+                return out
+
+        return []
+
+    @staticmethod
+    def _iter_class_lineage(
+        cls_name: str, class_bases_by_name: dict[str, tuple[str, ...]]
+    ) -> Iterable[str]:
+        """
+        Yields cls_name, then bases in BFS order (best-effort).
+        """
+        yield cls_name
+        seen: set[str] = {cls_name}
+        q: list[str] = [cls_name]
+
+        global_bases = getattr(class_bases_by_name, "get", None)
+
+        while q:
+            cur = q.pop(0)
+            bases = class_bases_by_name.get(cur) or ()
+            if not bases:
+                pass
+
+            for b in bases:
+                if b in seen:
+                    continue
+                seen.add(b)
+                yield b
+                q.append(b)
 
     @staticmethod
     def _narrow_from_test(
@@ -775,19 +1064,16 @@ class TypeFlowPass:
                     t_true = {TYPE_VALUE}
 
                 env_true[sym] = t_true
-
                 env_false[sym] = {rhs_kind}
                 return env_true, env_false
 
             env_true[sym] = {rhs_kind}
-
             t_false = set(cur)
             t_false.discard(rhs_kind)
             if not t_false:
                 t_false = {TYPE_VALUE}
 
             env_false[sym] = t_false
-
             return env_true, env_false
 
         return env, env
