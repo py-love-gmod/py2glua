@@ -22,6 +22,7 @@ from .passes.expand import (
     ExpandContext,
     NormalizeCallArgumentsPass,
     RewriteAnonymousFunctionsPass,
+    RewriteClassCtorCallsPass,
     RewriteInlineCallsPass,
     RewriteWithContextManagerPass,
 )
@@ -32,6 +33,7 @@ from .passes.lowering import (
     NilFoldPass,
     StripCompilerDirectiveDefPass,
     StripNoCompileAndGmodApiDefsPass,
+    StripPythonOnlyNodesPass,
 )
 from .passes.normalize import (
     AttachDecoratorsPass,
@@ -61,6 +63,7 @@ class Compiler:
     expand_passes = [
         CollectLocalSignaturesPass,  # kwargs args нормализация
         NormalizeCallArgumentsPass,  # kwargs args нормализация
+        RewriteClassCtorCallsPass,  # class() -> class.__init__()
         CollectContextManagersPass,  # with развёртка
         RewriteWithContextManagerPass,  # with развёртка
         CollectInlineFunctionsPass,  # inline
@@ -83,6 +86,7 @@ class Compiler:
         FoldCompileTimeBoolConstsPass,  # DEBUG и TYPE_CHECKING
         StripNoCompileAndGmodApiDefsPass,  # Стрип no_compile и gmod_api
         StripCompilerDirectiveDefPass,  # Стрип CD
+        StripPythonOnlyNodesPass,  # Стрип анотированных асайнов.
         ConstFoldingPass,  # Конст фолдинг
         DcePass,  # DCE
     ]

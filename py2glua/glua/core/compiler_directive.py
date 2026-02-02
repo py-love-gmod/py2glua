@@ -82,7 +82,7 @@ class CompilerDirective:
     # endregion
 
     @staticmethod
-    def gmod_api(name: str, realm: list[RealmMarker]) -> Callable:
+    def gmod_api(name: str, realm: list[RealmMarker], method: bool = False) -> Callable:
         """Помечает функцию или класс как элемент GMod API
 
         Делает две вещи:

@@ -3,3 +3,4 @@ from .context_manager import CollectContextManagersPass, RewriteWithContextManag
 from .expand_context import ExpandContext
 from .inline import CollectInlineFunctionsPass, RewriteInlineCallsPass
 from .normalize_args import CollectLocalSignaturesPass, NormalizeCallArgumentsPass
+from .rewrite_class_ctor_calls import RewriteClassCtorCallsPass
