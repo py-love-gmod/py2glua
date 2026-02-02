@@ -30,6 +30,8 @@ from .passes.lowering import (
     DcePass,
     FoldCompileTimeBoolConstsPass,
     NilFoldPass,
+    StripCompilerDirectiveDefPass,
+    StripNoCompileAndGmodApiDefsPass,
 )
 from .passes.normalize import (
     AttachDecoratorsPass,
@@ -79,6 +81,8 @@ class Compiler:
     lowering_passes = [
         NilFoldPass,  # nil fold
         FoldCompileTimeBoolConstsPass,  # DEBUG и TYPE_CHECKING
+        StripNoCompileAndGmodApiDefsPass,  # Стрип no_compile и gmod_api
+        StripCompilerDirectiveDefPass,  # Стрип CD
         ConstFoldingPass,  # Конст фолдинг
         DcePass,  # DCE
     ]
