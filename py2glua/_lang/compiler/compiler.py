@@ -7,12 +7,13 @@ from ..._cli import CompilerExit, log_step
 from ...config import Py2GluaConfig
 from ..py.ir_builder import PyIRBuilder, PyIRFile
 from .import_resolver import ImportResolver
-from .passes.analysis.symlinks import (
+from .passes.analysis import (
     BuildScopesPass,
     CollectDefsPass,
     ResolveUsesPass,
     RewriteToSymlinksPass,
     SymLinkContext,
+    TypeFlowPass,
 )
 from .passes.expand import (
     CollectAnonymousFunctionsPass,
@@ -27,10 +28,13 @@ from .passes.expand import (
     RewriteWithContextManagerPass,
 )
 from .passes.lowering import (
+    CollectGmodApiDeclsPass,
     ConstFoldingPass,
     DcePass,
+    FinalizeGmodApiRegistryPass,
     FoldCompileTimeBoolConstsPass,
     NilFoldPass,
+    RewriteGmodApiCallsPass,
     StripCompilerDirectiveDefPass,
     StripNoCompileAndGmodApiDefsPass,
     StripPythonOnlyNodesPass,
@@ -79,14 +83,18 @@ class Compiler:
         ResolveUsesPass,
         RewriteToSymlinksPass,
         # ===
+        TypeFlowPass,  # Типы блять
     ]
 
     lowering_passes = [
         NilFoldPass,  # nil fold
         FoldCompileTimeBoolConstsPass,  # DEBUG и TYPE_CHECKING
+        StripPythonOnlyNodesPass,  # Стрип анотированных асайнов.
+        CollectGmodApiDeclsPass,  # gmod api
+        FinalizeGmodApiRegistryPass,  # gmod api
+        RewriteGmodApiCallsPass,  # gmod api
         StripNoCompileAndGmodApiDefsPass,  # Стрип no_compile и gmod_api
         StripCompilerDirectiveDefPass,  # Стрип CD
-        StripPythonOnlyNodesPass,  # Стрип анотированных асайнов.
         ConstFoldingPass,  # Конст фолдинг
         DcePass,  # DCE
     ]
@@ -327,10 +335,10 @@ class Compiler:
 
                 except Exception as e:
                     CompilerExit.internal_error(
-                        "Lowering error\n"
-                        f"File: {ir.path}\n"
+                        "Ошибка упрощения\n"
+                        f"Файл: {ir.path}\n"
                         f"Pass: {p.__name__}\n"
-                        f"Error: {e}",
+                        f"Ошибка: {e}",
                     )
 
     # endregion
