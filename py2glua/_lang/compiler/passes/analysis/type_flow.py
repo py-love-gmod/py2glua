@@ -479,11 +479,21 @@ class TypeFlowPass:
 
         if isinstance(st, PyIRWhile):
             TypeFlowPass._walk_expr(ctx, st.test, env, snapshots)
+
+            env_true, _env_false = TypeFlowPass._narrow_from_test(
+                ctx,
+                st.test,
+                env,
+                warn_once,
+                nil_ids,
+                types_alias_ids,
+            )
+
             _env_body, _ = TypeFlowPass._walk_stmt_list(
                 ir,
                 ctx,
                 st.body,
-                env,
+                env_true,
                 type_sets,
                 snapshots,
                 warn_once,
@@ -492,6 +502,7 @@ class TypeFlowPass:
                 fn_ret_by_sym,
                 method_ret_by_class,
             )
+
             return env, False
 
         if isinstance(st, PyIRFor):

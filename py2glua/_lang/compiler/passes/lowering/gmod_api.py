@@ -512,8 +512,8 @@ class RewriteGmodApiCallsPass:
                         _warn_once(
                             ctx,
                             f"nullish_call_{ir.path}_{node.line}_{node.offset}",
-                            f"WARN: Вызов '{mname}' может выполняться на None/Nil. "
-                            f"Файл: {ir.path}, LINE|OFFSET: {node.line}|{node.offset}",
+                            f"WARN: Вызов '{mname}' может выполняться на None|Nil\n"
+                            f"Файл: {ir.path}\nLINE|OFFSET: {node.line}|{node.offset}",
                         )
 
                     if not cls_ids:
