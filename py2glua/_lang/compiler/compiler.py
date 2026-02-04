@@ -29,13 +29,16 @@ from .passes.expand import (
 )
 from .passes.lowering import (
     CollectGmodApiDeclsPass,
+    CollectGmodSpecialEnumDeclsPass,
     ConstFoldingPass,
     DcePass,
     FinalizeGmodApiRegistryPass,
     FoldCompileTimeBoolConstsPass,
+    FoldGmodSpecialEnumUsesPass,
     NilFoldPass,
     RewriteGmodApiCallsPass,
     StripCompilerDirectiveDefPass,
+    StripEnumsAndGmodSpecialEnumDefsPass,
     StripNoCompileAndGmodApiDefsPass,
     StripPythonOnlyNodesPass,
 )
@@ -89,10 +92,13 @@ class Compiler:
     lowering_passes = [
         NilFoldPass,  # nil fold
         FoldCompileTimeBoolConstsPass,  # DEBUG и TYPE_CHECKING
+        CollectGmodSpecialEnumDeclsPass,  # Enum fold
+        FoldGmodSpecialEnumUsesPass,  # Enum fold
         StripPythonOnlyNodesPass,  # Стрип анотированных асайнов.
         CollectGmodApiDeclsPass,  # gmod api
         FinalizeGmodApiRegistryPass,  # gmod api
         RewriteGmodApiCallsPass,  # gmod api
+        StripEnumsAndGmodSpecialEnumDefsPass,  # Стрип Enum
         StripNoCompileAndGmodApiDefsPass,  # Стрип no_compile и gmod_api
         StripCompilerDirectiveDefPass,  # Стрип CD
         ConstFoldingPass,  # Конст фолдинг
