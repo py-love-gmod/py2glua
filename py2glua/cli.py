@@ -1,11 +1,48 @@
 import argparse
+import re
+import secrets
 import shutil
+import string
 from pathlib import Path
 
 from ._cli import CompilerExit, log_step, logger, setup_logging
 from ._lang.compiler import Compiler
 from ._lang.lua_emiter import LuaEmitter
 from .config import Py2GluaConfig
+
+_LUA_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _gen_namespace() -> str:
+    alphabet = string.ascii_lowercase
+    suffix = "".join(secrets.choice(alphabet) for _ in range(8))
+    return f"_p2g_{suffix}"
+
+
+def _validate_namespace(ns: str) -> None:
+    if _LUA_IDENT_RE.match(ns):
+        return
+
+    if not ns:
+        reason = "namespace пустой"
+
+    elif not re.match(r"^[A-Za-z_]", ns):
+        reason = "namespace должен начинаться с буквы или '_'"
+
+    elif not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", ns):
+        reason = (
+            "namespace может содержать только буквы, цифры и '_' "
+            "и не может содержать точки, дефисы или пробелы"
+        )
+
+    else:
+        reason = "неизвестная ошибка формата"
+
+    CompilerExit.user_error(
+        f"Некорректный namespace: {ns}\nПричина: {reason}",
+        show_path=False,
+        show_pos=False,
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -53,9 +90,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "-n",
         "--namespace",
         type=str,
-        help="Неймспейс проекта",
+        help="Неймспейс проекта (Lua identifier)",
     )
-
     # endregion
 
     # region Version cmd
@@ -67,7 +103,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _build(src: Path, out: Path) -> None:
     project_ir = Compiler.build()
-
     emitter = LuaEmitter()
 
     with log_step("[7/7] Генерация GLua..."):
@@ -84,13 +119,12 @@ def _build(src: Path, out: Path) -> None:
             if ir.path is None:
                 CompilerExit.internal_error("Внутренняя ошибка: IR-файл без path")
 
-            rel = ir.path.relative_to(src)  # type: ignore
+            rel = ir.path.relative_to(src)  # type: ignore[arg-type]
             out_path = out / rel.with_suffix(".lua")
 
             out_path.parent.mkdir(parents=True, exist_ok=True)
 
             result = emitter.emit_file(ir)
-
             out_path.write_text(result.code, encoding="utf-8")
 
     logger.info("Сборка завершена")
@@ -99,6 +133,7 @@ def _build(src: Path, out: Path) -> None:
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
+
     setup_logging(args.verbose)
 
     Py2GluaConfig.verbose = args.verbose
@@ -107,13 +142,24 @@ def main() -> None:
     Py2GluaConfig.source = args.src.resolve()
     Py2GluaConfig.output = args.out.resolve()
 
-    logger.debug(f"""Py2Glua
-Version: {Py2GluaConfig.version()}
-Source : {Py2GluaConfig.source}
-Output : {Py2GluaConfig.output}
-Verbose: {Py2GluaConfig.verbose}
-Debug  : {Py2GluaConfig.debug}
-""")
+    if args.namespace:
+        _validate_namespace(args.namespace)
+        Py2GluaConfig.namespace = args.namespace
+    else:
+        ns = _gen_namespace()
+        Py2GluaConfig.namespace = ns
+        logger.warning(f"Namespace не задан, сгенерирован автоматически: {ns}")
+
+    logger.debug(
+        f"""Py2Glua
+Version  : {Py2GluaConfig.version()}
+Source   : {Py2GluaConfig.source}
+Output   : {Py2GluaConfig.output}
+Namespace: {Py2GluaConfig.namespace}
+Verbose  : {Py2GluaConfig.verbose}
+Debug    : {Py2GluaConfig.debug}
+"""
+    )
 
     match args.cmd:
         case "build":

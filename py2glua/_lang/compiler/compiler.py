@@ -65,15 +65,15 @@ class Compiler:
     ]
 
     expand_passes = [
-        CollectLocalSignaturesPass,  # kwargs args нормализация
-        NormalizeCallArgumentsPass,  # kwargs args нормализация
+        CollectLocalSignaturesPass,  # args+kwargs нормализация
+        NormalizeCallArgumentsPass,  # args+kwargs нормализация
         RewriteClassCtorCallsPass,  # class() -> class.__init__()
         CollectContextManagersPass,  # with развёртка
         RewriteWithContextManagerPass,  # with развёртка
-        CollectInlineFunctionsPass,  # inline
-        RewriteInlineCallsPass,  # inline
-        CollectAnonymousFunctionsPass,  # anonymous обработка
-        RewriteAnonymousFunctionsPass,  # anonymous обработка
+        CollectInlineFunctionsPass,  # inline развёртка
+        RewriteInlineCallsPass,  # inline развёртка
+        CollectAnonymousFunctionsPass,  # anonymous развёртка
+        RewriteAnonymousFunctionsPass,  # anonymous развёртка
     ]
 
     analysis_passes = [
@@ -83,7 +83,7 @@ class Compiler:
         ResolveUsesPass,
         RewriteToSymlinksPass,
         # ===
-        TypeFlowPass,  # Типы блять
+        TypeFlowPass,  # Типизация и проверки типов
     ]
 
     lowering_passes = [

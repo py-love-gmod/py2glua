@@ -9,6 +9,8 @@ class Py2GluaConfig:
     verbose: bool = False
     debug: bool = False
 
+    namespace: str = ""
+
     @classmethod
     def version(cls) -> str:
         try:

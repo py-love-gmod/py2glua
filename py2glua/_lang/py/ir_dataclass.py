@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum, IntEnum, auto
 from pathlib import Path
 
+from ...config import Py2GluaConfig
+
 
 # Base
 @dataclass
@@ -118,7 +120,7 @@ class PyIRConstant(PyIRNode):
             return "nil"
 
         if v is None:
-            return "TODO: None"
+            return f"{Py2GluaConfig.namespace}.None"
 
         if isinstance(v, bool):
             return "true" if v else "false"
