@@ -14,7 +14,7 @@ class PyIRNode:
     offset: int | None
 
     def walk(self):
-        raise NotImplementedError()
+        raise NotImplementedError("walk() must be implemented by subclasses")
 
 
 # File / Decorators
@@ -49,12 +49,9 @@ class PyIRDecorator(PyIRNode):
 
     def walk(self):
         yield self
-
         yield from self.exper.walk()
-
         for a in self.args_p:
             yield from a.walk()
-
         for a in self.args_kw.values():
             yield from a.walk()
 
@@ -150,24 +147,61 @@ class PyIRVarUse(PyIRNode):
         return self.name
 
 
+class PyIRVarStorage(IntEnum):
+    """
+    How a declared name must be emitted.
+
+    LOCAL:
+      - Emit `local name` (or `local name = ...` when used with PyIRAssign.is_local)
+
+    GLOBAL:
+      - Emit bare `name` (discouraged; should only be used intentionally)
+
+    EXPORT:
+      - Still local at declaration-site, but later a pass can export it via:
+            <namespace>.<module>.<name> = name
+      - Emission of export assignment is NOT done here (this is just the storage marker).
+    """
+
+    LOCAL = auto()
+    GLOBAL = auto()
+    EXPORT = auto()
+
+
 @dataclass
 class PyIRVarCreate(PyIRNode):
     """
     Statement-only node.
 
     Contract:
-    - Must not appear inside expressions.
-    - Emit uses `local <name>` unless is_global=True.
+      - Must not appear inside expressions.
+      - Emitter uses `storage` to decide `local` vs bare name.
+
+    Backward compatibility:
+      - `is_global` is kept as a legacy alias for storage==GLOBAL.
+      - Prefer setting `storage=PyIRVarStorage.LOCAL|GLOBAL|EXPORT`.
     """
 
     name: str
     is_global: bool = False
+    storage: PyIRVarStorage | None = None
+
+    def __post_init__(self) -> None:
+        if self.storage is None:
+            self.storage = (
+                PyIRVarStorage.GLOBAL if self.is_global else PyIRVarStorage.LOCAL
+            )
+        else:
+            self.is_global = self.storage == PyIRVarStorage.GLOBAL
 
     def walk(self):
         yield self
 
     def __str__(self) -> str:
-        return self.name if self.is_global else f"local {self.name}"
+        if self.storage in (PyIRVarStorage.GLOBAL,):
+            return self.name
+
+        return f"local {self.name}"
 
 
 # FString (must be lowered)
@@ -199,7 +233,6 @@ class PyIRAnnotation(PyIRVarCreate):
         yield self
 
     def __str__(self) -> str:
-        # If this reaches emit - it's a pipeline bug.
         raise AssertionError("PyIRAnnotation must be stripped before emit")
 
 
@@ -395,6 +428,7 @@ class PyAugAssignType(IntEnum):
 class PyIRAssign(PyIRNode):
     targets: list[PyIRNode]
     value: PyIRNode
+    is_local: bool = False
 
     def walk(self):
         yield self
@@ -452,8 +486,13 @@ class PyIRFunctionDef(PyIRNode):
 
     def walk(self):
         yield self
+
         for d in self.decorators:
             yield from d.walk()
+
+        for _ann, default in self.signature.values():
+            if default is not None:
+                yield from default.walk()
 
         for n in self.body:
             yield from n.walk()
@@ -468,6 +507,7 @@ class PyIRClassDef(PyIRNode):
 
     def walk(self):
         yield self
+
         for b in self.bases:
             yield from b.walk()
 
@@ -523,11 +563,12 @@ class PyIRFor(PyIRNode):
 
 @dataclass
 class PyIRReturn(PyIRNode):
-    value: PyIRNode
+    value: PyIRNode | None = None
 
     def walk(self):
         yield self
-        yield from self.value.walk()
+        if self.value is not None:
+            yield from self.value.walk()
 
 
 @dataclass
@@ -629,10 +670,10 @@ class PyIREmitExpr(PyIRNode):
             return f"{self.args_p[0]}[{self.args_p[1]}]"
 
         if self.kind == PyIREmitKind.CALL:
-            args = ", ".join(str(a) for a in self.args_p)
             if self.args_kw:
                 raise AssertionError("CALL does not support keyword args in emit expr")
 
+            args = ", ".join(str(a) for a in self.args_p)
             return f"{self.name}({args})"
 
-        raise AssertionError("unknown emit kind")
+        raise AssertionError("Unknown emit kind")

@@ -115,6 +115,11 @@ class SymLinkContext:
     # module.name -> { export_name -> SymbolId }
     module_exports: dict[str, dict[str, SymbolId]] = field(default_factory=dict)
 
+    # resolve
+    project_deps: dict[str, set[str]] = field(default_factory=dict)
+    project_exports: dict[str, set[str]] = field(default_factory=dict)
+    project_path_by_module: dict[str, Path] = field(default_factory=dict)
+
     def uid(self, node: PyIRNode) -> int:
         k = id(node)
         existing = self._node_uid.get(k)
@@ -195,7 +200,6 @@ class SymLinkContext:
         idx = self._last_index(parts, "py2glua")
         if idx is not None:
             tail = list(parts[idx:])
-
             if not tail:
                 return None
 
@@ -231,7 +235,6 @@ class SymLinkContext:
             stem = last[:-3]
             if stem == "__init__":
                 tail = tail[:-1]
-
             else:
                 tail[-1] = stem
 
@@ -254,18 +257,9 @@ class SymLinkContext:
 
         self._module_index_ready = True
 
-    def get_exported_symbol(
-        self,
-        module_path: str,
-        symbol: str,
-    ) -> Symbol | None:
+    def get_exported_symbol(self, module_path: str, symbol: str) -> Symbol | None:
         """
         Получить экспортируемый символ из модуля.
-
-        module_path: "a.b.c"
-        symbol: имя экспортируемого символа
-
-        Возвращает Symbol или None, если не найден.
         """
         self.ensure_module_index()
 
@@ -295,36 +289,41 @@ class BuildScopesPass:
         ctx.node_scope[file_uid] = file_scope
         ctx.file_scope[file_uid] = file_scope
 
+        def iter_nodes(val):
+            if isinstance(val, PyIRNode):
+                yield val
+                return
+
+            if isinstance(val, (list, tuple)):
+                for x in val:
+                    yield from iter_nodes(x)
+
+                return
+
+            if isinstance(val, dict):
+                for k, v in val.items():
+                    yield from iter_nodes(k)
+                    yield from iter_nodes(v)
+
+                return
+
         def iter_children_direct(node: PyIRNode):
             if not is_dataclass(node):
                 return
 
             for f in fields(node):
                 v = getattr(node, f.name)
-
-                if isinstance(v, PyIRNode):
-                    yield v
-                    continue
-
-                if isinstance(v, list):
-                    for x in v:
-                        if isinstance(x, PyIRNode):
-                            yield x
-
-                    continue
-
-                if isinstance(v, dict):
-                    for x in v.values():
-                        if isinstance(x, PyIRNode):
-                            yield x
-
-                    continue
+                yield from iter_nodes(v)
 
         def walk(node: PyIRNode, scope: ScopeId) -> None:
             node_uid = ctx.uid(node)
             ctx.node_scope[node_uid] = scope
 
             if isinstance(node, PyIRFunctionDef):
+                for _ann, default in node.signature.values():
+                    if default is not None:
+                        walk(default, scope)
+
                 body_scope = ctx.new_scope(parent=scope, file=ir.path, kind="function")
                 ctx.fn_body_scope[node_uid] = body_scope
 
@@ -337,6 +336,10 @@ class BuildScopesPass:
                 return
 
             if isinstance(node, PyIRFunctionExpr):
+                for _ann, default in node.signature.values():
+                    if default is not None:
+                        walk(default, scope)
+
                 body_scope = ctx.new_scope(parent=scope, file=ir.path, kind="function")
                 ctx.fn_body_scope[node_uid] = body_scope
 
@@ -357,6 +360,7 @@ class BuildScopesPass:
 
                 for n2 in node.body:
                     walk(n2, body_scope)
+
                 return
 
             for ch in iter_children_direct(node):
@@ -516,7 +520,6 @@ class RewriteToSymlinksPass:
             while isinstance(cur, PyIRAttribute):
                 attrs_rev.append(cur.attr)
                 cur = cur.value
-
             attrs_rev.reverse()
             return cur, attrs_rev
 
@@ -547,7 +550,7 @@ class RewriteToSymlinksPass:
                 if rest and next_module in ctx.module_exports:
                     continue
 
-                cur: PyIRNode = sym_from_symbol_id(
+                cur2: PyIRNode = sym_from_symbol_id(
                     target,
                     line=n.line,
                     offset=n.offset,
@@ -555,14 +558,14 @@ class RewriteToSymlinksPass:
                 )
 
                 for a in rest:
-                    cur = PyIRAttribute(
+                    cur2 = PyIRAttribute(
                         line=n.line,
                         offset=n.offset,
-                        value=cur,
+                        value=cur2,
                         attr=a,
                     )
 
-                return cur
+                return cur2
 
             return n
 
@@ -618,16 +621,35 @@ class RewriteToSymlinksPass:
                 return node
 
             if isinstance(node, PyIRFunctionDef):
-                node.decorators = [rw(d, store=False) for d in node.decorators]  # pyright: ignore
+                node.decorators = [rw(d, store=False) for d in node.decorators]  # type: ignore
+
+                new_sig: dict[str, tuple[str | None, PyIRNode | None]] = {}
+                for k, (ann, default) in node.signature.items():
+                    if default is not None:
+                        default = rw(default, store=False)
+
+                    new_sig[k] = (ann, default)
+
+                node.signature = new_sig
+
                 node.body = [rw(n, store=False) for n in node.body]
                 return node
 
             if isinstance(node, PyIRFunctionExpr):
+                new_sig: dict[str, tuple[str | None, PyIRNode | None]] = {}
+                for k, (ann, default) in node.signature.items():
+                    if default is not None:
+                        default = rw(default, store=False)
+
+                    new_sig[k] = (ann, default)
+
+                node.signature = new_sig
+
                 node.body = [rw(n, store=False) for n in node.body]
                 return node
 
             if isinstance(node, PyIRClassDef):
-                node.decorators = [rw(d, store=False) for d in node.decorators]  # pyright: ignore
+                node.decorators = [rw(d, store=False) for d in node.decorators]  # type: ignore
                 node.bases = [rw(b, store=False) for b in node.bases]
                 node.body = [rw(n, store=False) for n in node.body]
                 return node
@@ -635,6 +657,7 @@ class RewriteToSymlinksPass:
             if is_dataclass(node):
                 for f in fields(node):
                     v = getattr(node, f.name)
+
                     if isinstance(v, PyIRNode):
                         setattr(node, f.name, rw(v, store=False))
 
@@ -648,12 +671,29 @@ class RewriteToSymlinksPass:
                             ],
                         )
 
+                    elif isinstance(v, tuple):
+                        out_t = []
+                        changed = False
+                        for x in v:
+                            if isinstance(x, PyIRNode):
+                                nx = rw(x, store=False)
+                                changed = changed or (nx is not x)
+                                out_t.append(nx)
+
+                            else:
+                                out_t.append(x)
+
+                        if changed:
+                            setattr(node, f.name, tuple(out_t))
+
                     elif isinstance(v, dict):
                         setattr(
                             node,
                             f.name,
                             {
-                                k: rw(x, store=False) if isinstance(x, PyIRNode) else x
+                                k: (
+                                    rw(x, store=False) if isinstance(x, PyIRNode) else x
+                                )
                                 for k, x in v.items()
                             },
                         )

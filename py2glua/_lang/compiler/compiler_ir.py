@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 from ..py.ir_dataclass import PyIRNode
@@ -52,7 +54,8 @@ class PyIRFunctionExpr(PyIRNode):
     Lua function literal (expression):
         function(args) ... end
 
-    signature: как у PyIRFunctionDef.signature
+    signature: same shape as PyIRFunctionDef.signature:
+      dict[str, tuple[str|None, PyIRNode|None]]
     """
 
     signature: dict[str, tuple[str | None, PyIRNode | None]]
@@ -60,5 +63,10 @@ class PyIRFunctionExpr(PyIRNode):
 
     def walk(self):
         yield self
+
+        for _ann, default in self.signature.values():
+            if default is not None:
+                yield from default.walk()
+
         for n in self.body:
             yield from n.walk()

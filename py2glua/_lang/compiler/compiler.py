@@ -37,6 +37,7 @@ from .passes.lowering import (
     FoldGmodSpecialEnumUsesPass,
     NilFoldPass,
     RewriteGmodApiCallsPass,
+    StripCommentsImportsPass,
     StripCompilerDirectiveDefPass,
     StripEnumsAndGmodSpecialEnumDefsPass,
     StripNoCompileAndGmodApiDefsPass,
@@ -45,6 +46,12 @@ from .passes.lowering import (
 from .passes.normalize import (
     AttachDecoratorsPass,
     NormalizeImportsPass,
+)
+from .passes.project import (
+    BuildAutorunInitProjectPass,
+    CleanUpEmptyFilesPass,
+    EmitLuaProjectPass,
+    ResolveSymlinksToNamespaceProjectPass,
 )
 from .passes.sanity_check import (
     ImportSanityCheckPass,
@@ -90,6 +97,7 @@ class Compiler:
     ]
 
     lowering_passes = [
+        StripCommentsImportsPass,  # Стрип комментариев
         NilFoldPass,  # nil fold
         FoldCompileTimeBoolConstsPass,  # DEBUG и TYPE_CHECKING
         CollectGmodSpecialEnumDeclsPass,  # Enum fold
@@ -105,7 +113,12 @@ class Compiler:
         DcePass,  # DCE
     ]
 
-    project_passes = []
+    project_passes = [
+        CleanUpEmptyFilesPass,  # Очистка "пустых" файлов
+        ResolveSymlinksToNamespaceProjectPass,  # Ресолв симлинков
+        BuildAutorunInitProjectPass,  # auto init
+        EmitLuaProjectPass,  # Кодген финальный
+    ]
 
     # region сборка исходников
     @classmethod
@@ -347,31 +360,44 @@ class Compiler:
                         f"Ошибка: {e}",
                     )
 
+    @classmethod
+    def _run_project_passes(
+        cls,
+        all_ir: list[PyIRFile],
+        ctx: SymLinkContext,
+    ) -> None:
+        for p in cls.project_passes:
+            try:
+                all_ir = p.run(all_ir, ctx)
+
+            except Exception as e:
+                CompilerExit.internal_error(
+                    f"Ошибка project-pass\nPass: {p.__name__}\nОшибка: {e}",
+                )
+
     # endregion
 
     # public API
     @classmethod
-    def build(cls) -> list[PyIRFile]:
-        with log_step("[1/7] Сборка исходников..."):
+    def build(cls) -> None:
+        with log_step("[1/6] Сборка исходников..."):
             project_ir, internal_ir = cls.build_from_src()
 
-        with log_step("[2/7] Проверка валидности..."):
+        with log_step("[2/6] Проверка валидности..."):
             cls._run_sanity_check(project_ir, internal_ir)
 
-        with log_step("[3/7] Развёртка..."):
+        with log_step("[3/6] Развёртка..."):
             cls._run_expand(project_ir, internal_ir)
 
-        with log_step("[4/7] Анализ..."):
+        with log_step("[4/6] Анализ..."):
             slctx = cls._run_analysis(project_ir, internal_ir)
 
-        with log_step("[5/7] Упрощение..."):
+        with log_step("[5/6] Упрощение..."):
             cls._run_lowering(project_ir, internal_ir, slctx)
 
-        with log_step("[6/7] Сборка..."):
-            pass
-
-        project_ir.sort(key=lambda f: str(f.path))
-        return project_ir
+        with log_step("[6/6] Сборка lua..."):
+            all_ir = [*internal_ir, *project_ir]
+            cls._run_project_passes(all_ir, slctx)
 
     # region utils
     @staticmethod

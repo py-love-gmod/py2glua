@@ -1,13 +1,11 @@
 import argparse
 import re
 import secrets
-import shutil
 import string
 from pathlib import Path
 
-from ._cli import CompilerExit, log_step, logger, setup_logging
+from ._cli import CompilerExit, logger, setup_logging
 from ._lang.compiler import Compiler
-from ._lang.lua_emiter import LuaEmitter
 from .config import Py2GluaConfig
 
 _LUA_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -101,32 +99,8 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _build(src: Path, out: Path) -> None:
-    project_ir = Compiler.build()
-    emitter = LuaEmitter()
-
-    with log_step("[7/7] Генерация GLua..."):
-        if out.exists():
-            if not out.is_dir():
-                CompilerExit.system_error(f"Путь build не является директорией: {out}")
-
-            logger.debug("Очистка build директории...")
-            shutil.rmtree(out)
-
-        out.mkdir(parents=True, exist_ok=True)
-
-        for ir in project_ir:
-            if ir.path is None:
-                CompilerExit.internal_error("Внутренняя ошибка: IR-файл без path")
-
-            rel = ir.path.relative_to(src)  # type: ignore[arg-type]
-            out_path = out / rel.with_suffix(".lua")
-
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-
-            result = emitter.emit_file(ir)
-            out_path.write_text(result.code, encoding="utf-8")
-
+def _build() -> None:
+    Compiler.build()
     logger.info("Сборка завершена")
 
 
@@ -145,10 +119,15 @@ def main() -> None:
     if args.namespace:
         _validate_namespace(args.namespace)
         Py2GluaConfig.namespace = args.namespace
+
     else:
         ns = _gen_namespace()
         Py2GluaConfig.namespace = ns
-        logger.warning(f"Namespace не задан, сгенерирован автоматически: {ns}")
+        logger.warning(
+            "Namespace не задан\n"
+            f"Namespace задан автоматически: {ns}\n"
+            "Установить свой можно через параметр -n | --namespace"
+        )
 
     logger.debug(
         f"""Py2Glua
@@ -163,7 +142,7 @@ Debug    : {Py2GluaConfig.debug}
 
     match args.cmd:
         case "build":
-            _build(Py2GluaConfig.source, Py2GluaConfig.output)
+            _build()
             CompilerExit.generic(0)
 
         case "version":
