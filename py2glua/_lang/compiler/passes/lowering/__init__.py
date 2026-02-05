@@ -7,6 +7,10 @@ from .gmod_api import (
     FinalizeGmodApiRegistryPass,
     RewriteGmodApiCallsPass,
 )
+from .lazy_compile import (
+    CountSymlinkUsesPass,
+    StripLazyCompileUnusedDefsPass,
+)
 from .nil_fold import NilFoldPass
 from .strip_asign import StripPythonOnlyNodesPass
 from .strip_cd import StripCompilerDirectiveDefPass

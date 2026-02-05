@@ -31,6 +31,7 @@ from .passes.lowering import (
     CollectGmodApiDeclsPass,
     CollectGmodSpecialEnumDeclsPass,
     ConstFoldingPass,
+    CountSymlinkUsesPass,
     DcePass,
     FinalizeGmodApiRegistryPass,
     FoldCompileTimeBoolConstsPass,
@@ -40,6 +41,7 @@ from .passes.lowering import (
     StripCommentsImportsPass,
     StripCompilerDirectiveDefPass,
     StripEnumsAndGmodSpecialEnumDefsPass,
+    StripLazyCompileUnusedDefsPass,
     StripNoCompileAndGmodApiDefsPass,
     StripPythonOnlyNodesPass,
 )
@@ -97,7 +99,6 @@ class Compiler:
     ]
 
     lowering_passes = [
-        StripCommentsImportsPass,  # Стрип комментариев
         NilFoldPass,  # nil fold
         FoldCompileTimeBoolConstsPass,  # DEBUG и TYPE_CHECKING
         CollectGmodSpecialEnumDeclsPass,  # Enum fold
@@ -106,10 +107,13 @@ class Compiler:
         CollectGmodApiDeclsPass,  # gmod api
         FinalizeGmodApiRegistryPass,  # gmod api
         RewriteGmodApiCallsPass,  # gmod api
+        CountSymlinkUsesPass,  # Считаем для lazy_compile
+        StripLazyCompileUnusedDefsPass,  # Обрабатываем lazy_compile
         StripEnumsAndGmodSpecialEnumDefsPass,  # Стрип Enum
         StripNoCompileAndGmodApiDefsPass,  # Стрип no_compile и gmod_api
         StripCompilerDirectiveDefPass,  # Стрип CD
         ConstFoldingPass,  # Конст фолдинг
+        StripCommentsImportsPass,  # Стрип комментариев и импортов
         DcePass,  # DCE
     ]
 
