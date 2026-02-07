@@ -26,6 +26,7 @@ from ....py.ir_dataclass import (
     PyIREmitKind,
     PyIRFile,
     PyIRFor,
+    PyIRFString,
     PyIRFunctionDef,
     PyIRIf,
     PyIRImport,
@@ -235,7 +236,6 @@ class LuaEmitter:
         if isinstance(node, PyIREmitExpr) and node.kind == PyIREmitKind.RAW:
             self._flush_pending_locals(top_level=top_level)
             self._maybe_blankline_before("stmt", top_level=top_level)
-            # _wl() handles multiline strings.
             self._wl(node.name or "")
             return
 
@@ -381,6 +381,7 @@ class LuaEmitter:
                 PyIRUnaryOP,
                 PyIRSymLink,
                 PyIRFunctionExpr,
+                PyIRFString,
             ),
         ):
             self._flush_pending_locals(top_level=top_level)
@@ -533,14 +534,60 @@ class LuaEmitter:
         v = self._expr(node.value)
         self._wl(f"{t} = ({t} {op} {v})")
 
+    @staticmethod
+    def _lua_string_literal(s: str) -> str:
+        s = s.replace("\\", "\\\\")
+        s = s.replace('"', '\\"')
+        s = s.replace("\r", "\\r")
+        s = s.replace("\n", "\\n")
+        s = s.replace("\t", "\\t")
+        return f'"{s}"'
+
+    def _emit_fstring(self, node: PyIRFString) -> str:
+        if not node.parts:
+            return '""'
+
+        chunks: list[str] = []
+
+        def push_str(text: str) -> None:
+            if not text:
+                return
+            if chunks and chunks[-1].startswith('"') and chunks[-1].endswith('"'):
+                prev = chunks.pop()
+                prev_body = prev[1:-1]
+                text_esc = self._lua_string_literal(text)[1:-1]
+                chunks.append(f'"{prev_body}{text_esc}"')
+            else:
+                chunks.append(self._lua_string_literal(text))
+
+        for p in node.parts:
+            if isinstance(p, str):
+                push_str(p)
+            else:
+                chunks.append(f"tostring({self._expr(p)})")
+
+        if not chunks:
+            return '""'
+        if len(chunks) == 1:
+            return chunks[0]
+
+        return "(" + " .. ".join(chunks) + ")"
+
     def _expr(self, node: PyIRNode) -> str:
         if isinstance(node, PyIRAttribute):
             return f"{self._expr(node.value)}.{node.attr}"
 
+        if isinstance(node, PyIRFString):
+            return self._emit_fstring(node)
+
+        if isinstance(node, PyIRConstant):
+            if isinstance(node.value, str):
+                return self._lua_string_literal(node.value)
+            return str(node)
+
         if isinstance(
             node,
             (
-                PyIRConstant,
                 PyIRVarUse,
                 PyIRVarCreate,
                 PyIRSubscript,
@@ -624,7 +671,7 @@ class LuaEmitter:
             val = item.value
 
             if isinstance(key, PyIRConstant) and isinstance(key.value, str):
-                k = f"[{repr(key.value)}]"
+                k = f"[{self._lua_string_literal(key.value)}]"
             elif isinstance(key, PyIRConstant) and isinstance(key.value, (int, float)):
                 k = f"[{key.value}]"
             else:

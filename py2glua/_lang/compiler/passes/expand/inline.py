@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import fields, is_dataclass
+from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
+from .....config import Py2GluaConfig
 from ....py.ir_dataclass import (
     LuaNil,
     PyIRAssign,
@@ -33,6 +35,8 @@ _CD_PREFIX = (
     "compiler_directive",
     "CompilerDirective",
 )
+
+_KEY_SEP = "::"
 
 
 def _attr_chain_parts(node: PyIRNode) -> List[str] | None:
@@ -68,7 +72,6 @@ def _compiler_directive_kind(dec: PyIRDecorator) -> str | None:
     if isinstance(expr, PyIRAttribute):
         if _is_compiler_directive_attr(expr, method="inline"):
             return "inline"
-
         return None
 
     if isinstance(expr, PyIRCall):
@@ -76,10 +79,13 @@ def _compiler_directive_kind(dec: PyIRDecorator) -> str | None:
         if isinstance(f, PyIRAttribute):
             if _is_compiler_directive_attr(f, method="inline"):
                 return "inline"
-
         return None
 
     return None
+
+
+def _is_inline_def(fn: PyIRFunctionDef) -> bool:
+    return any(_compiler_directive_kind(d) == "inline" for d in fn.decorators)
 
 
 def _collect_target_names(node: PyIRNode, out: Set[str]) -> None:
@@ -116,14 +122,92 @@ def _collect_locals_in_body(stmts: List[PyIRNode], out: Set[str]) -> None:
             continue
 
 
+def _module_parts_from_path(path: Path) -> tuple[str, ...] | None:
+    p = path.resolve()
+
+    parts = p.parts
+    try:
+        src_root = Py2GluaConfig.source.resolve()
+        rel = p.relative_to(src_root)
+    except Exception:
+        rel = None
+
+    if rel is None:
+        try:
+            i = parts.index("py2glua")
+            tail = list(parts[i:])
+        except ValueError:
+            return None
+    else:
+        tail = list(rel.parts)
+
+    if not tail:
+        return None
+
+    last = tail[-1]
+    if last.endswith(".py"):
+        name = last[:-3]
+        tail[-1] = "__init__" if name == "__init__" else name
+
+    return tuple(tail)
+
+
+def _normalize_mod_parts(mod_parts: tuple[str, ...]) -> tuple[str, ...]:
+    # NormalizeImportsPass works with package path without trailing __init__
+    if mod_parts and mod_parts[-1] == "__init__":
+        return mod_parts[:-1]
+    return mod_parts
+
+
+def _ir_mod_parts(ir: PyIRFile) -> tuple[str, ...] | None:
+    if ir.path is None:
+        return None
+    mp = _module_parts_from_path(ir.path)
+    if mp is None:
+        return None
+    return _normalize_mod_parts(mp)
+
+
+def _qual_key(mod_parts: tuple[str, ...], fn_name: str) -> str:
+    return f"{'.'.join(mod_parts)}{_KEY_SEP}{fn_name}"
+
+
+def _call_inline_key(
+    ir_mod_parts: tuple[str, ...] | None, func: PyIRNode
+) -> str | None:
+    """
+    Deterministic keying:
+      - local call:    from_meters(10)   -> "<this_module>::from_meters"
+      - imported call: pkg.mod.fn(10)    -> "pkg.mod::fn"
+    """
+    if isinstance(func, PyIRVarUse):
+        if ir_mod_parts is None:
+            return None
+        return _qual_key(ir_mod_parts, func.name)
+
+    if isinstance(func, PyIRAttribute):
+        parts = _attr_chain_parts(func)
+        if parts is None or len(parts) < 2:
+            return None
+        mod = _normalize_mod_parts(tuple(parts[:-1]))
+        name = parts[-1]
+        if not mod:
+            return None
+        return _qual_key(mod, name)
+
+    return None
+
+
 class CollectInlineFunctionsPass:
     @staticmethod
     def run(ir: PyIRFile, ctx: ExpandContext) -> None:
+        mod_parts = _ir_mod_parts(ir)
+
         for st in ir.body:
             if not isinstance(st, PyIRFunctionDef):
                 continue
 
-            if not any(_compiler_directive_kind(d) == "inline" for d in st.decorators):
+            if not _is_inline_def(st):
                 continue
 
             params = tuple(st.signature.keys())
@@ -131,11 +215,17 @@ class CollectInlineFunctionsPass:
             locals_set: Set[str] = set(params)
             _collect_locals_in_body(st.body, locals_set)
 
-            ctx.inline_templates[st.name] = InlineTemplate(
-                fn=st,
-                params=params,
-                locals=tuple(sorted(locals_set)),
-            )
+            # Strong key: module-qualified, no collisions between modules.
+            if mod_parts is not None:
+                key = _qual_key(mod_parts, st.name)
+                ctx.inline_templates[key] = InlineTemplate(
+                    fn=st,
+                    params=params,
+                    locals=tuple(sorted(locals_set)),
+                )
+            else:
+                # If module path is unknown, we can't safely qualify.
+                continue
 
 
 def _mk_var(name: str, ref: PyIRNode) -> PyIRVarUse:
@@ -172,7 +262,6 @@ def _rename_vars(node: PyIRNode, rename: Dict[str, str]) -> PyIRNode:
         nn = rename.get(node.name)
         if nn is None:
             return deepcopy(node)
-
         return PyIRVarUse(line=node.line, offset=node.offset, name=nn)
 
     if not is_dataclass(node):
@@ -290,8 +379,7 @@ def _rewrite_returns_no_label(
     for st in stmts:
         if isinstance(st, PyIRReturn):
             if ret_store is not None:
-                out.append(_mk_assign(ret_store, deepcopy(st.value), ref))
-
+                out.append(_mk_assign(ret_store, deepcopy(st.value), ref))  # pyright: ignore[reportArgumentType]
             continue
 
         out.append(st)
@@ -312,8 +400,7 @@ def _rewrite_returns_with_label(
     for st in stmts:
         if isinstance(st, PyIRReturn):
             if ret_store is not None:
-                out.append(_mk_assign(ret_store, deepcopy(st.value), ref))
-
+                out.append(_mk_assign(ret_store, deepcopy(st.value), ref))  # pyright: ignore[reportArgumentType]
             out.append(_mk_goto(end_label, ref))
             continue
 
@@ -386,9 +473,7 @@ def _strip_nops(stmts: List[PyIRNode]) -> List[PyIRNode]:
     for s in stmts:
         if isinstance(s, (PyIRComment, PyIRPass)):
             continue
-
         out.append(s)
-
     return out
 
 
@@ -459,7 +544,6 @@ def _subst_vars(node: PyIRNode, subst: Dict[str, PyIRNode]) -> PyIRNode:
         repl = subst.get(node.name)
         if repl is None:
             return deepcopy(node)
-
         return deepcopy(repl)
 
     if not is_dataclass(node):
@@ -480,7 +564,6 @@ def _subst_vars(node: PyIRNode, subst: Dict[str, PyIRNode]) -> PyIRNode:
                     new_list.append(_subst_vars(x, subst))
                 else:
                     new_list.append(deepcopy(x))
-
             kw[f.name] = new_list
             continue
 
@@ -491,7 +574,6 @@ def _subst_vars(node: PyIRNode, subst: Dict[str, PyIRNode]) -> PyIRNode:
                     new_dict[k] = _subst_vars(x, subst)
                 else:
                     new_dict[k] = deepcopy(x)
-
             kw[f.name] = new_dict
             continue
 
@@ -500,55 +582,153 @@ def _subst_vars(node: PyIRNode, subst: Dict[str, PyIRNode]) -> PyIRNode:
     return type(node)(**kw)  # type: ignore[arg-type]
 
 
+def _collect_remaining_inline_call_keys(
+    node: PyIRNode,
+    *,
+    ir_mod_parts: tuple[str, ...] | None,
+    out: Set[str],
+) -> None:
+    if isinstance(node, PyIRCall):
+        k = _call_inline_key(ir_mod_parts, node.func)
+        if k is not None:
+            out.add(k)
+
+    if not is_dataclass(node):
+        return
+
+    for f in fields(node):
+        v = getattr(node, f.name)
+
+        if isinstance(v, PyIRNode):
+            _collect_remaining_inline_call_keys(v, ir_mod_parts=ir_mod_parts, out=out)
+            continue
+
+        if isinstance(v, list):
+            for x in v:
+                if isinstance(x, PyIRNode):
+                    _collect_remaining_inline_call_keys(
+                        x, ir_mod_parts=ir_mod_parts, out=out
+                    )
+            continue
+
+        if isinstance(v, dict):
+            for x in v.values():
+                if isinstance(x, PyIRNode):
+                    _collect_remaining_inline_call_keys(
+                        x, ir_mod_parts=ir_mod_parts, out=out
+                    )
+            continue
+
+
 class RewriteInlineCallsPass:
     @staticmethod
     def run(ir: PyIRFile, ctx: ExpandContext) -> PyIRFile:
-        ir.body = RewriteInlineCallsPass._rewrite_stmt_list(ir, ir.body, ctx)
+        mod_parts = _ir_mod_parts(ir)
+        ir.body = RewriteInlineCallsPass._rewrite_stmt_list(ir, ir.body, ctx, mod_parts)
+
+        # Strip inline defs only if there are no remaining call sites.
+        RewriteInlineCallsPass._strip_fully_inlined_defs(ir, ctx, mod_parts)
+
         return ir
 
     @staticmethod
+    def _strip_fully_inlined_defs(
+        ir: PyIRFile,
+        ctx: ExpandContext,
+        mod_parts: tuple[str, ...] | None,
+    ) -> None:
+        if mod_parts is None:
+            return
+
+        remaining_calls: Set[str] = set()
+        for st in ir.body:
+            _collect_remaining_inline_call_keys(
+                st, ir_mod_parts=mod_parts, out=remaining_calls
+            )
+
+        new_body: List[PyIRNode] = []
+        for st in ir.body:
+            if isinstance(st, PyIRFunctionDef) and _is_inline_def(st):
+                key = _qual_key(mod_parts, st.name)
+                # Strip only when:
+                #  - this fn is actually registered as inline template
+                #  - and there are no remaining calls to it after rewrite
+                if key in ctx.inline_templates and key not in remaining_calls:
+                    continue
+            new_body.append(st)
+
+        ir.body = new_body
+
+    @staticmethod
     def _rewrite_stmt_list(
-        ir: PyIRFile, stmts: List[PyIRNode], ctx: ExpandContext
+        ir: PyIRFile,
+        stmts: List[PyIRNode],
+        ctx: ExpandContext,
+        mod_parts: tuple[str, ...] | None,
     ) -> List[PyIRNode]:
         out: List[PyIRNode] = []
         for st in stmts:
-            out.extend(RewriteInlineCallsPass._rewrite_stmt(ir, st, ctx))
-
+            out.extend(RewriteInlineCallsPass._rewrite_stmt(ir, st, ctx, mod_parts))
         return out
 
     @staticmethod
-    def _rewrite_stmt(ir: PyIRFile, st: PyIRNode, ctx: ExpandContext) -> List[PyIRNode]:
+    def _rewrite_stmt(
+        ir: PyIRFile,
+        st: PyIRNode,
+        ctx: ExpandContext,
+        mod_parts: tuple[str, ...] | None,
+    ) -> List[PyIRNode]:
         if isinstance(st, PyIRIf):
-            pro, test = RewriteInlineCallsPass._rewrite_expr(ir, st.test, ctx)
+            pro, test = RewriteInlineCallsPass._rewrite_expr(
+                ir, st.test, ctx, mod_parts
+            )
             st.test = test
-            st.body = RewriteInlineCallsPass._rewrite_stmt_list(ir, st.body, ctx)
-            st.orelse = RewriteInlineCallsPass._rewrite_stmt_list(ir, st.orelse, ctx)
+            st.body = RewriteInlineCallsPass._rewrite_stmt_list(
+                ir, st.body, ctx, mod_parts
+            )
+            st.orelse = RewriteInlineCallsPass._rewrite_stmt_list(
+                ir, st.orelse, ctx, mod_parts
+            )
             return pro + [st]
 
         if isinstance(st, PyIRWhile):
-            pro, test = RewriteInlineCallsPass._rewrite_expr(ir, st.test, ctx)
+            pro, test = RewriteInlineCallsPass._rewrite_expr(
+                ir, st.test, ctx, mod_parts
+            )
             st.test = test
-            st.body = RewriteInlineCallsPass._rewrite_stmt_list(ir, st.body, ctx)
+            st.body = RewriteInlineCallsPass._rewrite_stmt_list(
+                ir, st.body, ctx, mod_parts
+            )
             return pro + [st]
 
         if isinstance(st, PyIRFor):
-            pro_iter, it = RewriteInlineCallsPass._rewrite_expr(ir, st.iter, ctx)
+            pro_iter, it = RewriteInlineCallsPass._rewrite_expr(
+                ir, st.iter, ctx, mod_parts
+            )
             st.iter = it
-            st.body = RewriteInlineCallsPass._rewrite_stmt_list(ir, st.body, ctx)
+            st.body = RewriteInlineCallsPass._rewrite_stmt_list(
+                ir, st.body, ctx, mod_parts
+            )
             return pro_iter + [st]
 
         if isinstance(st, PyIRWith):
             pro: List[PyIRNode] = []
             for item in st.items:
-                p, e = RewriteInlineCallsPass._rewrite_expr(ir, item.context_expr, ctx)
+                p, e = RewriteInlineCallsPass._rewrite_expr(
+                    ir, item.context_expr, ctx, mod_parts
+                )
                 pro.extend(p)
                 item.context_expr = e
 
-            st.body = RewriteInlineCallsPass._rewrite_stmt_list(ir, st.body, ctx)
+            st.body = RewriteInlineCallsPass._rewrite_stmt_list(
+                ir, st.body, ctx, mod_parts
+            )
             return pro + [st]
 
         if isinstance(st, PyIRFunctionDef):
-            st.body = RewriteInlineCallsPass._rewrite_stmt_list(ir, st.body, ctx)
+            st.body = RewriteInlineCallsPass._rewrite_stmt_list(
+                ir, st.body, ctx, mod_parts
+            )
             return [st]
 
         if (
@@ -560,41 +740,44 @@ class RewriteInlineCallsPass:
 
             if isinstance(st.value, PyIRCall):
                 inl = RewriteInlineCallsPass._maybe_inline_assign_into_target(
-                    ir, st.value, ctx, target=t0
+                    ir, st.value, ctx, mod_parts=mod_parts, target=t0
                 )
                 if inl is not None:
                     return inl
 
-            pro, v = RewriteInlineCallsPass._rewrite_expr(ir, st.value, ctx)
+            pro, v = RewriteInlineCallsPass._rewrite_expr(ir, st.value, ctx, mod_parts)
             st.value = v
             return pro + [st]
 
         if isinstance(st, PyIRAssign):
-            pro, v = RewriteInlineCallsPass._rewrite_expr(ir, st.value, ctx)
+            pro, v = RewriteInlineCallsPass._rewrite_expr(ir, st.value, ctx, mod_parts)
             st.value = v
             return pro + [st]
 
         if isinstance(st, PyIRReturn):
-            pro, v = RewriteInlineCallsPass._rewrite_expr(ir, st.value, ctx)
+            pro, v = RewriteInlineCallsPass._rewrite_expr(ir, st.value, ctx, mod_parts)  # pyright: ignore[reportArgumentType]
             st.value = v
             return pro + [st]
 
         if isinstance(st, PyIRCall):
-            inl = RewriteInlineCallsPass._maybe_inline_stmt(st, ctx)
+            inl = RewriteInlineCallsPass._maybe_inline_stmt(st, ctx, mod_parts)
             if inl is not None:
                 return inl
 
-            pro, expr = RewriteInlineCallsPass._rewrite_expr(ir, st, ctx)
+            pro, expr = RewriteInlineCallsPass._rewrite_expr(ir, st, ctx, mod_parts)
             return pro + [expr]
 
         return [st]
 
     @staticmethod
     def _rewrite_expr(
-        ir: PyIRFile, expr: PyIRNode, ctx: ExpandContext
+        ir: PyIRFile,
+        expr: PyIRNode,
+        ctx: ExpandContext,
+        mod_parts: tuple[str, ...] | None,
     ) -> Tuple[List[PyIRNode], PyIRNode]:
         if isinstance(expr, PyIRCall):
-            return RewriteInlineCallsPass._maybe_inline_expr(ir, expr, ctx)
+            return RewriteInlineCallsPass._maybe_inline_expr(ir, expr, ctx, mod_parts)
 
         if not is_dataclass(expr):
             return [], expr
@@ -604,7 +787,7 @@ class RewriteInlineCallsPass:
             v = getattr(expr, f.name)
 
             if isinstance(v, PyIRNode):
-                p, nv = RewriteInlineCallsPass._rewrite_expr(ir, v, ctx)
+                p, nv = RewriteInlineCallsPass._rewrite_expr(ir, v, ctx, mod_parts)
                 pro.extend(p)
                 setattr(expr, f.name, nv)
                 continue
@@ -612,10 +795,9 @@ class RewriteInlineCallsPass:
             if isinstance(v, list) and v and all(isinstance(x, PyIRNode) for x in v):
                 new_list: List[PyIRNode] = []
                 for x in v:
-                    p, nx = RewriteInlineCallsPass._rewrite_expr(ir, x, ctx)
+                    p, nx = RewriteInlineCallsPass._rewrite_expr(ir, x, ctx, mod_parts)
                     pro.extend(p)
                     new_list.append(nx)
-
                 setattr(expr, f.name, new_list)
                 continue
 
@@ -626,21 +808,25 @@ class RewriteInlineCallsPass:
             ):
                 new_dict: Dict[str, PyIRNode] = {}
                 for k, x in v.items():
-                    p, nx = RewriteInlineCallsPass._rewrite_expr(ir, x, ctx)
+                    p, nx = RewriteInlineCallsPass._rewrite_expr(ir, x, ctx, mod_parts)
                     pro.extend(p)
                     new_dict[k] = nx
-
                 setattr(expr, f.name, new_dict)
                 continue
 
         return pro, expr
 
     @staticmethod
-    def _maybe_inline_stmt(call: PyIRCall, ctx: ExpandContext) -> List[PyIRNode] | None:
-        if not isinstance(call.func, PyIRVarUse):
+    def _maybe_inline_stmt(
+        call: PyIRCall,
+        ctx: ExpandContext,
+        mod_parts: tuple[str, ...] | None,
+    ) -> List[PyIRNode] | None:
+        key = _call_inline_key(mod_parts, call.func)
+        if key is None:
             return None
 
-        tmpl = ctx.inline_templates.get(call.func.name)
+        tmpl = ctx.inline_templates.get(key)
         if tmpl is None:
             return None
 
@@ -649,16 +835,24 @@ class RewriteInlineCallsPass:
 
     @staticmethod
     def _maybe_inline_assign_into_target(
-        ir: PyIRFile, call: PyIRCall, ctx: ExpandContext, *, target: PyIRVarUse
+        ir: PyIRFile,
+        call: PyIRCall,
+        ctx: ExpandContext,
+        *,
+        mod_parts: tuple[str, ...] | None,
+        target: PyIRVarUse,
     ) -> List[PyIRNode] | None:
-        if not isinstance(call.func, PyIRVarUse):
+        key = _call_inline_key(mod_parts, call.func)
+        if key is None:
             return None
 
-        tmpl = ctx.inline_templates.get(call.func.name)
+        tmpl = ctx.inline_templates.get(key)
         if tmpl is None:
             return None
 
-        pro_args, new_call = RewriteInlineCallsPass._rewrite_call_args(ir, call, ctx)
+        pro_args, new_call = RewriteInlineCallsPass._rewrite_call_args(
+            ir, call, ctx, mod_parts
+        )
 
         expr_inl = RewriteInlineCallsPass._try_inline_as_expr(new_call, tmpl)
         if expr_inl is not None:
@@ -677,16 +871,22 @@ class RewriteInlineCallsPass:
 
     @staticmethod
     def _maybe_inline_expr(
-        ir: PyIRFile, call: PyIRCall, ctx: ExpandContext
+        ir: PyIRFile,
+        call: PyIRCall,
+        ctx: ExpandContext,
+        mod_parts: tuple[str, ...] | None,
     ) -> Tuple[List[PyIRNode], PyIRNode]:
-        if not isinstance(call.func, PyIRVarUse):
+        key = _call_inline_key(mod_parts, call.func)
+        if key is None:
             return [], call
 
-        tmpl = ctx.inline_templates.get(call.func.name)
+        tmpl = ctx.inline_templates.get(key)
         if tmpl is None:
             return [], call
 
-        pro_args, new_call = RewriteInlineCallsPass._rewrite_call_args(ir, call, ctx)
+        pro_args, new_call = RewriteInlineCallsPass._rewrite_call_args(
+            ir, call, ctx, mod_parts
+        )
         expr_inl = RewriteInlineCallsPass._try_inline_as_expr(new_call, tmpl)
         if expr_inl is not None:
             return pro_args, expr_inl
@@ -705,26 +905,26 @@ class RewriteInlineCallsPass:
 
     @staticmethod
     def _rewrite_call_args(
-        ir: PyIRFile, call: PyIRCall, ctx: ExpandContext
+        ir: PyIRFile,
+        call: PyIRCall,
+        ctx: ExpandContext,
+        mod_parts: tuple[str, ...] | None,
     ) -> Tuple[List[PyIRNode], PyIRCall]:
         pro: List[PyIRNode] = []
-
         new_call = deepcopy(call)
 
         new_args_p: List[PyIRNode] = []
         for a in new_call.args_p:
-            p, na = RewriteInlineCallsPass._rewrite_expr(ir, a, ctx)
+            p, na = RewriteInlineCallsPass._rewrite_expr(ir, a, ctx, mod_parts)
             pro.extend(p)
             new_args_p.append(na)
-
         new_call.args_p = new_args_p
 
         new_args_kw: Dict[str, PyIRNode] = {}
         for k, a in new_call.args_kw.items():
-            p, na = RewriteInlineCallsPass._rewrite_expr(ir, a, ctx)
+            p, na = RewriteInlineCallsPass._rewrite_expr(ir, a, ctx, mod_parts)
             pro.extend(p)
             new_args_kw[k] = na
-
         new_call.args_kw = new_args_kw
 
         return pro, new_call
@@ -751,32 +951,28 @@ class RewriteInlineCallsPass:
             arg: PyIRNode | None = None
             if i < len(call.args_p):
                 arg = call.args_p[i]
-
             elif p in call.args_kw:
                 arg = call.args_kw[p]
-
             else:
                 sig = tmpl.fn.signature.get(p)
                 default = sig[1] if sig is not None else None
                 if default is not None:
                     arg = deepcopy(default)
-
                 else:
                     return None
 
             subst[p] = arg
 
         uses: Dict[str, int] = {}
-        _count_var_uses(ret_expr, uses)
+        _count_var_uses(ret_expr, uses)  # pyright: ignore[reportArgumentType]
 
         for p, cnt in uses.items():
             if cnt <= 1:
                 continue
-
             if p in subst and _has_call(subst[p]):
                 return None
 
-        return _subst_vars(ret_expr, subst)
+        return _subst_vars(ret_expr, subst)  # pyright: ignore[reportArgumentType]
 
     @staticmethod
     def _build_inline_do(
@@ -796,7 +992,6 @@ class RewriteInlineCallsPass:
         for name in tmpl.locals:
             if name in param_set:
                 continue
-
             do_body.append(_mk_assign(_mk_var(rename[name], call), _mk_nil(call), call))
 
         args_p = call.args_p
@@ -806,7 +1001,6 @@ class RewriteInlineCallsPass:
             arg: PyIRNode | None = None
             if i < len(args_p):
                 arg = args_p[i]
-
             elif p in args_kw:
                 arg = args_kw[p]
 

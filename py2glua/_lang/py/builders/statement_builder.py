@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import token as token_mod
 import tokenize
+from io import StringIO
 from typing import List, Sequence
 
 from ...etc import TokenStream
@@ -55,6 +57,31 @@ _LITERAL_NAMES = {
     "False": False,
     "None": None,
 }
+
+
+def _fstring_token_types() -> tuple[int | None, int | None, int | None]:
+    fs = getattr(token_mod, "FSTRING_START", None)
+    fm = getattr(token_mod, "FSTRING_MIDDLE", None)
+    fe = getattr(token_mod, "FSTRING_END", None)
+    return fs, fm, fe
+
+
+def _tokenize_expr(text: str) -> list[tokenize.TokenInfo]:
+    gen = tokenize.generate_tokens(StringIO(text).readline)
+    out: list[tokenize.TokenInfo] = []
+    for t in gen:
+        if t.type in (
+            tokenize.NL,
+            tokenize.NEWLINE,
+            tokenize.INDENT,
+            tokenize.DEDENT,
+            tokenize.COMMENT,
+            tokenize.ENDMARKER,
+            tokenize.ENCODING,
+        ):
+            continue
+        out.append(t)
+    return out
 
 
 class StatementBuilder:
@@ -461,7 +488,7 @@ class StatementBuilder:
             start = 0
             for idx in eq_indices:
                 splits.append(tokens[start:idx])
-                start = idx + 1  # пропускаем '='
+                start = idx + 1  # skip '='
 
             for lhs_toks in reversed(splits):
                 if not lhs_toks:
@@ -583,7 +610,7 @@ class StatementBuilder:
             if not (tok and tok.type == tokenize.OP and tok.string == ","):
                 break
 
-            stream.advance()  # съесть ','
+            stream.advance()  # eat ','
             tok2 = stream.peek()
 
             if tok2 is None:
@@ -755,10 +782,8 @@ class StatementBuilder:
                     left=node,
                     right=right,
                 )
-
             else:
                 break
-
         return node
 
     @staticmethod
@@ -776,10 +801,8 @@ class StatementBuilder:
                     left=node,
                     right=right,
                 )
-
             else:
                 break
-
         return node
 
     @staticmethod
@@ -797,10 +820,8 @@ class StatementBuilder:
                     left=node,
                     right=right,
                 )
-
             else:
                 break
-
         return node
 
     @staticmethod
@@ -811,9 +832,7 @@ class StatementBuilder:
             if tok and tok.type == tokenize.OP and tok.string in {"<<", ">>"}:
                 op_tok = stream.advance()
                 if op_tok is None:
-                    StatementBuilder._raise(
-                        "Неожиданный конец ввода в shift-операции", tok
-                    )
+                    StatementBuilder._raise("Unexpected EOF in shift operator", tok)
 
                 right = StatementBuilder._parse_add_sub(stream)
                 op = (
@@ -829,10 +848,8 @@ class StatementBuilder:
                     left=node,
                     right=right,
                 )
-
             else:
                 break
-
         return node
 
     @staticmethod
@@ -843,9 +860,7 @@ class StatementBuilder:
             if tok and tok.type == tokenize.OP and tok.string in {"+", "-"}:
                 op_tok = stream.advance()
                 if op_tok is None:
-                    StatementBuilder._raise(
-                        "Неожиданный конец ввода в +/- операции", tok
-                    )
+                    StatementBuilder._raise("Unexpected EOF in +/- operator", tok)
 
                 right = StatementBuilder._parse_mul_div(stream)
                 op = PyBinOPType.ADD if op_tok.string == "+" else PyBinOPType.SUB  # pyright: ignore[reportOptionalMemberAccess]
@@ -868,21 +883,16 @@ class StatementBuilder:
             if tok and tok.type == tokenize.OP and tok.string in {"*", "/", "//", "%"}:
                 op_tok = stream.advance()
                 if op_tok is None:
-                    StatementBuilder._raise(
-                        "Неожиданный конец ввода в */% операции", tok
-                    )
+                    StatementBuilder._raise("Unexpected EOF in */% operator", tok)
 
                 right = StatementBuilder._parse_power(stream)
 
                 if op_tok.string == "*":  # pyright: ignore[reportOptionalMemberAccess]
                     op = PyBinOPType.MUL
-
                 elif op_tok.string == "/":  # pyright: ignore[reportOptionalMemberAccess]
                     op = PyBinOPType.DIV
-
                 elif op_tok.string == "//":  # pyright: ignore[reportOptionalMemberAccess]
                     op = PyBinOPType.FLOORDIV
-
                 else:
                     op = PyBinOPType.MOD
 
@@ -919,16 +929,14 @@ class StatementBuilder:
     def _parse_unary(stream: TokenStream) -> PyIRNode:
         tok = stream.peek()
         if tok is None:
-            StatementBuilder._raise("Неожиданный конец ввода в унарном выражении", tok)
+            StatementBuilder._raise("Unexpected EOF in unary expression", tok)
 
         assert tok is not None
 
         if tok.type == tokenize.OP and tok.string in {"+", "-", "~"}:
             op_tok = stream.advance()
             if op_tok is None:
-                StatementBuilder._raise(
-                    "Неожиданный конец ввода после унарного оператора", tok
-                )
+                StatementBuilder._raise("Unexpected EOF after unary operator", tok)
 
             operand = StatementBuilder._parse_unary(stream)
             line, col = op_tok.start  # pyright: ignore[reportOptionalMemberAccess]
@@ -945,7 +953,7 @@ class StatementBuilder:
         if tok.type == tokenize.NAME and tok.string == "not":
             op_tok = stream.advance()
             if op_tok is None:
-                StatementBuilder._raise("Неожиданный конец ввода после 'not'", tok)
+                StatementBuilder._raise("Unexpected EOF after 'not'", tok)
 
             operand = StatementBuilder._parse_unary(stream)
             line, col = op_tok.start  # pyright: ignore[reportOptionalMemberAccess]
@@ -969,7 +977,7 @@ class StatementBuilder:
                 name_tok = stream.advance()
                 if name_tok is None or name_tok.type != tokenize.NAME:
                     StatementBuilder._raise(
-                        "Ожидалось имя атрибута после '.'", name_tok or dot_tok
+                        "Expected attribute name after '.'", name_tok or dot_tok
                     )
 
                 node = PyIRAttribute(
@@ -996,11 +1004,17 @@ class StatementBuilder:
     def _parse_atom(stream: TokenStream) -> PyIRNode:  # type: ignore
         tok = stream.peek()
         if tok is None:
-            StatementBuilder._raise("Неожиданный конец ввода в выражении", tok)
+            StatementBuilder._raise("Unexpected EOF in expression", tok)
 
         assert tok is not None
 
-        # f-string
+        fs_start, _, _ = _fstring_token_types()
+
+        # f-string (new tokenizer): FSTRING_START ... FSTRING_END
+        if fs_start is not None and tok.type == fs_start:
+            return StatementBuilder._parse_fstring(stream)
+
+        # f-string (legacy tokenizer): single STRING token starting with f/F
         if tok.type == tokenize.STRING and tok.string and tok.string[0] in ("f", "F"):
             return StatementBuilder._parse_fstring(stream)
 
@@ -1016,7 +1030,7 @@ class StatementBuilder:
                 value=_LITERAL_NAMES[tok2.string],
             )
 
-        # Обычное имя (переменная / функция / класс)
+        # Variable / function / class name
         if tok.type == tokenize.NAME:
             tok2 = stream.advance()
             assert tok2 is not None
@@ -1028,7 +1042,7 @@ class StatementBuilder:
                 name=tok2.string,
             )
 
-        # Числовой литерал
+        # Numeric literal
         if tok.type == tokenize.NUMBER:
             tok2 = stream.advance()
             assert tok2 is not None
@@ -1041,7 +1055,7 @@ class StatementBuilder:
                 value=value,
             )
 
-        # Строковый литерал
+        # String literal
         if tok.type == tokenize.STRING:
             tok2 = stream.advance()
             assert tok2 is not None
@@ -1054,7 +1068,7 @@ class StatementBuilder:
                 value=value,
             )
 
-        # Скобочное выражение / пустой tuple
+        # Parenthesized expression / empty tuple
         if tok.type == tokenize.OP and tok.string == "(":
             lpar = stream.advance()
             assert lpar is not None
@@ -1073,15 +1087,15 @@ class StatementBuilder:
             stream.expect_op(")")
             return node
 
-        # Список
+        # List
         if tok.type == tokenize.OP and tok.string == "[":
             return StatementBuilder._parse_list_literal(stream)
 
-        # Словарь или множество
+        # Dict or set
         if tok.type == tokenize.OP and tok.string == "{":
             return StatementBuilder._parse_dict_or_set_literal(stream)
 
-        StatementBuilder._raise(f"Неожиданный токен в выражении: {tok!r}", tok)
+        StatementBuilder._raise(f"Unexpected token in expression: {tok!r}", tok)
 
     @staticmethod
     def _parse_call(stream: TokenStream, func_node: PyIRNode) -> PyIRCall:
@@ -1094,7 +1108,7 @@ class StatementBuilder:
         tok = stream.peek()
         if tok and tok.type == tokenize.OP and tok.string in ("*", "**"):
             StatementBuilder._raise(
-                "Распаковка аргументов (*args / **kwargs) не поддерживается в py2glua",
+                "Argument unpacking (*args / **kwargs) is not supported in py2glua",
                 tok,
             )
 
@@ -1103,7 +1117,7 @@ class StatementBuilder:
                 t = stream.peek()
                 if t and t.type == tokenize.OP and t.string in ("*", "**"):
                     StatementBuilder._raise(
-                        "Распаковка аргументов (*args / **kwargs) не поддерживается в py2glua",
+                        "Argument unpacking (*args / **kwargs) is not supported in py2glua",
                         t,
                     )
 
@@ -1136,7 +1150,6 @@ class StatementBuilder:
                     nxt = stream.peek()
                     if nxt and nxt.type == tokenize.OP and nxt.string == ")":
                         break
-
                     continue
 
                 break
@@ -1240,7 +1253,7 @@ class StatementBuilder:
                     return PyIRDict(line=line, offset=col, items=items)
 
                 StatementBuilder._raise(
-                    f"Ожидалось ',' или '}}' в словаре, получен {tok!r}", tok
+                    f"Expected ',' or '}}' in dict, got {tok!r}", tok
                 )
 
         elements: list[PyIRNode] = [first]
@@ -1263,24 +1276,142 @@ class StatementBuilder:
                 stream.advance()
                 return PyIRSet(line=line, offset=col, elements=elements)
 
-            StatementBuilder._raise(
-                f"Ожидалось ',' или '}}' в множестве, получен {tok!r}", tok
-            )
+            StatementBuilder._raise(f"Expected ',' or '}}' in set, got {tok!r}", tok)
 
     @staticmethod
     def _parse_fstring(stream: TokenStream) -> PyIRFString:
-        tok = stream.advance()
+        fs_start, fs_mid, fs_end = _fstring_token_types()
+        tok = stream.peek()
         if tok is None:
-            StatementBuilder._raise("Неожиданный конец ввода в f-строке", tok)
+            StatementBuilder._raise("Unexpected EOF in f-string", tok)
 
-        raw = tok.string  # pyright: ignore[reportOptionalMemberAccess]
-        if not raw or raw[0] not in ("f", "F"):
-            StatementBuilder._raise("Некорректная f-строка", tok)
+        assert tok is not None
 
+        # --- New tokenizer path: FSTRING_START ... FSTRING_END ---
+        if fs_start is not None and tok.type == fs_start:
+            start_tok = stream.advance()
+            assert start_tok is not None
+
+            s = start_tok.string
+            if not s or s[-1] not in ("'", '"') or "f" not in s.lower():
+                StatementBuilder._raise("Invalid f-string start token", start_tok)
+
+            parts: list[str | PyIRNode] = []
+            buf: list[str] = []
+
+            def flush() -> None:
+                if buf:
+                    parts.append("".join(buf))
+                    buf.clear()
+
+            while True:
+                t = stream.peek()
+                if t is None:
+                    StatementBuilder._raise("Unexpected EOF in f-string", start_tok)
+
+                if fs_end is not None and t.type == fs_end:
+                    stream.advance()
+                    break
+
+                if fs_mid is not None and t.type == fs_mid:
+                    mid_tok = stream.advance()
+                    assert mid_tok is not None
+                    if mid_tok.string:
+                        buf.append(mid_tok.string)
+                    continue
+
+                if t.type == tokenize.OP and t.string == "{":
+                    stream.advance()
+                    flush()
+
+                    expr_tokens: list[tokenize.TokenInfo] = []
+
+                    depth_paren = 0
+                    depth_brack = 0
+                    depth_brace = 0
+
+                    while True:
+                        nt = stream.peek()
+                        if nt is None:
+                            StatementBuilder._raise(
+                                "Unclosed '{' in f-string", start_tok
+                            )
+
+                        if nt.type == tokenize.OP:
+                            ss = nt.string
+
+                            if ss == "(":
+                                depth_paren += 1
+                            elif ss == ")":
+                                depth_paren -= 1
+                            elif ss == "[":
+                                depth_brack += 1
+                            elif ss == "]":
+                                depth_brack -= 1
+                            elif ss == "{":
+                                depth_brace += 1
+                            elif ss == "}":
+                                if (
+                                    depth_paren == 0
+                                    and depth_brack == 0
+                                    and depth_brace == 0
+                                ):
+                                    break
+                                depth_brace -= 1
+                            elif (
+                                ss in (":", "!")
+                                and depth_paren == 0
+                                and depth_brack == 0
+                                and depth_brace == 0
+                            ):
+                                StatementBuilder._raise(
+                                    "Format specifiers and conversions in f-strings are not supported",
+                                    nt,
+                                )
+
+                        expr_tokens.append(stream.advance())  # type: ignore[arg-type]
+
+                    if not expr_tokens:
+                        StatementBuilder._raise(
+                            "Empty expression in f-string braces", start_tok
+                        )
+
+                    ts = TokenStream(expr_tokens)
+                    expr = StatementBuilder._parse_expression(ts, stop_ops=set())
+                    if not ts.eof():
+                        StatementBuilder._raise(
+                            "Invalid expression inside f-string braces",
+                            ts.peek(),
+                        )
+
+                    parts.append(expr)
+                    stream.expect_op("}")
+                    continue
+
+                StatementBuilder._raise(f"Unexpected token inside f-string: {t!r}", t)
+
+            flush()
+
+            return PyIRFString(
+                line=start_tok.start[0],
+                offset=start_tok.start[1],
+                parts=parts,
+            )
+
+        # --- Legacy tokenizer path: single STRING token like f"..." ---
+        tok2 = stream.advance()
+        if tok2 is None:
+            StatementBuilder._raise("Unexpected EOF in f-string", tok2)
+
+        raw = tok2.string
+        if not raw or "f" not in raw[:2].lower():
+            StatementBuilder._raise("Invalid f-string token", tok2)
+
+        # Only simple quotes f"..." / f'...'
         if not raw.startswith(('f"', "f'", 'F"', "F'")):
             StatementBuilder._raise(
-                "Поддерживаются только простые f-строки вида f\"...\" или f'...'",
-                tok,
+                "Only simple f-strings like f\"...\" or f'...' are supported",
+                tok2,
             )
 
         body = raw[2:-1]
@@ -1288,52 +1419,103 @@ class StatementBuilder:
         parts: list[str | PyIRNode] = []
         buf: list[str] = []
 
-        i = 0
-        n = len(body)
-
-        def flush() -> None:
+        def flush_legacy() -> None:
             if buf:
                 parts.append("".join(buf))
                 buf.clear()
+
+        i = 0
+        n = len(body)
 
         while i < n:
             c = body[i]
 
             if c == "{":
-                flush()
+                # escaped "{{"
+                if i + 1 < n and body[i + 1] == "{":
+                    buf.append("{")
+                    i += 2
+                    continue
+
+                flush_legacy()
                 i += 1
                 start = i
 
-                while i < n and body[i] != "}":
+                depth_paren = 0
+                depth_brack = 0
+                depth_brace = 0
+
+                while i < n:
+                    ch = body[i]
+
+                    if ch == "(":
+                        depth_paren += 1
+                    elif ch == ")":
+                        depth_paren -= 1
+                    elif ch == "[":
+                        depth_brack += 1
+                    elif ch == "]":
+                        depth_brack -= 1
+                    elif ch == "{":
+                        depth_brace += 1
+                    elif ch == "}":
+                        if depth_paren == 0 and depth_brack == 0 and depth_brace == 0:
+                            break
+                        depth_brace -= 1
+                    elif (
+                        ch in (":", "!")
+                        and depth_paren == 0
+                        and depth_brack == 0
+                        and depth_brace == 0
+                    ):
+                        StatementBuilder._raise(
+                            "Format specifiers and conversions in f-strings are not supported",
+                            tok2,
+                        )
+
                     i += 1
 
                 if i >= n:
-                    StatementBuilder._raise("Незакрытая '{' в f-строке", tok)
+                    StatementBuilder._raise("Unclosed '{' in f-string", tok2)
 
-                name = body[start:i].strip()
-                if not name.isidentifier():
+                expr_text = body[start:i].strip()
+                if not expr_text:
+                    StatementBuilder._raise("Empty expression in f-string braces", tok2)
+
+                try:
+                    expr_tokens = _tokenize_expr(expr_text)
+                except tokenize.TokenError:
                     StatementBuilder._raise(
-                        "В f-строках разрешена только подстановка простого имени: {name}",
-                        tok,
+                        "Invalid expression inside f-string braces", tok2
                     )
 
-                parts.append(
-                    PyIRVarUse(
-                        line=tok.start[0],  # pyright: ignore[reportOptionalMemberAccess]
-                        offset=tok.start[1],  # pyright: ignore[reportOptionalMemberAccess]
-                        name=name,
+                ts = TokenStream(expr_tokens)
+                expr = StatementBuilder._parse_expression(ts, stop_ops=set())
+                if not ts.eof():
+                    StatementBuilder._raise(
+                        "Invalid expression inside f-string braces",
+                        ts.peek(),
                     )
-                )
-                i += 1
+
+                parts.append(expr)
+                i += 1  # skip '}'
                 continue
+
+            if c == "}":
+                # escaped "}}"
+                if i + 1 < n and body[i + 1] == "}":
+                    buf.append("}")
+                    i += 2
+                    continue
+                StatementBuilder._raise("Unmatched '}' in f-string", tok2)
 
             buf.append(c)
             i += 1
 
-        flush()
+        flush_legacy()
 
         return PyIRFString(
-            line=tok.start[0],  # pyright: ignore[reportOptionalMemberAccess]
-            offset=tok.start[1],  # pyright: ignore[reportOptionalMemberAccess]
+            line=tok2.start[0],
+            offset=tok2.start[1],
             parts=parts,
         )
