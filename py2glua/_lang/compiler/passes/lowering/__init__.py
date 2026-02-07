@@ -15,6 +15,7 @@ from .lazy_compile import (
     CountSymlinkUsesPass,
     StripLazyCompileUnusedDefsPass,
 )
+from .net_string import CollectRegisterArgDeclsPass, CollectRegisterArgNetStringsPass
 from .nil_fold import NilFoldPass
 from .raw import RewriteRawCallsPass
 from .strip_asign import StripPythonOnlyNodesPass

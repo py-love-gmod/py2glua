@@ -33,6 +33,8 @@ from .passes.lowering import (
     CollectDebugCompileOnlyDeclsPass,
     CollectGmodApiDeclsPass,
     CollectGmodSpecialEnumDeclsPass,
+    CollectRegisterArgDeclsPass,
+    CollectRegisterArgNetStringsPass,
     CollectWithConditionClassesPass,
     ConstFoldingPass,
     CountSymlinkUsesPass,
@@ -129,6 +131,8 @@ class Compiler:
         CountSymlinkUsesPass,  # Подсчёт read-use symlink-ов
         StripLazyCompileUnusedDefsPass,  # Удаление lazy_compile defs без использования
         DcePass,  # DCE
+        CollectRegisterArgDeclsPass,  # Сборка net полей
+        CollectRegisterArgNetStringsPass,  # Сборка net полей
     ]
 
     project_passes = [

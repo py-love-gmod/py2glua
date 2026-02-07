@@ -102,7 +102,7 @@ class CompilerDirective:
         """TODO:
 
         Обязазательно реализовывать поле `uid`
-        
+
         Обязазательно реализовывать метод `overrid(realm, fn) -> callable`
         """
 
@@ -114,6 +114,15 @@ class CompilerDirective:
     @staticmethod
     def typeguard_nil() -> Callable:
         """Помечает функцию как валидатор Nil. То есть после этой функции метод точно не Nil. Сделано для IsValid"""
+
+        def decorator(fn):
+            return fn
+
+        return decorator
+
+    @staticmethod
+    def register_arg(index: int = 0) -> Callable:
+        """Регистрирует переменную в особое хранилище для последующего создания util.AddNetworkString"""
 
         def decorator(fn):
             return fn

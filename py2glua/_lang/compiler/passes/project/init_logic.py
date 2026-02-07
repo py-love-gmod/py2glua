@@ -25,11 +25,13 @@ class BuildAutorunInitProjectPass:
       - NameSpace = {}
       - NameSpace.None proxy
       - one SERVER block AddCSLuaFile(...)
+      - one SERVER block util.AddNetworkString(...)
       - one SERVER block include(...)
       - one CLIENT block include(...)
     """
 
     _INIT_VIRTUAL_PATH: Final[Path] = Path("lua") / "autorun" / "init.py"
+    _NET_SET_FIELD: Final[str] = "_net_string_literals"
 
     @classmethod
     def run(cls, files: list[PyIRFile], ctx: SymLinkContext) -> list[PyIRFile]:
@@ -90,6 +92,8 @@ class BuildAutorunInitProjectPass:
             if r in (FileRealm.SHARED, FileRealm.CLIENT, FileRealm.MENU):
                 client_includes.append(inc)
 
+        net_strings = cls._get_sorted_net_strings(ctx)
+
         init_ir = PyIRFile(
             line=None,
             offset=None,
@@ -97,6 +101,7 @@ class BuildAutorunInitProjectPass:
             body=cls._build_init_body(
                 ns=ns,
                 addscluafile=addscluafile,
+                net_strings=net_strings,
                 server_includes=server_includes,
                 client_includes=client_includes,
             ),
@@ -122,6 +127,7 @@ class BuildAutorunInitProjectPass:
         *,
         ns: str,
         addscluafile: list[str],
+        net_strings: list[str],
         server_includes: list[str],
         client_includes: list[str],
     ) -> list[PyIRNode]:
@@ -148,21 +154,33 @@ class BuildAutorunInitProjectPass:
         out.append(cls._blank())
 
         out.append(PyIRComment(line=None, offset=None, value="Auto load blob"))
+
         if addscluafile:
             out.append(PyIRComment(line=None, offset=None, value="Transport"))
             out.append(cls._raw("if SERVER then"))
             for p in addscluafile:
                 out.append(cls._raw(f"    AddCSLuaFile({cls._q(p)})"))
+            out.append(cls._raw("end"))
+            out.append(cls._blank())
+
+        if net_strings:
+            out.append(PyIRComment(line=None, offset=None, value="Net strings"))
+            out.append(cls._raw("if SERVER then"))
+            for s in net_strings:
+                out.append(cls._raw(f"    util.AddNetworkString({cls._q(s)})"))
 
             out.append(cls._raw("end"))
+            out.append(cls._blank())
 
         out.append(PyIRComment(line=None, offset=None, value="Execution"))
+
         if server_includes:
             out.append(cls._raw("if SERVER then"))
             for p in server_includes:
                 out.append(cls._raw(f"    include({cls._q(p)})"))
 
             out.append(cls._raw("end"))
+            out.append(cls._blank())
 
         if client_includes:
             out.append(cls._raw("if CLIENT then"))
@@ -172,6 +190,14 @@ class BuildAutorunInitProjectPass:
             out.append(cls._raw("end"))
 
         return out
+
+    @classmethod
+    def _get_sorted_net_strings(cls, ctx: SymLinkContext) -> list[str]:
+        raw = getattr(ctx, cls._NET_SET_FIELD, None)
+        if not isinstance(raw, set) or not raw:
+            return []
+
+        return sorted(str(x) for x in raw if isinstance(x, str) and x)
 
     @staticmethod
     def _raw(s: str) -> PyIREmitExpr:
