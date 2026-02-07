@@ -107,8 +107,8 @@ class Compiler:
         CollectGmodApiDeclsPass,  # gmod api
         FinalizeGmodApiRegistryPass,  # gmod api
         RewriteGmodApiCallsPass,  # gmod api
-        CountSymlinkUsesPass,  # Считаем для lazy_compile
-        StripLazyCompileUnusedDefsPass,  # Обрабатываем lazy_compile
+        CountSymlinkUsesPass,  # Считаем для lazy_compile # Нагружают сильно. TODO:
+        StripLazyCompileUnusedDefsPass,  # Обрабатываем lazy_compile # Нагружают сильно. TODO:
         StripEnumsAndGmodSpecialEnumDefsPass,  # Стрип Enum
         StripNoCompileAndGmodApiDefsPass,  # Стрип no_compile и gmod_api
         StripCompilerDirectiveDefPass,  # Стрип CD

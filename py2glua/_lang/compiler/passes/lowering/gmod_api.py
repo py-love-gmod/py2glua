@@ -656,7 +656,7 @@ class RewriteGmodApiCallsPass:
                 return [st]
 
             if isinstance(st, PyIRReturn):
-                st.value = rw_expr(st.value)
+                st.value = rw_expr(st.value)  # pyright: ignore[reportArgumentType]
                 return [st]
 
             if isinstance(st, PyIRFunctionDef):
