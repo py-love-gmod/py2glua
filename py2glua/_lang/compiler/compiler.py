@@ -52,7 +52,6 @@ from .passes.lowering import (
     StripEnumsAndGmodSpecialEnumDefsPass,
     StripLazyCompileUnusedDefsPass,
     StripNoCompileAndGmodApiDefsPass,
-    StripPythonOnlyNodesPass,
 )
 from .passes.normalize import (
     AttachDecoratorsPass,
@@ -60,6 +59,7 @@ from .passes.normalize import (
 )
 from .passes.project import (
     BuildAutorunInitProjectPass,
+    BuildGmodPrototypesProjectPass,
     CleanUpEmptyFilesPass,
     EmitLuaProjectPass,
     ResolveSymlinksToNamespaceProjectPass,
@@ -119,7 +119,6 @@ class Compiler:
         RewriteWithConditionBlocksPass,  # with -> if замена
         CollectGmodSpecialEnumDeclsPass,  #  gmod_special_enum сбор
         FoldGmodSpecialEnumUsesPass,  #  gmod_special_enum подстановка
-        StripPythonOnlyNodesPass,  # Удаление Python-only конструкций
         CollectGmodApiDeclsPass,  # gmod_api сбор
         FinalizeGmodApiRegistryPass,  # Финализация реестра GMod API
         RewriteGmodApiCallsPass,  # Переписывание вызовов GMod API
@@ -136,6 +135,7 @@ class Compiler:
     ]
 
     project_passes = [
+        BuildGmodPrototypesProjectPass,  # Создание "прототипов" гмода
         CleanUpEmptyFilesPass,  # Очистка "пустых" файлов
         ResolveSymlinksToNamespaceProjectPass,  # Ресолв симлинков
         BuildAutorunInitProjectPass,  # auto init

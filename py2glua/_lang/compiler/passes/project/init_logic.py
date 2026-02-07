@@ -62,6 +62,9 @@ class BuildAutorunInitProjectPass:
             if inc.startswith("autorun/"):
                 continue
 
+            if inc.startswith(("entities/", "weapons/")):
+                continue
+
             mod_to_ir[mod] = ir
             mod_to_inc[mod] = inc
 

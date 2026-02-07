@@ -104,6 +104,8 @@ class CompilerDirective:
         Обязазательно реализовывать поле `uid`
 
         Обязазательно реализовывать метод `overrid(realm, fn) -> callable`
+
+        Обязазательно реализовывать метод `add_method(realm) -> callable`
         """
 
         def decorator(fn):

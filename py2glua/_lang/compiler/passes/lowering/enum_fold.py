@@ -1,50 +1,41 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
+from ....._cli.compiler_exit import CompilerExit
 from ....compiler.passes.analysis.symlinks import PyIRSymLink, SymLinkContext
 from ....py.ir_dataclass import (
+    PyIRAnnotatedAssign,
     PyIRAssign,
     PyIRAttribute,
-    PyIRAugAssign,
-    PyIRBinOP,
-    PyIRBreak,
     PyIRCall,
     PyIRClassDef,
-    PyIRComment,
     PyIRConstant,
-    PyIRContinue,
     PyIRDecorator,
     PyIRDict,
     PyIRDictItem,
     PyIREmitExpr,
     PyIREmitKind,
     PyIRFile,
-    PyIRFor,
-    PyIRFunctionDef,
-    PyIRIf,
-    PyIRImport,
-    PyIRList,
     PyIRNode,
-    PyIRPass,
-    PyIRReturn,
-    PyIRSet,
-    PyIRSubscript,
-    PyIRTuple,
-    PyIRUnaryOP,
-    PyIRVarCreate,
     PyIRVarUse,
-    PyIRWhile,
-    PyIRWith,
-    PyIRWithItem,
 )
+
+
+def _sid(x: Any) -> int | None:
+    if isinstance(x, int):
+        return x
+    v = getattr(x, "value", None)
+    if isinstance(v, int):
+        return v
+    return None
 
 
 @dataclass(frozen=True)
 class _EnumFieldSpec:
-    kind: str  # "global" | "bool" | "int" | "float" | "str"
-    value: Any  # for "global": identifier string; for others: python literal
+    kind: str
+    value: Any
 
 
 def _get_store(ctx: SymLinkContext) -> dict[int, dict[str, _EnumFieldSpec]]:
@@ -55,54 +46,38 @@ def _get_store(ctx: SymLinkContext) -> dict[int, dict[str, _EnumFieldSpec]]:
     return store
 
 
-def _iter_imported_names(
-    names: list[str | tuple[str, str]],
-) -> Iterable[tuple[str, str]]:
-    for n in names:
-        if isinstance(n, tuple):
-            yield n[0], n[1]
-        else:
-            yield n, n
+def _parse_decorator_call(
+    d: PyIRDecorator,
+) -> tuple[PyIRNode, list[PyIRNode], dict[str, PyIRNode]]:
+    if isinstance(d.exper, PyIRCall):
+        c = d.exper
+        return c.func, list(c.args_p or []), dict(c.args_kw or {})
+    return d.exper, list(d.args_p or []), dict(d.args_kw or {})
 
 
 def _is_gmod_special_enum_decorator(d: PyIRDecorator) -> bool:
-    exp = d.exper
-    return isinstance(exp, PyIRAttribute) and exp.attr == "gmod_special_enum"
+    func, _, _ = _parse_decorator_call(d)
+    return isinstance(func, PyIRAttribute) and func.attr == "gmod_special_enum"
 
 
-def _parse_fields_dict(node: PyIRNode) -> dict[str, _EnumFieldSpec]:
-    if not isinstance(node, PyIRDict):
-        raise ValueError("gmod_special_enum(fields=...) expects a dict")
+def _const_to_spec(node: PyIRNode) -> _EnumFieldSpec | None:
+    if isinstance(node, PyIRConstant):
+        v = node.value
+        if isinstance(v, bool):
+            return _EnumFieldSpec("bool", v)
+        if isinstance(v, int) and not isinstance(v, bool):
+            return _EnumFieldSpec("int", v)
+        if isinstance(v, float):
+            return _EnumFieldSpec("float", v)
+        if isinstance(v, str):
+            return _EnumFieldSpec("str", v)
+        return None
 
-    out: dict[str, _EnumFieldSpec] = {}
+    if isinstance(node, PyIREmitExpr) and node.kind == PyIREmitKind.GLOBAL:
+        if isinstance(node.name, str) and node.name:
+            return _EnumFieldSpec("global", node.name)
 
-    for it in node.items:
-        if not isinstance(it, PyIRDictItem):
-            continue
-
-        if not isinstance(it.key, PyIRConstant) or not isinstance(it.key.value, str):
-            raise ValueError("gmod_special_enum fields keys must be string constants")
-
-        field_name = it.key.value
-
-        if not isinstance(it.value, PyIRTuple) or len(it.value.elements) != 2:
-            raise ValueError(
-                "gmod_special_enum fields values must be a 2-tuple: (kind, value)"
-            )
-
-        kind_node, val_node = it.value.elements
-
-        if not isinstance(kind_node, PyIRConstant) or not isinstance(
-            kind_node.value, str
-        ):
-            raise ValueError("gmod_special_enum field kind must be a string constant")
-
-        if not isinstance(val_node, PyIRConstant):
-            raise ValueError("gmod_special_enum field value must be a constant")
-
-        out[field_name] = _EnumFieldSpec(kind=kind_node.value, value=val_node.value)
-
-    return out
+    return None
 
 
 def _make_global(ref: PyIRNode, ident: str) -> PyIREmitExpr:
@@ -117,50 +92,48 @@ def _make_global(ref: PyIRNode, ident: str) -> PyIREmitExpr:
 
 
 def _make_replacement(ref: PyIRNode, spec: _EnumFieldSpec) -> PyIRNode:
-    kind = spec.kind
-    val = spec.value
-
-    if kind == "global":
-        if not isinstance(val, str):
-            raise ValueError(
-                "gmod_special_enum global value must be a string identifier"
-            )
-
-        return _make_global(ref, val)
-
-    if kind == "bool":
-        if not isinstance(val, bool):
-            raise ValueError("gmod_special_enum bool value must be a bool constant")
-
-        return PyIRConstant(line=ref.line, offset=ref.offset, value=val)
-
-    if kind in ("int", "float", "str"):
-        return PyIRConstant(line=ref.line, offset=ref.offset, value=val)
-
-    raise ValueError(f"Unsupported enum field kind: {kind!r}")
+    if spec.kind == "global":
+        return _make_global(ref, spec.value)
+    return PyIRConstant(ref.line, ref.offset, spec.value)
 
 
-def _const_to_spec(value_node: PyIRNode) -> _EnumFieldSpec | None:
-    if isinstance(value_node, PyIRConstant):
-        v = value_node.value
-        if isinstance(v, bool):
-            return _EnumFieldSpec(kind="bool", value=v)
+def _dotted_parts(expr: PyIRNode) -> list[str] | None:
+    if isinstance(expr, PyIRVarUse):
+        return [expr.name] if expr.name else None
 
-        if isinstance(v, int):
-            return _EnumFieldSpec(kind="int", value=v)
+    if isinstance(expr, PyIRSymLink):
+        n = getattr(expr, "name", None)
+        return [n] if isinstance(n, str) and n else None
 
-        if isinstance(v, float):
-            return _EnumFieldSpec(kind="float", value=v)
+    if isinstance(expr, PyIREmitExpr) and expr.kind == PyIREmitKind.GLOBAL:
+        return [expr.name] if expr.name else None
 
-        if isinstance(v, str):
-            return _EnumFieldSpec(kind="str", value=v)
-
-        return None
-
-    if isinstance(value_node, PyIREmitExpr) and value_node.kind == PyIREmitKind.GLOBAL:
-        return _EnumFieldSpec(kind="global", value=value_node.name)
+    if isinstance(expr, PyIRAttribute):
+        base = _dotted_parts(expr.value)
+        if base is None:
+            return None
+        return [*base, expr.attr]
 
     return None
+
+
+def _is_python_enum_base(base: PyIRNode) -> bool:
+    if isinstance(base, PyIRVarUse) and base.name in ("Enum", "IntEnum", "StrEnum"):
+        return True
+
+    if isinstance(base, PyIRSymLink):
+        if base.name in ("Enum", "IntEnum", "StrEnum"):
+            return True
+
+    parts = _dotted_parts(base)
+    if parts and len(parts) >= 2:
+        return parts[-2] == "enum" and parts[-1] in ("Enum", "IntEnum", "StrEnum")
+
+    return False
+
+
+def _class_is_python_enum(cls: PyIRClassDef) -> bool:
+    return any(_is_python_enum_base(b) for b in (cls.bases or []))
 
 
 def _extract_target_name(ctx: SymLinkContext, t: PyIRNode) -> str | None:
@@ -168,178 +141,56 @@ def _extract_target_name(ctx: SymLinkContext, t: PyIRNode) -> str | None:
         return t.name
 
     if isinstance(t, PyIRSymLink):
-        name = getattr(t, "name", None)
-        if isinstance(name, str) and name:
-            return name
+        if isinstance(t.name, str) and t.name:
+            return t.name
+
+        sid = _sid(getattr(t, "symbol_id", None))
+        if sid is None:
+            return None
 
         for attr in ("symbols_by_id", "symbol_by_id", "id_to_symbol", "symbols"):
             m = getattr(ctx, attr, None)
             if isinstance(m, dict):
-                sym = m.get(t.symbol_id)
-                if sym is not None:
-                    n = getattr(sym, "name", None)
-                    if isinstance(n, str) and n:
-                        return n
+                sym = m.get(sid)
+                if sym is not None and isinstance(sym.name, str):
+                    return sym.name
 
     return None
-
-
-def _collect_import_module_aliases(
-    ir: PyIRFile,
-    ctx: SymLinkContext,
-    current_module: str,
-) -> dict[int, str]:
-    """
-    Builds mapping: alias_symbol_id -> imported module name string.
-    Needed for resolving `module.ClassName` into class symbol id.
-    """
-
-    def local_symbol_id(name: str) -> int | None:
-        sym = ctx.get_exported_symbol(current_module, name)
-        return sym.id.value if sym is not None else None
-
-    out: dict[int, str] = {}
-
-    for node in ir.walk():
-        if not isinstance(node, PyIRImport):
-            continue
-        if node.if_from:
-            continue
-
-        mod = ".".join(node.modules) if node.modules else ""
-        if not mod:
-            continue
-
-        if node.names:
-            for _orig, bound in _iter_imported_names(node.names):
-                sid = local_symbol_id(bound)
-                if sid is not None:
-                    out[sid] = mod
-
-        else:
-            bound = node.modules[-1] if node.modules else ""
-            sid = local_symbol_id(bound)
-            if sid is not None:
-                out[sid] = mod
-
-    return out
-
-
-def _collect_enum_base_ids(
-    ir: PyIRFile,
-    ctx: SymLinkContext,
-    current_module: str,
-    import_alias_to_mod: dict[int, str],
-) -> set[int]:
-    """
-    Returns symbol_ids of locally bound names that represent Enum bases (Enum/IntEnum).
-    Supports both:
-      from enum import Enum, IntEnum
-      import enum; enum.Enum / enum.IntEnum
-    """
-
-    def local_symbol_id(name: str) -> int | None:
-        sym = ctx.get_exported_symbol(current_module, name)
-        return sym.id.value if sym is not None else None
-
-    enum_base_ids: set[int] = set()
-
-    for node in ir.walk():
-        if not isinstance(node, PyIRImport):
-            continue
-
-        mod = ".".join(node.modules) if node.modules else ""
-        if mod != "enum":
-            continue
-
-        if node.if_from:
-            for orig, bound in _iter_imported_names(node.names):
-                if orig in ("Enum", "IntEnum", "StrEnum"):
-                    sid = local_symbol_id(bound)
-                    if sid is not None:
-                        enum_base_ids.add(sid)
-
-    return enum_base_ids
-
-
-def _is_python_enum_base(
-    base: PyIRNode,
-    *,
-    enum_name_ids: set[int],
-    import_alias_to_mod: dict[int, str],
-) -> bool:
-    """
-    True if base expression represents Enum/IntEnum/StrEnum.
-    Works for:
-      Enum
-      IntEnum
-      enum.Enum
-      enum.IntEnum
-      <alias>.Enum  (where alias imports module "enum")
-    """
-    if isinstance(base, PyIRVarUse) and base.name in ("Enum", "IntEnum", "StrEnum"):
-        return True
-
-    if isinstance(base, PyIRSymLink) and base.symbol_id in enum_name_ids:
-        return True
-
-    if isinstance(base, PyIRAttribute) and base.attr in ("Enum", "IntEnum", "StrEnum"):
-        v = base.value
-        if isinstance(v, PyIRVarUse) and v.name == "enum":
-            return True
-        if isinstance(v, PyIRSymLink):
-            mod = import_alias_to_mod.get(v.symbol_id)
-            if mod == "enum":
-                return True
-
-    return False
-
-
-def _class_is_python_enum(
-    cls: PyIRClassDef,
-    *,
-    enum_name_ids: set[int],
-    import_alias_to_mod: dict[int, str],
-) -> bool:
-    return any(
-        _is_python_enum_base(
-            b, enum_name_ids=enum_name_ids, import_alias_to_mod=import_alias_to_mod
-        )
-        for b in cls.bases
-    )
 
 
 def _resolve_enum_class_id(
     expr: PyIRNode,
+    *,
     ctx: SymLinkContext,
     store: dict[int, dict[str, _EnumFieldSpec]],
-    import_alias_to_mod: dict[int, str],
+    current_module: str,
 ) -> int | None:
-    """
-    Resolves expressions that point to enum-class object:
-      Realm
-      module.Realm
-    into class symbol_id, if present in store.
-    """
     if isinstance(expr, PyIRSymLink) and not expr.is_store:
-        return expr.symbol_id if expr.symbol_id in store else None
+        sid = _sid(expr.symbol_id)
+        return sid if sid in store else None
 
-    if isinstance(expr, PyIRAttribute):
-        if isinstance(expr.value, PyIRSymLink) and not expr.value.is_store:
-            mod = import_alias_to_mod.get(expr.value.symbol_id)
-            if mod:
-                sym = ctx.get_exported_symbol(mod, expr.attr)
-                if sym is not None and sym.id.value in store:
-                    return sym.id.value
+    parts = _dotted_parts(expr)
+    if not parts:
+        return None
 
-    return None
+    if len(parts) == 1:
+        sym = ctx.get_exported_symbol(current_module, parts[0])
+    else:
+        sym = ctx.get_exported_symbol(".".join(parts[:-1]), parts[-1])
+
+    if sym is None:
+        return None
+
+    cid = _sid(sym.id)
+    return cid if cid in store else None
 
 
 class CollectGmodSpecialEnumDeclsPass:
     """
-    Collects mapping for:
-      - classes with @gmod_special_enum(fields=...)
-      - OR classes that inherit Python Enum/IntEnum (values from NAME = <const> in class body)
+    Collects enum field mappings from:
+      - @gmod_special_enum(fields=...)
+      - Python Enum / IntEnum / StrEnum classes
+        including annotated assignments
     """
 
     @staticmethod
@@ -355,11 +206,6 @@ class CollectGmodSpecialEnumDeclsPass:
 
         store = _get_store(ctx)
 
-        import_alias_to_mod = _collect_import_module_aliases(ir, ctx, current_module)
-        enum_name_ids = _collect_enum_base_ids(
-            ir, ctx, current_module, import_alias_to_mod
-        )
-
         for node in ir.walk():
             if not isinstance(node, PyIRClassDef):
                 continue
@@ -368,224 +214,124 @@ class CollectGmodSpecialEnumDeclsPass:
             if sym is None:
                 continue
 
-            cls_id = sym.id.value
+            cls_id = _sid(sym.id)
+            if cls_id is None:
+                continue
 
-            dec: PyIRDecorator | None = None
-            for d in node.decorators:
-                if isinstance(d, PyIRDecorator) and _is_gmod_special_enum_decorator(d):
-                    dec = d
-                    break
+            for d in node.decorators or []:
+                if not _is_gmod_special_enum_decorator(d):
+                    continue
 
-            if dec is not None:
-                fields_node = dec.args_kw.get("fields")
-                if fields_node is None:
-                    raise ValueError(
-                        "gmod_special_enum missing required kw arg: fields"
+                _, _, kw = _parse_decorator_call(d)
+                fields = kw.get("fields")
+                if not isinstance(fields, PyIRDict):
+                    CompilerExit.user_error_node(
+                        "gmod_special_enum(fields=...) expects dict",
+                        path=ir.path,
+                        node=d,
                     )
 
-                mapping = _parse_fields_dict(fields_node)
+                mapping: dict[str, _EnumFieldSpec] = {}
+                for it in fields.items:
+                    if not isinstance(it, PyIRDictItem):
+                        continue
+
+                    if not isinstance(it.key, PyIRConstant):
+                        continue
+
+                    spec = _const_to_spec(it.value)
+                    if spec:
+                        mapping[it.key.value] = spec  # pyright: ignore[reportArgumentType]
+
                 store.setdefault(cls_id, {}).update(mapping)
+                break
+
+            if not _class_is_python_enum(node):
                 continue
 
-            if not _class_is_python_enum(
-                node,
-                enum_name_ids=enum_name_ids,
-                import_alias_to_mod=import_alias_to_mod,
-            ):
-                continue
+            body_map: dict[str, _EnumFieldSpec] = {}
 
-            body_mapping: dict[str, _EnumFieldSpec] = {}
+            for st in node.body or []:
+                if isinstance(st, PyIRAssign):
+                    if len(st.targets) != 1:
+                        continue
+                    name = _extract_target_name(ctx, st.targets[0])
+                    if not name:
+                        continue
+                    spec = _const_to_spec(st.value)
+                    if spec:
+                        body_map[name] = spec
 
-            for st in node.body:
-                if not isinstance(st, PyIRAssign):
-                    continue
-                if len(st.targets) != 1:
-                    continue
+                elif isinstance(st, PyIRAnnotatedAssign):
+                    name = st.name
+                    spec = _const_to_spec(st.value)
+                    if spec:
+                        body_map[name] = spec
 
-                t = st.targets[0]
-                name = _extract_target_name(ctx, t)
-                if not name:
-                    continue
-
-                spec = _const_to_spec(st.value)
-                if spec is None:
-                    continue
-
-                body_mapping[name] = spec
-
-            if body_mapping:
-                store.setdefault(cls_id, {}).update(body_mapping)
+            if body_map:
+                store.setdefault(cls_id, {}).update(body_map)
 
         return ir
 
 
 class FoldGmodSpecialEnumUsesPass:
-    """
-    Replaces enum member reads ONLY when the base resolves to a collected enum-class:
-      Realm.SERVER            -> <const>
-      module.Realm.SERVER     -> <const>
-    """
-
     @staticmethod
     def run(ir: PyIRFile, ctx: SymLinkContext) -> PyIRFile:
-        ctx.ensure_module_index()
-
         store: dict[int, dict[str, _EnumFieldSpec]] | None = getattr(
             ctx, "_gmod_special_enum_store", None
         )
-        if not store:
-            return ir
-
-        if ir.path is None:
+        if not store or ir.path is None:
             return ir
 
         current_module = ctx.module_name_by_path.get(ir.path)
         if not current_module:
             return ir
 
-        import_alias_to_mod = _collect_import_module_aliases(ir, ctx, current_module)
-
         def rw(node: PyIRNode, *, store_ctx: bool) -> PyIRNode:
             if isinstance(node, PyIRAttribute):
                 node.value = rw(node.value, store_ctx=False)
 
-                if store_ctx:
-                    return node
-
-                base_cls_id = _resolve_enum_class_id(
-                    node.value, ctx, store, import_alias_to_mod
-                )
-                if base_cls_id is not None:
-                    spec = store[base_cls_id].get(node.attr)
-                    if spec is not None:
-                        return _make_replacement(node, spec)
+                if not store_ctx:
+                    cid = _resolve_enum_class_id(
+                        node.value,
+                        ctx=ctx,
+                        store=store,
+                        current_module=current_module,
+                    )
+                    if cid is not None:
+                        spec = store.get(cid, {}).get(node.attr)
+                        if spec:
+                            return _make_replacement(node, spec)
 
                 return node
 
-            if isinstance(node, PyIRSymLink):
-                return node
-
-            if isinstance(node, PyIRCall):
-                node.func = rw(node.func, store_ctx=False)
-                node.args_p = [rw(a, store_ctx=False) for a in node.args_p]
-                node.args_kw = {
-                    k: rw(v, store_ctx=False) for k, v in node.args_kw.items()
-                }
-                return node
-
-            if isinstance(
-                node,
-                (
-                    PyIRConstant,
-                    PyIRVarUse,
-                    PyIRVarCreate,
-                    PyIRImport,
-                    PyIRBreak,
-                    PyIRContinue,
-                    PyIRPass,
-                    PyIRComment,
-                    PyIREmitExpr,
-                ),
+            for attr in (
+                "value",
+                "left",
+                "right",
+                "target",
+                "iter",
+                "test",
+                "context_expr",
+                "optional_vars",
             ):
-                return node
+                v = getattr(node, attr, None)
+                if isinstance(v, PyIRNode):
+                    setattr(node, attr, rw(v, store_ctx=False))
 
-            if isinstance(node, PyIRUnaryOP):
-                node.value = rw(node.value, store_ctx=False)
-                return node
-
-            if isinstance(node, PyIRBinOP):
-                node.left = rw(node.left, store_ctx=False)
-                node.right = rw(node.right, store_ctx=False)
-                return node
-
-            if isinstance(node, PyIRSubscript):
-                node.value = rw(node.value, store_ctx=False)
-                node.index = rw(node.index, store_ctx=False)
-                return node
-
-            if isinstance(node, PyIRList):
-                node.elements = [rw(e, store_ctx=False) for e in node.elements]
-                return node
-
-            if isinstance(node, PyIRTuple):
-                node.elements = [rw(e, store_ctx=False) for e in node.elements]
-                return node
-
-            if isinstance(node, PyIRSet):
-                node.elements = [rw(e, store_ctx=False) for e in node.elements]
-                return node
-
-            if isinstance(node, PyIRDictItem):
-                node.key = rw(node.key, store_ctx=False)
-                node.value = rw(node.value, store_ctx=False)
-                return node
-
-            if isinstance(node, PyIRDict):
-                node.items = [rw(i, store_ctx=False) for i in node.items]  # type: ignore[list-item]
-                return node
-
-            if isinstance(node, PyIRDecorator):
-                node.exper = rw(node.exper, store_ctx=False)
-                node.args_p = [rw(a, store_ctx=False) for a in node.args_p]
-                node.args_kw = {
-                    k: rw(v, store_ctx=False) for k, v in node.args_kw.items()
-                }
-                return node
-
-            if isinstance(node, PyIRAssign):
-                node.targets = [rw(t, store_ctx=True) for t in node.targets]
-                node.value = rw(node.value, store_ctx=False)
-                return node
-
-            if isinstance(node, PyIRAugAssign):
-                node.target = rw(node.target, store_ctx=True)
-                node.value = rw(node.value, store_ctx=False)
-                return node
-
-            if isinstance(node, PyIRReturn):
-                node.value = rw(node.value, store_ctx=False)
-                return node
-
-            if isinstance(node, PyIRIf):
-                node.test = rw(node.test, store_ctx=False)
-                node.body = [rw(s, store_ctx=False) for s in node.body]
-                node.orelse = [rw(s, store_ctx=False) for s in node.orelse]
-                return node
-
-            if isinstance(node, PyIRWhile):
-                node.test = rw(node.test, store_ctx=False)
-                node.body = [rw(s, store_ctx=False) for s in node.body]
-                return node
-
-            if isinstance(node, PyIRFor):
-                node.target = rw(node.target, store_ctx=True)
-                node.iter = rw(node.iter, store_ctx=False)
-                node.body = [rw(s, store_ctx=False) for s in node.body]
-                return node
-
-            if isinstance(node, PyIRWithItem):
-                node.context_expr = rw(node.context_expr, store_ctx=False)
-                if node.optional_vars is not None:
-                    node.optional_vars = rw(node.optional_vars, store_ctx=True)
-                return node
-
-            if isinstance(node, PyIRWith):
-                node.items = [rw(i, store_ctx=False) for i in node.items]  # type: ignore[list-item]
-                node.body = [rw(s, store_ctx=False) for s in node.body]
-                return node
-
-            if isinstance(node, PyIRFunctionDef):
-                node.decorators = [rw(d, store_ctx=False) for d in node.decorators]  # type: ignore[list-item]
-                node.body = [rw(s, store_ctx=False) for s in node.body]
-                return node
-
-            if isinstance(node, PyIRClassDef):
-                node.bases = [rw(b, store_ctx=False) for b in node.bases]
-                node.decorators = [rw(d, store_ctx=False) for d in node.decorators]  # type: ignore[list-item]
-                node.body = [rw(s, store_ctx=False) for s in node.body]
-                return node
+            for attr in (
+                "body",
+                "orelse",
+                "args_p",
+                "items",
+                "bases",
+                "decorators",
+            ):
+                seq = getattr(node, attr, None)
+                if isinstance(seq, list):
+                    setattr(node, attr, [rw(x, store_ctx=False) for x in seq])
 
             return node
 
-        ir.body = [rw(n, store_ctx=False) for n in ir.body]
+        ir.body = [rw(n, store_ctx=False) for n in (ir.body or [])]
         return ir

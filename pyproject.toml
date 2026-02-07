@@ -13,7 +13,7 @@ authors = [{ name = "Cain" }]
 dependencies = ["colorama"]
 
 [project.scripts]
-py2glua = "py2glua.cli:main"
+py2glua = "py2glua.__main__:main"
 
 [project.urls]
 homepage = "https://github.com/py-love-gmod/py2glua"

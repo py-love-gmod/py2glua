@@ -155,3 +155,7 @@ Debug    : {Py2GluaConfig.debug}
                 show_path=False,
                 show_pos=False,
             )
+
+
+if __name__ == "__main__":
+    main()

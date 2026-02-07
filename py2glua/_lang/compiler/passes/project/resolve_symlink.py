@@ -34,22 +34,25 @@ from ..analysis.symlinks import PyIRSymLink, SymLinkContext
 class ResolveSymlinksToNamespaceProjectPass:
     """
     Project-pass: finalizes name resolution for codegen WITHOUT env shims.
-
-    What it does:
-      - No setfenv / no metatables.
-      - Imports become explicit namespace chains.
-      - Cross-module symlinks become explicit namespace chains.
-      - Locals are inserted "near first use", but with correct Lua lexical rules:
-          * A local must be declared BEFORE any earlier function/class method that captures it as upvalue.
-          * Locals are inserted at the current block list level (module / function body), not inside nested if/while blocks.
-      - Emitter will later collapse patterns:
-            local x
-            x = expr
-        into:
-            local x = expr
     """
 
     _MAX_RAW_LINE: Final[int] = 160
+    _SKIP_AUTORUN_TOPDIRS: Final[tuple[str, ...]] = ("entities", "weapons")
+
+    @staticmethod
+    def _is_simple_lua_name(name: str) -> bool:
+        if not name or "." in name or ":" in name:
+            return False
+
+        c0 = name[0]
+        if not (c0.isalpha() or c0 == "_"):
+            return False
+
+        for ch in name[1:]:
+            if not (ch.isalnum() or ch == "_"):
+                return False
+
+        return True
 
     @classmethod
     def run(cls, files: list[PyIRFile], ctx: SymLinkContext) -> list[PyIRFile]:
@@ -84,6 +87,21 @@ class ResolveSymlinksToNamespaceProjectPass:
         return files
 
     @classmethod
+    def _is_entity_or_weapon_file(cls, p: Path) -> bool:
+        try:
+            src_root = Py2GluaConfig.source.resolve()
+            rel = p.resolve().relative_to(src_root)
+
+        except Exception:
+            rel = p
+
+        parts = list(rel.parts)
+        if parts and parts[0] == "lua":
+            parts = parts[1:]
+
+        return bool(parts) and parts[0] in cls._SKIP_AUTORUN_TOPDIRS
+
+    @classmethod
     def _normalize_module_index_keys(cls, ctx: SymLinkContext) -> None:
         add: dict[Path, str] = {}
         for p, mod in list(ctx.module_name_by_path.items()):
@@ -107,6 +125,9 @@ class ResolveSymlinksToNamespaceProjectPass:
             if ir.path is None:
                 continue
 
+            if cls._is_entity_or_weapon_file(ir.path):
+                continue
+
             mod = cls._module_of_path(ir.path, ctx)
             if mod:
                 out[mod] = ir.path
@@ -126,6 +147,9 @@ class ResolveSymlinksToNamespaceProjectPass:
             if ir.path is None:
                 continue
 
+            if cls._is_entity_or_weapon_file(ir.path):
+                continue
+
             use_mod = cls._module_of_path(ir.path, ctx)
             if not use_mod:
                 continue
@@ -137,9 +161,13 @@ class ResolveSymlinksToNamespaceProjectPass:
                 if n.decl_file is None:
                     continue
 
+                if cls._is_entity_or_weapon_file(n.decl_file):
+                    continue
+
                 decl_mod = cls._module_of_path(n.decl_file, ctx)
                 if not decl_mod:
                     continue
+
                 if decl_mod == use_mod:
                     continue
 
@@ -156,6 +184,9 @@ class ResolveSymlinksToNamespaceProjectPass:
 
         for ir in files:
             if ir.path is None:
+                continue
+
+            if cls._is_entity_or_weapon_file(ir.path):
                 continue
 
             mod = cls._module_of_path(ir.path, ctx)
@@ -199,21 +230,10 @@ class ResolveSymlinksToNamespaceProjectPass:
     def _place_locals_project_style(
         cls, ir: PyIRFile, *, import_binds: dict[str, tuple[str, ...]]
     ) -> None:
-        """
-        Module body:
-          - module locals are all module-scope defs except import-binds
-          - locals inserted before earliest statement that *touches* them, where "touch" includes:
-              * direct usage in that statement subtree
-              * usage inside nested function/method bodies (upvalue capture)
-        Function bodies:
-          - same idea, but params excluded
-        """
         module_locals = cls._collect_defs_in_block(ir.body, stop_at_boundaries=True)
         module_locals.difference_update(import_binds.keys())
         ir.body = cls._place_locals_in_block(
-            ir.body,
-            local_names=module_locals,
-            params=set(),
+            ir.body, local_names=module_locals, params=set()
         )
 
         for st in ir.body:
@@ -270,14 +290,16 @@ class ResolveSymlinksToNamespaceProjectPass:
         local_names: set[str],
         params: set[str],
     ) -> list[PyIRNode]:
-        """
-        Inserts PyIRVarCreate before earliest statement index where each local is first "touched".
-        Crucially: insert at THIS block list level (module/function body), not inside nested if/while blocks.
-        """
         if not local_names:
             return body
 
-        declared: set[str] = {st.name for st in body if isinstance(st, PyIRVarCreate)}
+        local_names = {n for n in local_names if cls._is_simple_lua_name(n)}
+
+        declared: set[str] = {
+            st.name
+            for st in body
+            if isinstance(st, PyIRVarCreate) and cls._is_simple_lua_name(st.name)
+        }
         needed = {n for n in local_names if n not in declared and n not in params}
         if not needed:
             return body
@@ -290,7 +312,6 @@ class ResolveSymlinksToNamespaceProjectPass:
             for n in hits:
                 if n not in first_at:
                     first_at[n] = i
-
             if len(first_at) == len(needed):
                 break
 
@@ -313,31 +334,31 @@ class ResolveSymlinksToNamespaceProjectPass:
 
     @classmethod
     def _touch_names_in_stmt(cls, node: PyIRNode) -> set[str]:
-        """
-        Names that are referenced/defined in the subtree of a single top-level statement.
-        Includes upvalue-capture needs: when entering a nested function/class body, only count PyIRSymLink with hops>0.
-        """
         out: set[str] = set()
+
+        def add(name: str) -> None:
+            if cls._is_simple_lua_name(name):
+                out.add(name)
 
         def walk(n: PyIRNode, *, nested_scope: bool) -> None:
             if isinstance(n, PyIRSymLink):
                 if (not nested_scope) or (n.hops > 0):
-                    out.add(n.name)
+                    add(n.name)
                 return
 
             if isinstance(n, PyIRVarUse):
                 if not nested_scope:
-                    out.add(n.name)
+                    add(n.name)
                 return
 
             if isinstance(n, PyIRVarCreate):
                 if not nested_scope:
-                    out.add(n.name)
+                    add(n.name)
                 return
 
             if isinstance(n, PyIRFunctionDef):
                 if not nested_scope:
-                    out.add(n.name)
+                    add(n.name)
 
                 for d in n.decorators:
                     walk(d, nested_scope=nested_scope)
@@ -348,31 +369,26 @@ class ResolveSymlinksToNamespaceProjectPass:
 
                 for b in n.body:
                     walk(b, nested_scope=True)
-
                 return
 
             if isinstance(n, PyIRFunctionExpr):
                 for _arg, (_ann, default) in n.signature.items():
                     if default is not None:
                         walk(default, nested_scope=nested_scope)
-
                 for b in n.body:
                     walk(b, nested_scope=True)
                 return
 
             if isinstance(n, PyIRClassDef):
                 if not nested_scope:
-                    out.add(n.name)
+                    add(n.name)
 
                 for b in n.bases:
                     walk(b, nested_scope=nested_scope)
-
                 for d in n.decorators:
                     walk(d, nested_scope=nested_scope)
-
                 for b in n.body:
                     walk(b, nested_scope=True)
-
                 return
 
             if not is_dataclass(n):
@@ -382,12 +398,10 @@ class ResolveSymlinksToNamespaceProjectPass:
                 v = getattr(n, f.name)
                 if isinstance(v, PyIRNode):
                     walk(v, nested_scope=nested_scope)
-
                 elif isinstance(v, list):
                     for x in v:
                         if isinstance(x, PyIRNode):
                             walk(x, nested_scope=nested_scope)
-
                 elif isinstance(v, dict):
                     for x in v.values():
                         if isinstance(x, PyIRNode):
@@ -398,20 +412,12 @@ class ResolveSymlinksToNamespaceProjectPass:
 
     @staticmethod
     def _mk_local_create(*, name: str) -> PyIRVarCreate:
-        """
-        Compatible with both old/new PyIRVarCreate layouts:
-          - old: is_global (False => local)
-          - new: is_local (True => local)
-        """
         fset = {f.name for f in fields(PyIRVarCreate)}
         kwargs = {}
-
         if "is_global" in fset:
             kwargs["is_global"] = False
-
         if "is_local" in fset:
             kwargs["is_local"] = True
-
         return PyIRVarCreate(line=None, offset=None, name=name, **kwargs)
 
     @classmethod
@@ -426,7 +432,6 @@ class ResolveSymlinksToNamespaceProjectPass:
             return body
 
         out = list(body)
-
         ensure_lines = cls._emit_ensure_module_table(ns, ns_mod_parts)
         if ensure_lines:
             out.append(
@@ -485,7 +490,6 @@ class ResolveSymlinksToNamespaceProjectPass:
             out.append(
                 PyIREmitExpr(line=None, offset=None, kind=PyIREmitKind.RAW, name=cur)
             )
-
         return out
 
     @classmethod
@@ -612,21 +616,25 @@ class ResolveSymlinksToNamespaceProjectPass:
     ) -> set[str]:
         out: set[str] = set()
 
+        def add_name(name: str) -> None:
+            if cls._is_simple_lua_name(name):
+                out.add(name)
+
         def add_simple_target(t: PyIRNode) -> None:
             if isinstance(t, PyIRVarUse):
-                out.add(t.name)
+                add_name(t.name)
                 return
             if isinstance(t, PyIRSymLink) and t.is_store:
-                out.add(t.name)
+                add_name(t.name)
                 return
 
         def walk(node: PyIRNode) -> None:
             if isinstance(node, PyIRVarCreate):
-                out.add(node.name)
+                add_name(node.name)
                 return
 
             if isinstance(node, PyIRFunctionDef):
-                out.add(node.name)
+                add_name(node.name)
                 if stop_at_boundaries:
                     return
                 for b in node.body:
@@ -641,7 +649,7 @@ class ResolveSymlinksToNamespaceProjectPass:
                 return
 
             if isinstance(node, PyIRClassDef):
-                out.add(node.name)
+                add_name(node.name)
                 if stop_at_boundaries:
                     return
                 for b in node.body:
@@ -735,7 +743,6 @@ class ResolveSymlinksToNamespaceProjectPass:
     @staticmethod
     def _import_bind_map(ir: PyIRFile) -> dict[str, tuple[str, ...]]:
         out: dict[str, tuple[str, ...]] = {}
-
         for n in ir.body:
             if not isinstance(n, PyIRImport):
                 continue
@@ -743,7 +750,6 @@ class ResolveSymlinksToNamespaceProjectPass:
                 continue
 
             mods = tuple(n.modules or ())
-
             if n.names:
                 for spec in n.names:
                     if isinstance(spec, tuple):
@@ -771,13 +777,11 @@ class ResolveSymlinksToNamespaceProjectPass:
         parts = [p for p in mod_name.split(".") if p]
         try:
             src_root_name = Py2GluaConfig.source.resolve().name
-
         except Exception:
             src_root_name = ""
 
         if parts and src_root_name and parts[0] == src_root_name:
             parts = parts[1:]
-
         return tuple(parts)
 
     @staticmethod
@@ -791,7 +795,6 @@ class ResolveSymlinksToNamespaceProjectPass:
         cur: PyIRNode = base
         for p in parts:
             cur = PyIRAttribute(line=line, offset=offset, value=cur, attr=p)
-
         return cur
 
     @staticmethod
@@ -799,11 +802,8 @@ class ResolveSymlinksToNamespaceProjectPass:
         hit = ctx.module_name_by_path.get(p)
         if hit is not None:
             return hit
-
         try:
             pr = p.resolve()
-
         except Exception:
             return None
-
         return ctx.module_name_by_path.get(pr)

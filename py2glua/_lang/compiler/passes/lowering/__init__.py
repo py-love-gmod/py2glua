@@ -18,7 +18,6 @@ from .lazy_compile import (
 from .net_string import CollectRegisterArgDeclsPass, CollectRegisterArgNetStringsPass
 from .nil_fold import NilFoldPass
 from .raw import RewriteRawCallsPass
-from .strip_asign import StripPythonOnlyNodesPass
 from .strip_cd import StripCompilerDirectiveDefPass
 from .strip_comments_imports import StripCommentsImportsPass
 from .strip_enums import StripEnumsAndGmodSpecialEnumDefsPass

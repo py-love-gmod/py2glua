@@ -1,12 +1,7 @@
 from collections.abc import Callable
 from enum import Enum
-from typing import TYPE_CHECKING, ParamSpec, TypeVar
 
 from .core import CompilerDirective, nil
-
-if TYPE_CHECKING:
-    P = ParamSpec("P")
-    R = TypeVar("R")
 
 
 class ENTType(Enum):
@@ -53,13 +48,21 @@ class ENT:
     @staticmethod
     def override(
         realm: CompilerDirective.RealmMarker,
-        target: Callable[P, R],
-    ) -> Callable[[Callable[P, R]], Callable[P, R]]:
-        def decorator(fn: Callable[P, R]) -> Callable[P, R]:
+        target: Callable,
+    ) -> Callable:
+        def decorator(fn: Callable) -> Callable:
+            return fn
+
+        return decorator
+
+    @staticmethod
+    def add_method(
+        realm: CompilerDirective.RealmMarker,
+    ) -> Callable:
+        def decorator(fn: Callable) -> Callable:
             return fn
 
         return decorator
 
     def Initialize(self) -> None:
-        # TODO:
-        ...
+        pass

@@ -7,7 +7,6 @@ from .core import CompilerDirective
     fields={
         "SERVER": ("global", "SERVER"),
         "CLIENT": ("global", "CLIENT"),
-        "MENU": ("global", "MENU_DLL"),
         "SHARED": ("bool", True),
     }
 )
@@ -20,14 +19,6 @@ class Realm:
 
     CLIENT: Final = CompilerDirective.RealmMarker()
     """Код выполняется исключительно на клиенте"""
-
-    MENU: Final = CompilerDirective.RealmMarker()
-    """
-    Отдельное Lua-состояние главного меню.
-    Изолировано от CLIENT и SERVER, прямое взаимодействие невозможно.
-    Связь возможна только через файловую систему.
-    Требует перезаписи Lua-файлов движка. (что пока что не поддерживается в версии py2glua 0.0.1)
-    """
 
     SHARED: Final = CompilerDirective.RealmMarker()
     """Код выполняется одновременно и на клиенте, и на сервере"""

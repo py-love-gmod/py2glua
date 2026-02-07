@@ -13,6 +13,7 @@ from ..py.ir_dataclass import (
     PyIRFunctionDef,
     PyIRImport,
     PyIRImportType,
+    PyIRVarCreate,
     PyIRVarUse,
 )
 
@@ -44,8 +45,8 @@ class _SymbolIndex:
             try:
                 src = path.read_text(encoding="utf-8")
                 ir = PyIRBuilder.build_file(source=src, path_to_file=path)
-
             except Exception:
+                # Индекс best-effort: не валим сборку из-за одного файла
                 continue
 
             self._index_file(ir)
@@ -58,7 +59,7 @@ class _SymbolIndex:
 
     def _index_file(self, ir: PyIRFile) -> None:
         for node in ir.body or []:
-            if isinstance(node, (PyIRClassDef, PyIRFunctionDef)):
+            if isinstance(node, (PyIRClassDef, PyIRFunctionDef, PyIRVarCreate)):
                 self._add(node.name, ir.path)
 
             elif isinstance(node, PyIRAssign):
@@ -69,7 +70,6 @@ class _SymbolIndex:
     def _add(self, name: str, path: Path | None) -> None:
         if not path or not name or name.startswith("_"):
             return
-
         self._sym2path.setdefault(name, path.resolve())
 
 
@@ -142,10 +142,11 @@ class ImportResolver:
             return _Resolved(PyIRImportType.LOCAL, tuple(deps_local))
 
         if self._is_internal_namespace(modules):
-            return _Resolved(
-                PyIRImportType.INTERNAL,
-                tuple(self._resolve_internal(imp, modules, current_file)),
-            )
+            deps_internal = self._resolve_internal(imp, modules, current_file)
+            if deps_internal:
+                return _Resolved(PyIRImportType.INTERNAL, tuple(deps_internal))
+
+            return _Resolved(PyIRImportType.INTERNAL, ())
 
         return _Resolved(PyIRImportType.EXTERNAL, ())
 
@@ -155,15 +156,34 @@ class ImportResolver:
         modules: list[str],
         current_file: Path,
     ) -> list[Path]:
+        """
+        INTERNAL namespace: py2glua.glua.<rest...>
+        """
+
         rest = modules[2:]
 
+        # import py2glua.glua.ent
         if not imp.if_from:
             p = self._resolve_module_or_package(self.internal_root, rest)
             return [p] if p else []
 
-        deps: set[Path] = set()
+        # from py2glua.glua.ent import ENT
+        parent = self._resolve_module_or_package(self.internal_root, rest)
+        if parent is None:
+            return []
+
+        # КЛЮЧЕВАЯ ПРАВКА:
+        # Если parent — это модуль (НЕ пакет), то для deps достаточно самого parent.
+        # Никаких попыток "разрешить символ ENT" делать не надо.
+        if parent.name != "__init__.py":
+            return [parent]
+
+        # parent — пакет: from pkg import X -> X может быть подмодулем/пакетом или символом.
+        pkg_dir = parent.parent
+        deps: set[Path] = {parent}
+
         for name in self._iter_imported_names(imp):
-            p = self._resolve_module_or_package(self.internal_root, rest + [name])
+            p = self._resolve_module_or_package(pkg_dir, [name])
             if p:
                 deps.add(p)
                 continue
@@ -202,7 +222,7 @@ class ImportResolver:
             return [parent]
 
         pkg_dir = parent.parent
-        deps: set[Path] = set()
+        deps: set[Path] = {parent}
 
         for name in self._iter_imported_names(imp):
             p = self._resolve_module_or_package(pkg_dir, [name])
@@ -246,7 +266,7 @@ class ImportResolver:
             return [parent]
 
         pkg_dir = parent.parent
-        deps: set[Path] = set()
+        deps: set[Path] = {parent}
 
         for name in self._iter_imported_names(imp):
             p = self._resolve_module_or_package(pkg_dir, [name])
@@ -316,7 +336,6 @@ class ImportResolver:
         try:
             path.resolve().relative_to(root.resolve())
             return True
-
         except ValueError:
             return False
 
@@ -326,16 +345,6 @@ class ImportResolver:
 
     @staticmethod
     def _best_effort_top_name(imp: PyIRImport) -> str | None:
-        """
-        Attempt to guess a top-level module name when `imp.modules` is empty.
-        This is ONLY used to identify stdlib modules that must be ignored.
-
-        Heuristics:
-          - if modules present -> use modules[0] (handled earlier)
-          - else if this is `from X import ...` and X was not populated:
-              try to use the first imported name as a candidate.
-              (This is conservative: it may miss some stdlib imports, but should not misclassify locals.)
-        """
         if imp.modules:
             return imp.modules[0]
 
