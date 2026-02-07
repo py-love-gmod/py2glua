@@ -161,7 +161,6 @@ class BuildAutorunInitProjectPass:
             for p in addscluafile:
                 out.append(cls._raw(f"    AddCSLuaFile({cls._q(p)})"))
             out.append(cls._raw("end"))
-            out.append(cls._blank())
 
         if net_strings:
             out.append(PyIRComment(line=None, offset=None, value="Net strings"))
@@ -170,7 +169,6 @@ class BuildAutorunInitProjectPass:
                 out.append(cls._raw(f"    util.AddNetworkString({cls._q(s)})"))
 
             out.append(cls._raw("end"))
-            out.append(cls._blank())
 
         out.append(PyIRComment(line=None, offset=None, value="Execution"))
 
