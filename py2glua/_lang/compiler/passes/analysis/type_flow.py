@@ -697,7 +697,7 @@ class TypeFlowPass:
         method_tg_nil_by_class: set[tuple[str, str]],
     ) -> Tuple[Dict[int, Set[str]], bool]:
         if isinstance(st, PyIRReturn):
-            TypeFlowPass._walk_expr(ctx, st.value, env, snapshots)
+            TypeFlowPass._walk_expr(ctx, st.value, env, snapshots)  # type: ignore
             return env, True
 
         if (

@@ -1,3 +1,4 @@
+from .deprecated_call import CollectDeprecatedDeclsPass, WarnDeprecatedUsesPass
 from .symlinks import (
     BuildScopesPass,
     CollectDefsPass,
@@ -6,4 +7,3 @@ from .symlinks import (
     SymLinkContext,
 )
 from .type_flow import TypeFlowPass
-

@@ -23,6 +23,7 @@ from ....py.ir_dataclass import (
     PyIRDecorator,
     PyIRDict,
     PyIREmitExpr,
+    PyIREmitKind,
     PyIRFile,
     PyIRFor,
     PyIRFunctionDef,
@@ -36,6 +37,7 @@ from ....py.ir_dataclass import (
     PyIRTuple,
     PyIRUnaryOP,
     PyIRVarCreate,
+    PyIRVarStorage,
     PyIRVarUse,
     PyIRWhile,
     PyIRWith,
@@ -163,16 +165,21 @@ class LuaEmitter:
     @staticmethod
     def _varcreate_is_local(node: PyIRVarCreate) -> bool:
         """
-        Support both old and new PyIRVarCreate field sets:
-          - old: is_global (False => local)
-          - new: is_local (True => local)
-        Fallback: treat as local.
+        Supports current PyIRVarCreate:
+        - storage: LOCAL/GLOBAL/EXPORT
+        - is_global kept as legacy alias
         """
         fset = {f.name for f in fields(node)}
+
+        if "storage" in fset:
+            st = getattr(node, "storage", None)
+            if st is not None:
+                return st != PyIRVarStorage.GLOBAL
+
         if "is_global" in fset:
             return not bool(getattr(node, "is_global"))
-        if "is_local" in fset:
-            return bool(getattr(node, "is_local"))
+
+        # fallback: local
         return True
 
     @staticmethod
@@ -223,6 +230,13 @@ class LuaEmitter:
 
     def _stmt(self, node: PyIRNode, *, top_level: bool) -> None:
         if isinstance(node, PyIRDecorator):
+            return
+
+        if isinstance(node, PyIREmitExpr) and node.kind == PyIREmitKind.RAW:
+            self._flush_pending_locals(top_level=top_level)
+            self._maybe_blankline_before("stmt", top_level=top_level)
+            # _wl() handles multiline strings.
+            self._wl(node.name or "")
             return
 
         if isinstance(node, PyIRVarCreate):

@@ -10,10 +10,12 @@ from .import_resolver import ImportResolver
 from .passes.analysis import (
     BuildScopesPass,
     CollectDefsPass,
+    CollectDeprecatedDeclsPass,
     ResolveUsesPass,
     RewriteToSymlinksPass,
     SymLinkContext,
     TypeFlowPass,
+    WarnDeprecatedUsesPass,
 )
 from .passes.expand import (
     CollectAnonymousFunctionsPass,
@@ -28,8 +30,10 @@ from .passes.expand import (
     RewriteWithContextManagerPass,
 )
 from .passes.lowering import (
+    CollectDebugCompileOnlyDeclsPass,
     CollectGmodApiDeclsPass,
     CollectGmodSpecialEnumDeclsPass,
+    CollectWithConditionClassesPass,
     ConstFoldingPass,
     CountSymlinkUsesPass,
     DcePass,
@@ -37,7 +41,10 @@ from .passes.lowering import (
     FoldCompileTimeBoolConstsPass,
     FoldGmodSpecialEnumUsesPass,
     NilFoldPass,
+    RewriteAndStripDebugCompileOnlyPass,
     RewriteGmodApiCallsPass,
+    RewriteRawCallsPass,
+    RewriteWithConditionBlocksPass,
     StripCommentsImportsPass,
     StripCompilerDirectiveDefPass,
     StripEnumsAndGmodSpecialEnumDefsPass,
@@ -96,24 +103,31 @@ class Compiler:
         RewriteToSymlinksPass,
         # ===
         TypeFlowPass,  # Типизация и проверки типов
+        CollectDeprecatedDeclsPass,  # Деприкейтед варны
+        WarnDeprecatedUsesPass,  # Деприкейтед варны
     ]
 
     lowering_passes = [
-        NilFoldPass,  # nil fold
-        FoldCompileTimeBoolConstsPass,  # DEBUG и TYPE_CHECKING
-        CollectGmodSpecialEnumDeclsPass,  # Enum fold
-        FoldGmodSpecialEnumUsesPass,  # Enum fold
-        StripPythonOnlyNodesPass,  # Стрип анотированных асайнов.
-        CollectGmodApiDeclsPass,  # gmod api
-        FinalizeGmodApiRegistryPass,  # gmod api
-        RewriteGmodApiCallsPass,  # gmod api
-        CountSymlinkUsesPass,  # Считаем для lazy_compile # Нагружают сильно. TODO:
-        StripLazyCompileUnusedDefsPass,  # Обрабатываем lazy_compile # Нагружают сильно. TODO:
-        StripEnumsAndGmodSpecialEnumDefsPass,  # Стрип Enum
-        StripNoCompileAndGmodApiDefsPass,  # Стрип no_compile и gmod_api
-        StripCompilerDirectiveDefPass,  # Стрип CD
-        ConstFoldingPass,  # Конст фолдинг
-        StripCommentsImportsPass,  # Стрип комментариев и импортов
+        NilFoldPass,  # Трансформирует в нормальный nil
+        FoldCompileTimeBoolConstsPass,  # DEBUG | TYPE_CHECKING -> compile-time if
+        CollectDebugCompileOnlyDeclsPass,  # Сбор debug_compile_only()
+        RewriteAndStripDebugCompileOnlyPass,  # Замена debug_compile_only()
+        RewriteRawCallsPass,  # Обработка raw
+        CollectWithConditionClassesPass,  # with -> if сбор
+        RewriteWithConditionBlocksPass,  # with -> if замена
+        CollectGmodSpecialEnumDeclsPass,  #  gmod_special_enum сбор
+        FoldGmodSpecialEnumUsesPass,  #  gmod_special_enum подстановка
+        StripPythonOnlyNodesPass,  # Удаление Python-only конструкций
+        CollectGmodApiDeclsPass,  # gmod_api сбор
+        FinalizeGmodApiRegistryPass,  # Финализация реестра GMod API
+        RewriteGmodApiCallsPass,  # Переписывание вызовов GMod API
+        StripEnumsAndGmodSpecialEnumDefsPass,  # Удаление Enum и gmod_special_enum дефиниций из IR
+        StripNoCompileAndGmodApiDefsPass,  # Удаление no_compile и gmod_api реализаций
+        StripCompilerDirectiveDefPass,  # Удаление определений CompilerDirective из IR
+        ConstFoldingPass,  # Константное свёртывание выражений
+        StripCommentsImportsPass,  # Удаление комментариев и import-ов
+        CountSymlinkUsesPass,  # Подсчёт read-use symlink-ов
+        StripLazyCompileUnusedDefsPass,  # Удаление lazy_compile defs без использования
         DcePass,  # DCE
     ]
 

@@ -42,9 +42,11 @@ class FoldCompileTimeBoolConstsPass:
         ) -> Iterator[tuple[str, str]]:
             if not names:
                 return
+
             for n in names:
                 if isinstance(n, tuple):
                     yield n[0], n[1]
+
                 else:
                     yield n, n
 
@@ -168,6 +170,7 @@ class FoldCompileTimeBoolConstsPass:
                 node.context_expr = rw(node.context_expr, store=False)
                 if node.optional_vars is not None:
                     node.optional_vars = rw(node.optional_vars, store=True)
+
                 return node
 
             if isinstance(node, PyIRFunctionDef):
