@@ -783,7 +783,7 @@ class BuildGmodPrototypesProjectPass:
                     cls._raw('include("shared.lua")'),
                 ]
                 + (init_body if init_body else [cls._raw("")])
-            ),
+            ),  # type: ignore
             imports=[],
             realm=FileRealm.SERVER,
         )
@@ -795,7 +795,7 @@ class BuildGmodPrototypesProjectPass:
             body=(
                 [cls._raw('include("shared.lua")')]
                 + (cl_body if cl_body else [cls._raw("")])
-            ),
+            ),  # type: ignore
             imports=[],
             realm=FileRealm.CLIENT,
         )

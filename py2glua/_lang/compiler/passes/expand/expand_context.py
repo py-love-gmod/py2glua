@@ -24,6 +24,13 @@ class FnSig:
 
 
 @dataclass(frozen=True)
+class ClassTemplate:
+    instance_methods: Dict[str, FnSig]
+    class_methods: Tuple[str, ...]
+    has_init: bool
+
+
+@dataclass(frozen=True)
 class InlineTemplate:
     fn: PyIRFunctionDef
     params: Tuple[str, ...]
@@ -36,6 +43,9 @@ class ExpandContext:
     # Per-file top-level function signatures used by args normalization.
     # Key is canonical file path string.
     fn_sigs: Dict[str, Dict[str, FnSig]] = field(default_factory=dict)
+    # Per-file class runtime templates.
+    # Key is canonical file path string.
+    class_templates: Dict[str, Dict[str, ClassTemplate]] = field(default_factory=dict)
 
     inline_templates: Dict[str, InlineTemplate] = field(default_factory=dict)
 
