@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Final
+from typing import Final, cast
 
 from ....compiler.passes.analysis.symlinks import PyIRSymLink, SymLinkContext
 from ....py.ir_dataclass import (
@@ -65,11 +65,7 @@ class DcePass:
         ctx.ensure_module_index()
 
         def is_lua_nil(v: object) -> bool:
-            try:
-                return v is LuaNil or isinstance(v, LuaNil)  # type: ignore[arg-type]
-
-            except TypeError:
-                return v is LuaNil
+            return v is LuaNil or isinstance(v, LuaNil)
 
         def is_const_value(v: object) -> bool:
             return v is None or is_lua_nil(v) or isinstance(v, (bool, int, float, str))
@@ -225,9 +221,12 @@ class DcePass:
                 return expr
 
             if isinstance(expr, PyIRDict):
-                expr.items = [  # type: ignore[list-item]
-                    dce_expr(i) if isinstance(i, PyIRNode) else i for i in expr.items
-                ]
+                new_items: list[PyIRDictItem] = []
+                for item in expr.items:
+                    rewritten = dce_expr(item) if isinstance(item, PyIRNode) else item
+                    if isinstance(rewritten, PyIRDictItem):
+                        new_items.append(rewritten)
+                expr.items = new_items
                 return expr
 
             if isinstance(expr, PyIRCall):
@@ -349,7 +348,8 @@ class DcePass:
                 return [stmt]
 
             if isinstance(stmt, PyIRReturn):
-                stmt.value = dce_expr(stmt.value)
+                if stmt.value is not None:
+                    stmt.value = dce_expr(stmt.value)
                 return [stmt]
 
             if isinstance(stmt, PyIRCall):
@@ -359,13 +359,17 @@ class DcePass:
                 return [stmt]
 
             if isinstance(stmt, PyIRFunctionDef):
-                stmt.decorators = [dce_expr(d) for d in stmt.decorators]  # type: ignore[list-item]
+                stmt.decorators = [
+                    cast(PyIRDecorator, dce_expr(d)) for d in stmt.decorators
+                ]
                 stmt.body = dce_stmt_list(stmt.body, in_loop=False)
                 return [stmt]
 
             if isinstance(stmt, PyIRClassDef):
                 stmt.bases = [dce_expr(b) for b in stmt.bases]
-                stmt.decorators = [dce_expr(d) for d in stmt.decorators]  # type: ignore[list-item]
+                stmt.decorators = [
+                    cast(PyIRDecorator, dce_expr(d)) for d in stmt.decorators
+                ]
                 stmt.body = dce_stmt_list(stmt.body, in_loop=in_loop)
                 return [stmt]
 

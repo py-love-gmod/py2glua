@@ -1,5 +1,5 @@
 from .clean_up_files import CleanUpEmptyFilesPass
+from .gmod_prototype import BuildGmodPrototypesProjectPass
 from .init_logic import BuildAutorunInitProjectPass
 from .lua_codgen import EmitLuaProjectPass
-from .gmod_prototype import BuildGmodPrototypesProjectPass
 from .resolve_symlink import ResolveSymlinksToNamespaceProjectPass

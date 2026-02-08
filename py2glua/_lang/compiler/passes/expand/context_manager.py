@@ -84,8 +84,12 @@ def _is_contextmanager_body_marker(node: PyIRNode) -> bool:
 
 
 def _get_param_names(fn: PyIRFunctionDef) -> Tuple[str, ...]:
-    # signature: dict[param_name, (annotation, default)]
-    return tuple(fn.signature.keys())
+    params = list(fn.signature.keys())
+    if fn.vararg is not None:
+        params.append(fn.vararg)
+    if fn.kwarg is not None:
+        params.append(fn.kwarg)
+    return tuple(params)
 
 
 def _split_contextmanager_fn(
@@ -143,31 +147,39 @@ def _clone_with_subst(node: PyIRNode, subst: Dict[str, PyIRNode]) -> PyIRNode:
     if not is_dataclass(node):
         return deepcopy(node)
 
-    kw = {}
-    for f in fields(node):
-        v = getattr(node, f.name)
+    clone = deepcopy(node)
+    for f in fields(clone):
+        v = getattr(clone, f.name)
 
         if isinstance(v, PyIRNode):
-            kw[f.name] = _clone_with_subst(v, subst)
+            setattr(clone, f.name, _clone_with_subst(v, subst))
             continue
 
         if isinstance(v, list):
-            if v and all(isinstance(x, PyIRNode) for x in v):
-                kw[f.name] = [_clone_with_subst(x, subst) for x in v]
-            else:
-                kw[f.name] = deepcopy(v)
+            new_list: list[object] = []
+            for item in v:
+                if isinstance(item, PyIRNode):
+                    new_list.append(_clone_with_subst(item, subst))
+                else:
+                    new_list.append(item)
+            setattr(clone, f.name, new_list)
             continue
 
         if isinstance(v, dict):
-            if v and all(isinstance(x, PyIRNode) for x in v.values()):
-                kw[f.name] = {k: _clone_with_subst(x, subst) for k, x in v.items()}
-            else:
-                kw[f.name] = deepcopy(v)
-            continue
+            new_dict: dict[object, object] = {}
+            for key, item in v.items():
+                new_key = (
+                    _clone_with_subst(key, subst) if isinstance(key, PyIRNode) else key
+                )
+                new_item = (
+                    _clone_with_subst(item, subst)
+                    if isinstance(item, PyIRNode)
+                    else item
+                )
+                new_dict[new_key] = new_item
+            setattr(clone, f.name, new_dict)
 
-        kw[f.name] = deepcopy(v)
-
-    return type(node)(**kw)
+    return clone
 
 
 def _instantiate_template(

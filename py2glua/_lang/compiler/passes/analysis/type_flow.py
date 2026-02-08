@@ -34,6 +34,11 @@ from ....py.ir_dataclass import (
     PyIRWithItem,
     PyUnaryOPType,
 )
+from ..common import (
+    collect_core_compiler_directive_local_symbol_ids,
+    iter_imported_names,
+    unwrap_decorator_attribute,
+)
 from .symlinks import PyIRSymLink, SymLinkContext
 
 TYPE_NONE = "None"
@@ -53,7 +58,7 @@ class TypeFlowPass:
       - None, Nil, Value are 3 distinct atoms: None != Nil != Value
       - Other names are nominal types: "Player", "Entity", "NPC", ...
 
-    Stores in ctx (dynamic fields):
+    Stores in ctx:
       - ctx.type_sets_by_symbol_id: dict[int, frozenset[str]]
       - ctx.type_env_by_uid: dict[int, dict[int, frozenset[str]]]
       - ctx._typeflow_warned: set[str]
@@ -141,21 +146,9 @@ class TypeFlowPass:
         Dict[int, Dict[int, frozenset[str]]],
         Callable[[str, str], None],
     ]:
-        type_sets = getattr(ctx, "type_sets_by_symbol_id", None)
-        if not isinstance(type_sets, dict):
-            type_sets = {}
-
-        snapshots = getattr(ctx, "type_env_by_uid", None)
-        if not isinstance(snapshots, dict):
-            snapshots = {}
-
-        warned = getattr(ctx, "_typeflow_warned", None)
-        if not isinstance(warned, set):
-            warned = set()
-
-        setattr(ctx, "type_sets_by_symbol_id", type_sets)
-        setattr(ctx, "type_env_by_uid", snapshots)
-        setattr(ctx, "_typeflow_warned", warned)
+        type_sets = ctx.type_sets_by_symbol_id
+        snapshots = ctx.type_env_by_uid
+        warned = ctx._typeflow_warned
 
         def warn_once(key: str, msg: str) -> None:
             if key in warned:
@@ -164,89 +157,27 @@ class TypeFlowPass:
             logger.warning(msg)
 
         return (
-            type_sets,  # type: ignore[return-value]
-            snapshots,  # type: ignore[return-value]
+            type_sets,
+            snapshots,
             warn_once,
         )
 
     @staticmethod
-    def _collect_compiler_directive_local_names(ir: PyIRFile) -> set[str]:
-        """
-        Supports:
-          from py2glua.glua... import CompilerDirective
-          from py2glua.glua... import CompilerDirective as CD
-
-        Always includes "CompilerDirective".
-        """
-        names: set[str] = {"CompilerDirective"}
-
-        for n in ir.body:
-            if not isinstance(n, PyIRImport):
-                continue
-            if not n.if_from:
-                continue
-
-            mod = ".".join(n.modules)
-            if "py2glua.glua" not in mod:
-                continue
-
-            for item in n.names:
-                if isinstance(item, tuple):
-                    src, alias = item
-                    if src == "CompilerDirective":
-                        names.add(alias)
-
-                else:
-                    if item == "CompilerDirective":
-                        names.add(item)
-
-        return names
-
-    @staticmethod
-    def _is_cd_expr(n: PyIRNode, cd_names: set[str]) -> bool:
-        """
-        Checks whether `n` refers to CompilerDirective (or its alias) best-effort.
-        """
-        if isinstance(n, PyIRVarUse):
-            return n.name in cd_names
-
+    def _is_cd_expr(n: PyIRNode, cd_symids: set[int]) -> bool:
         if isinstance(n, PyIRSymLink):
-            return n.name in cd_names
-
-        if isinstance(n, PyIRAttribute):
-            return TypeFlowPass._is_cd_expr(n.value, cd_names)
-
+            return int(n.symbol_id) in cd_symids
         return False
 
     @staticmethod
-    def _unwrap_decorator(dec: PyIRDecorator) -> PyIRAttribute | None:
-        """
-        Supports:
-          - @CD.typeguard_nil
-          - @CD.typeguard_nil()
-        Depending on how decorators are represented in IR:
-          - dec.exper can be PyIRAttribute
-          - or PyIRCall(func=PyIRAttribute)
-        """
-        exp = dec.exper
-        if isinstance(exp, PyIRAttribute):
-            return exp
-
-        if isinstance(exp, PyIRCall) and isinstance(exp.func, PyIRAttribute):
-            return exp.func
-
-        return None
-
-    @staticmethod
-    def _is_typeguard_nil_decorator(dec: PyIRDecorator, cd_names: set[str]) -> bool:
-        a = TypeFlowPass._unwrap_decorator(dec)
+    def _is_typeguard_nil_decorator(dec: PyIRDecorator, cd_symids: set[int]) -> bool:
+        a = unwrap_decorator_attribute(dec)
         if a is None:
             return False
 
         if a.attr != TypeFlowPass._TYPEGUARD_NIL_DEC:
             return False
 
-        return TypeFlowPass._is_cd_expr(a.value, cd_names)
+        return TypeFlowPass._is_cd_expr(a.value, cd_symids)
 
     @staticmethod
     def _collect_nil_ids(
@@ -263,14 +194,6 @@ class TypeFlowPass:
         current_module = ctx.module_name_by_path.get(ir.path)
         if not current_module:
             return set(), set()
-
-        def iter_imported_names(names):
-            for n in names:
-                if isinstance(n, tuple):
-                    yield n[0], n[1]
-
-                else:
-                    yield n, n
 
         def local_symbol_id(name: str) -> int | None:
             sym = ctx.get_exported_symbol(current_module, name)
@@ -337,7 +260,15 @@ class TypeFlowPass:
         fn_tg_nil_by_sym: set[int] = set()
         method_tg_nil_by_class: set[tuple[str, str]] = set()
 
-        cd_names = TypeFlowPass._collect_compiler_directive_local_names(ir)
+        cd_symids: set[int] = set()
+        if ir.path is not None:
+            current_module = ctx.module_name_by_path.get(ir.path)
+            if current_module:
+                cd_symids = collect_core_compiler_directive_local_symbol_ids(
+                    ir,
+                    ctx=ctx,
+                    current_module=current_module,
+                )
 
         file_uid = ctx.uid(ir)
         file_scope = ctx.file_scope.get(file_uid)
@@ -377,7 +308,7 @@ class TypeFlowPass:
                 )
 
                 if any(
-                    TypeFlowPass._is_typeguard_nil_decorator(d, cd_names)
+                    TypeFlowPass._is_typeguard_nil_decorator(d, cd_symids)
                     for d in st.decorators
                 ):
                     fn_tg_nil_by_sym.add(sid)
@@ -404,64 +335,36 @@ class TypeFlowPass:
                     )
 
                     if any(
-                        TypeFlowPass._is_typeguard_nil_decorator(d, cd_names)
+                        TypeFlowPass._is_typeguard_nil_decorator(d, cd_symids)
                         for d in m.decorators
                     ):
                         method_tg_nil_by_class.add((cls_name, m.name))
 
-        global_fn_ret = getattr(ctx, "fn_return_types_by_symbol_id", None)
-        if not isinstance(global_fn_ret, dict):
-            global_fn_ret = {}
+        global_fn_ret = ctx.fn_return_types_by_symbol_id
+        global_method_ret = ctx.method_return_types_by_class
+        global_fn_ret_ann = ctx.fn_return_ann_by_symbol_id
+        global_method_ret_ann = ctx.method_return_ann_by_class
+        global_class_bases = ctx.class_bases_by_name
+        global_fn_tg_nil = ctx.fn_typeguard_nil_by_symbol_id
+        global_method_tg_nil = ctx.method_typeguard_nil_by_class
 
-        global_method_ret = getattr(ctx, "method_return_types_by_class", None)
-        if not isinstance(global_method_ret, dict):
-            global_method_ret = {}
+        for fn_symid, fn_types in fn_ret_by_sym.items():
+            global_fn_ret[fn_symid] = fn_types
 
-        global_fn_ret_ann = getattr(ctx, "fn_return_ann_by_symbol_id", None)
-        if not isinstance(global_fn_ret_ann, dict):
-            global_fn_ret_ann = {}
+        for method_key, method_types in method_ret_by_class.items():
+            global_method_ret[method_key] = method_types
 
-        global_method_ret_ann = getattr(ctx, "method_return_ann_by_class", None)
-        if not isinstance(global_method_ret_ann, dict):
-            global_method_ret_ann = {}
+        for fn_symid, fn_ann in fn_ret_ann_by_sym.items():
+            global_fn_ret_ann[fn_symid] = fn_ann
 
-        global_class_bases = getattr(ctx, "class_bases_by_name", None)
-        if not isinstance(global_class_bases, dict):
-            global_class_bases = {}
+        for method_key, method_ann in method_ret_ann_by_class.items():
+            global_method_ret_ann[method_key] = method_ann
 
-        global_fn_tg_nil = getattr(ctx, "fn_typeguard_nil_by_symbol_id", None)
-        if not isinstance(global_fn_tg_nil, set):
-            global_fn_tg_nil = set()
-
-        global_method_tg_nil = getattr(ctx, "method_typeguard_nil_by_class", None)
-        if not isinstance(global_method_tg_nil, set):
-            global_method_tg_nil = set()
-
-        for k, v in fn_ret_by_sym.items():
-            global_fn_ret[k] = v
-
-        for k, v in method_ret_by_class.items():
-            global_method_ret[k] = v
-
-        for k, v in fn_ret_ann_by_sym.items():
-            global_fn_ret_ann[k] = v
-
-        for k, v in method_ret_ann_by_class.items():
-            global_method_ret_ann[k] = v
-
-        for k, v in class_bases_by_name.items():
-            global_class_bases.setdefault(k, v)
+        for class_name, class_bases in class_bases_by_name.items():
+            global_class_bases.setdefault(class_name, class_bases)
 
         global_fn_tg_nil |= set(fn_tg_nil_by_sym)
         global_method_tg_nil |= set(method_tg_nil_by_class)
-
-        setattr(ctx, "fn_return_types_by_symbol_id", global_fn_ret)
-        setattr(ctx, "method_return_types_by_class", global_method_ret)
-        setattr(ctx, "fn_return_ann_by_symbol_id", global_fn_ret_ann)
-        setattr(ctx, "method_return_ann_by_class", global_method_ret_ann)
-        setattr(ctx, "class_bases_by_name", global_class_bases)
-        setattr(ctx, "fn_typeguard_nil_by_symbol_id", global_fn_tg_nil)
-        setattr(ctx, "method_typeguard_nil_by_class", global_method_tg_nil)
 
         return (
             fn_ret_by_sym,
@@ -559,9 +462,7 @@ class TypeFlowPass:
         seen: set[str] = {cls_name}
         q: list[str] = [cls_name]
 
-        global_bases = getattr(ctx, "class_bases_by_name", None)
-        if not isinstance(global_bases, dict):
-            global_bases = {}
+        global_bases = ctx.class_bases_by_name
 
         while q:
             cur = q.pop(0)
@@ -697,7 +598,8 @@ class TypeFlowPass:
         method_tg_nil_by_class: set[tuple[str, str]],
     ) -> Tuple[Dict[int, Set[str]], bool]:
         if isinstance(st, PyIRReturn):
-            TypeFlowPass._walk_expr(ctx, st.value, env, snapshots)  # type: ignore
+            if st.value is not None:
+                TypeFlowPass._walk_expr(ctx, st.value, env, snapshots)
             return env, True
 
         if (
@@ -1018,13 +920,8 @@ class TypeFlowPass:
             return {TYPE_NONE}
 
         if isinstance(expr, PyIRConstant):
-            try:
-                if expr.value is LuaNil or isinstance(expr.value, LuaNil):  # type: ignore[arg-type]
-                    return {TYPE_NIL}
-
-            except TypeError:
-                if expr.value is LuaNil:
-                    return {TYPE_NIL}
+            if expr.value is LuaNil:
+                return {TYPE_NIL}
 
         if TypeFlowPass._rhs_is_nil(expr, nil_ids, types_alias_ids):
             return {TYPE_NIL}
@@ -1058,11 +955,9 @@ class TypeFlowPass:
             if sid in fn_ret_by_sym:
                 return set(fn_ret_by_sym[sid])
 
-            global_map = getattr(ctx, "fn_return_types_by_symbol_id", None)
-            if isinstance(global_map, dict):
-                v = global_map.get(sid)
-                if isinstance(v, frozenset):
-                    return set(v)
+            v = ctx.fn_return_types_by_symbol_id.get(sid)
+            if isinstance(v, frozenset):
+                return set(v)
 
             return {TYPE_VALUE}
 
@@ -1090,11 +985,7 @@ class TypeFlowPass:
                     ):
                         ret = method_ret_by_class.get((owner, mname))
                         if ret is None:
-                            global_m = getattr(
-                                ctx, "method_return_types_by_class", None
-                            )
-                            if isinstance(global_m, dict):
-                                ret = global_m.get((owner, mname))
+                            ret = ctx.method_return_types_by_class.get((owner, mname))
 
                         if isinstance(ret, frozenset):
                             out |= set(ret)
@@ -1127,9 +1018,7 @@ class TypeFlowPass:
             ann = fn_ret_ann_by_sym.get(sid)
 
             if ann is None:
-                global_map = getattr(ctx, "fn_return_ann_by_symbol_id", None)
-                if isinstance(global_map, dict):
-                    ann = global_map.get(sid)
+                ann = ctx.fn_return_ann_by_symbol_id.get(sid)
 
             return [ann] if isinstance(ann, (str, type(None))) else []
 
@@ -1144,9 +1033,7 @@ class TypeFlowPass:
                 ]
                 out: list[str | None] = []
 
-                global_m = getattr(ctx, "method_return_ann_by_class", None)
-                if not isinstance(global_m, dict):
-                    global_m = {}
+                global_m = ctx.method_return_ann_by_class
 
                 for cls_name in candidates:
                     for owner in TypeFlowPass._iter_class_lineage(
@@ -1299,8 +1186,7 @@ class TypeFlowPass:
             if sid in fn_tg_nil_by_sym:
                 return arg_sym
 
-            global_set = getattr(ctx, "fn_typeguard_nil_by_symbol_id", None)
-            if isinstance(global_set, set) and sid in global_set:
+            if sid in ctx.fn_typeguard_nil_by_symbol_id:
                 return arg_sym
 
             return None
@@ -1319,9 +1205,7 @@ class TypeFlowPass:
             if not candidates:
                 return None
 
-            global_set = getattr(ctx, "method_typeguard_nil_by_class", None)
-            if not isinstance(global_set, set):
-                global_set = set()
+            global_set = ctx.method_typeguard_nil_by_class
 
             for cls_name in candidates:
                 ok = False
@@ -1366,13 +1250,8 @@ class TypeFlowPass:
         rhs: PyIRNode, nil_ids: set[int], types_alias_ids: set[int]
     ) -> bool:
         if isinstance(rhs, PyIRConstant):
-            try:
-                if rhs.value is LuaNil or isinstance(rhs.value, LuaNil):  # type: ignore[arg-type]
-                    return True
-
-            except TypeError:
-                if rhs.value is LuaNil:
-                    return True
+            if rhs.value is LuaNil:
+                return True
 
         if isinstance(rhs, PyIRSymLink) and rhs.symbol_id in nil_ids:
             return True

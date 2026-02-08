@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from time import perf_counter
 from typing import Iterator
 
-from colorama import Fore, Style, init
+from .ansi import Fore, Style, init
 
 init(autoreset=True)
 logger = logging.getLogger("py2glua")

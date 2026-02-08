@@ -5,39 +5,14 @@ from typing import Iterable
 from ....compiler.passes.analysis.symlinks import PyIRSymLink, SymLinkContext
 from ....py.ir_dataclass import (
     LuaNil,
-    PyIRAssign,
     PyIRAttribute,
-    PyIRAugAssign,
-    PyIRBinOP,
-    PyIRBreak,
     PyIRCall,
-    PyIRClassDef,
-    PyIRComment,
     PyIRConstant,
-    PyIRContinue,
-    PyIRDecorator,
-    PyIRDict,
-    PyIRDictItem,
-    PyIREmitExpr,
     PyIRFile,
-    PyIRFor,
-    PyIRFunctionDef,
-    PyIRIf,
     PyIRImport,
-    PyIRList,
     PyIRNode,
-    PyIRPass,
-    PyIRReturn,
-    PyIRSet,
-    PyIRSubscript,
-    PyIRTuple,
-    PyIRUnaryOP,
-    PyIRVarCreate,
-    PyIRVarUse,
-    PyIRWhile,
-    PyIRWith,
-    PyIRWithItem,
 )
+from ..rewrite_utils import rewrite_expr_with_store_default, rewrite_stmt_block
 
 
 class NilFoldPass:
@@ -74,7 +49,6 @@ class NilFoldPass:
             for n in names:
                 if isinstance(n, tuple):
                     yield n[0], n[1]
-
                 else:
                     yield n, n
 
@@ -86,7 +60,6 @@ class NilFoldPass:
         nil_canon_id = nil_canon_sym.id.value if nil_canon_sym is not None else None
 
         nil_name_ids: set[int] = set()
-
         types_module_alias_ids: set[int] = set()
 
         for node in ir.walk():
@@ -114,9 +87,6 @@ class NilFoldPass:
                     if sid is not None:
                         types_module_alias_ids.add(sid)
 
-            else:
-                pass
-
         nil_ids: set[int] = set(nil_name_ids)
         if nil_canon_id is not None:
             nil_ids.add(nil_canon_id)
@@ -124,7 +94,13 @@ class NilFoldPass:
         if not nil_ids and not types_module_alias_ids:
             return ir
 
-        def rw(node: PyIRNode, *, store: bool) -> PyIRNode:
+        def rw_block(body: list[PyIRNode]) -> list[PyIRNode]:
+            return rewrite_stmt_block(body, rw_stmt)
+
+        def rw_stmt(st: PyIRNode) -> list[PyIRNode]:
+            return [rw_expr(st, False)]
+
+        def rw_expr(node: PyIRNode, store: bool) -> PyIRNode:
             if isinstance(node, PyIRSymLink):
                 if store or node.is_store:
                     return node
@@ -135,21 +111,25 @@ class NilFoldPass:
                 return node
 
             if isinstance(node, PyIRCall):
-                node.func = rw(node.func, store=False)
-                node.args_p = [rw(a, store=False) for a in node.args_p]
-                node.args_kw = {k: rw(v, store=False) for k, v in node.args_kw.items()}
+                node.func = rw_expr(node.func, store=False)
+                node.args_p = [rw_expr(a, store=False) for a in node.args_p]
+                node.args_kw = {
+                    k: rw_expr(v, store=False) for k, v in node.args_kw.items()
+                }
 
-                if not store and not node.args_p and not node.args_kw:
-                    if (
-                        isinstance(node.func, PyIRSymLink)
-                        and node.func.symbol_id in nil_ids
-                    ):
-                        return make_nil(node)
+                if (
+                    not store
+                    and not node.args_p
+                    and not node.args_kw
+                    and isinstance(node.func, PyIRSymLink)
+                    and node.func.symbol_id in nil_ids
+                ):
+                    return make_nil(node)
 
                 return node
 
             if isinstance(node, PyIRAttribute):
-                node.value = rw(node.value, store=False)
+                node.value = rw_expr(node.value, store=False)
 
                 if store:
                     return node
@@ -164,134 +144,11 @@ class NilFoldPass:
 
                 return node
 
-            if isinstance(
+            return rewrite_expr_with_store_default(
                 node,
-                (
-                    PyIRConstant,
-                    PyIRVarUse,
-                    PyIRVarCreate,
-                    PyIRImport,
-                    PyIRBreak,
-                    PyIRContinue,
-                    PyIRPass,
-                    PyIRComment,
-                ),
-            ):
-                return node
+                rw_expr=rw_expr,
+                rw_block=rw_block,
+            )
 
-            if isinstance(node, PyIRUnaryOP):
-                node.value = rw(node.value, store=False)
-                return node
-
-            if isinstance(node, PyIRBinOP):
-                node.left = rw(node.left, store=False)
-                node.right = rw(node.right, store=False)
-                return node
-
-            if isinstance(node, PyIRSubscript):
-                node.value = rw(node.value, store=False)
-                node.index = rw(node.index, store=False)
-                return node
-
-            if isinstance(node, PyIRList):
-                node.elements = [rw(e, store=False) for e in node.elements]
-                return node
-
-            if isinstance(node, PyIRTuple):
-                node.elements = [rw(e, store=False) for e in node.elements]
-                return node
-
-            if isinstance(node, PyIRSet):
-                node.elements = [rw(e, store=False) for e in node.elements]
-                return node
-
-            if isinstance(node, PyIRDictItem):
-                node.key = rw(node.key, store=False)
-                node.value = rw(node.value, store=False)
-                return node
-
-            if isinstance(node, PyIRDict):
-                node.items = [  # type: ignore[list-item]
-                    rw(i, store=False) if isinstance(i, PyIRNode) else i
-                    for i in node.items
-                ]
-                return node
-
-            if isinstance(node, PyIRDecorator):
-                node.exper = rw(node.exper, store=False)
-                node.args_p = [rw(a, store=False) for a in node.args_p]
-                node.args_kw = {k: rw(v, store=False) for k, v in node.args_kw.items()}
-                return node
-
-            if isinstance(node, PyIREmitExpr):
-                node.args_p = [rw(a, store=False) for a in node.args_p]
-                node.args_kw = {k: rw(v, store=False) for k, v in node.args_kw.items()}
-                return node
-
-            # ---- statements ----
-            if isinstance(node, PyIRAssign):
-                node.targets = [rw(t, store=True) for t in node.targets]
-                node.value = rw(node.value, store=False)
-                return node
-
-            if isinstance(node, PyIRAugAssign):
-                node.target = rw(node.target, store=True)
-                node.value = rw(node.value, store=False)
-                return node
-
-            if isinstance(node, PyIRReturn):
-                node.value = rw(node.value, store=False)
-                return node
-
-            if isinstance(node, PyIRIf):
-                node.test = rw(node.test, store=False)
-                node.body = [rw(s, store=False) for s in node.body]
-                node.orelse = [rw(s, store=False) for s in node.orelse]
-                return node
-
-            if isinstance(node, PyIRWhile):
-                node.test = rw(node.test, store=False)
-                node.body = [rw(s, store=False) for s in node.body]
-                return node
-
-            if isinstance(node, PyIRFor):
-                node.target = rw(node.target, store=True)
-                node.iter = rw(node.iter, store=False)
-                node.body = [rw(s, store=False) for s in node.body]
-                return node
-
-            if isinstance(node, PyIRWithItem):
-                node.context_expr = rw(node.context_expr, store=False)
-                if node.optional_vars is not None:
-                    node.optional_vars = rw(node.optional_vars, store=True)
-                return node
-
-            if isinstance(node, PyIRWith):
-                node.items = [  # type: ignore[list-item]
-                    rw(i, store=False) if isinstance(i, PyIRNode) else i
-                    for i in node.items
-                ]
-                node.body = [rw(s, store=False) for s in node.body]
-                return node
-
-            if isinstance(node, PyIRFunctionDef):
-                node.decorators = [  # type: ignore[list-item]
-                    rw(d, store=False) if isinstance(d, PyIRNode) else d
-                    for d in node.decorators
-                ]
-                node.body = [rw(s, store=False) for s in node.body]
-                return node
-
-            if isinstance(node, PyIRClassDef):
-                node.bases = [rw(b, store=False) for b in node.bases]
-                node.decorators = [  # type: ignore[list-item]
-                    rw(d, store=False) if isinstance(d, PyIRNode) else d
-                    for d in node.decorators
-                ]
-                node.body = [rw(s, store=False) for s in node.body]
-                return node
-
-            return node
-
-        ir.body = [rw(n, store=False) for n in ir.body]
+        ir.body = rw_block(ir.body)
         return ir

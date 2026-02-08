@@ -13,6 +13,7 @@ from ....py.ir_dataclass import (
     PyIRNode,
 )
 from ..analysis.symlinks import SymLinkContext
+from ..rewrite_utils import replace_or_prepend_init_file
 
 
 class BuildAutorunInitProjectPass:
@@ -31,7 +32,6 @@ class BuildAutorunInitProjectPass:
     """
 
     _INIT_VIRTUAL_PATH: Final[Path] = Path("lua") / "autorun" / "init.py"
-    _NET_SET_FIELD: Final[str] = "_net_string_literals"
 
     @classmethod
     def run(cls, files: list[PyIRFile], ctx: SymLinkContext) -> list[PyIRFile]:
@@ -68,11 +68,8 @@ class BuildAutorunInitProjectPass:
             mod_to_ir[mod] = ir
             mod_to_inc[mod] = inc
 
-        deps: dict[str, set[str]] = getattr(ctx, "project_deps", {}) or {}
-        ordered = cls._order_modules(
-            mod_to_ir.keys(),  # type: ignore
-            deps,
-        )
+        deps = ctx.project_deps
+        ordered = cls._order_modules(set(mod_to_ir.keys()), deps)
 
         addscluafile: list[str] = []
         server_includes: list[str] = []
@@ -112,17 +109,11 @@ class BuildAutorunInitProjectPass:
             realm=FileRealm.SHARED,
         )
 
-        out: list[PyIRFile] = [init_ir]
-        for ir in files:
-            if (
-                ir.path is not None
-                and ir.path.as_posix() == cls._INIT_VIRTUAL_PATH.as_posix()
-            ):
-                continue
-
-            out.append(ir)
-
-        return out
+        return replace_or_prepend_init_file(
+            files,
+            init_ir,
+            init_path=cls._INIT_VIRTUAL_PATH.as_posix(),
+        )
 
     @classmethod
     def _build_init_body(
@@ -194,11 +185,42 @@ class BuildAutorunInitProjectPass:
 
     @classmethod
     def _get_sorted_net_strings(cls, ctx: SymLinkContext) -> list[str]:
-        raw = getattr(ctx, cls._NET_SET_FIELD, None)
-        if not isinstance(raw, set) or not raw:
+        raw = ctx._net_string_literals
+        if not raw:
             return []
 
         return sorted(str(x) for x in raw if isinstance(x, str) and x)
+
+    @classmethod
+    def _reachable_modules(
+        cls,
+        mod_to_ir: dict[str, PyIRFile],
+        mod_to_inc: dict[str, str],
+        deps: dict[str, set[str]],
+    ) -> set[str]:
+        if not mod_to_ir:
+            return set()
+
+        # Project roots: everything not under internal runtime folder.
+        roots = {m for m, inc in mod_to_inc.items() if not inc.startswith("py2glua/")}
+        if not roots:
+            return set(mod_to_ir.keys())
+
+        out: set[str] = set()
+        stack = list(roots)
+        while stack:
+            m = stack.pop()
+            if m in out:
+                continue
+            if m not in mod_to_ir:
+                continue
+            out.add(m)
+
+            for d in deps.get(m, set()):
+                if d in mod_to_ir and d not in out:
+                    stack.append(d)
+
+        return out
 
     @staticmethod
     def _raw(s: str) -> PyIREmitExpr:

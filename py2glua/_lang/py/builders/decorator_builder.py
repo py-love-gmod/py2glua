@@ -23,11 +23,11 @@ class DecoratorBuilder:
         ]
 
         if not tokens or tokens[0].string != "@":
-            raise SyntaxError("Invalid decorator syntax")
+            raise SyntaxError("Некорректный синтаксис декоратора")
 
         tokens = tokens[1:]
         if not tokens:
-            raise SyntaxError("Decorator expression is missing")
+            raise SyntaxError("Отсутствует выражение декоратора")
 
         line, col = tokens[0].start
 
@@ -35,7 +35,7 @@ class DecoratorBuilder:
         expr = StatementBuilder._parse_postfix(stream)
 
         if not stream.eof():
-            raise SyntaxError("Invalid decorator expression")
+            raise SyntaxError("Некорректное выражение декоратора")
 
         if isinstance(expr, PyIRCall):
             dec_expr = expr.func

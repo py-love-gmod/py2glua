@@ -19,6 +19,8 @@ class ContextManagerTemplate:
 class FnSig:
     params: Tuple[str, ...]
     defaults: Dict[str, PyIRNode]
+    vararg_name: str | None = None
+    kwarg_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -31,7 +33,9 @@ class InlineTemplate:
 @dataclass
 class ExpandContext:
     cm_templates: Dict[str, ContextManagerTemplate] = field(default_factory=dict)
-    fn_sigs: Dict[str, FnSig] = field(default_factory=dict)
+    # Per-file top-level function signatures used by args normalization.
+    # Key is canonical file path string.
+    fn_sigs: Dict[str, Dict[str, FnSig]] = field(default_factory=dict)
 
     inline_templates: Dict[str, InlineTemplate] = field(default_factory=dict)
 

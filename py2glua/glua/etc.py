@@ -10,4 +10,4 @@ def IsValid(obj: object | nil) -> bool:
     Проверяет, не равен ли объект `nil`, имеет ли он метод `IsValid` и возвращает ли этот метод значение `true`.
 
     Если у объекта нет метода `IsValid`, он вернет `false`."""
-    ...
+    raise NotImplementedError

@@ -108,6 +108,8 @@ class CollectAnonymousFunctionsPass:
                 line=node.line,
                 offset=node.offset,
                 signature=deepcopy(node.signature),
+                vararg=node.vararg,
+                kwarg=node.kwarg,
                 body=deepcopy(node.body),
             )
 
@@ -157,15 +159,15 @@ class RewriteAnonymousFunctionsPass:
             return pro_iter + [st]
 
         if isinstance(st, PyIRWith):
-            pro: List[PyIRNode] = []
+            pro_with: List[PyIRNode] = []
             for item in st.items:
                 p, e = RewriteAnonymousFunctionsPass._rw_expr(
                     ir, item.context_expr, ctx
                 )
-                pro.extend(p)
+                pro_with.extend(p)
                 item.context_expr = e
             st.body = RewriteAnonymousFunctionsPass._rw_stmt_list(ir, st.body, ctx)
-            return pro + [st]
+            return pro_with + [st]
 
         if isinstance(st, PyIRFunctionDef):
             st.body = RewriteAnonymousFunctionsPass._rw_stmt_list(ir, st.body, ctx)
@@ -177,9 +179,12 @@ class RewriteAnonymousFunctionsPass:
             return pro + [st]
 
         if isinstance(st, PyIRReturn):
-            pro, v = RewriteAnonymousFunctionsPass._rw_expr(ir, st.value, ctx)
-            st.value = v
-            return pro + [st]
+            if st.value is None:
+                return [st]
+
+            pro_ret, value = RewriteAnonymousFunctionsPass._rw_expr(ir, st.value, ctx)
+            st.value = value
+            return pro_ret + [st]
 
         if isinstance(st, PyIRCall):
             pro, c = RewriteAnonymousFunctionsPass._rw_expr(ir, st, ctx)
@@ -227,39 +232,45 @@ class RewriteAnonymousFunctionsPass:
         if not is_dataclass(expr):
             return [], expr
 
-        pro: List[PyIRNode] = []
+        pro_other: List[PyIRNode] = []
 
         for f in fields(expr):
             v = getattr(expr, f.name)
 
             if isinstance(v, PyIRNode):
                 p, nv = RewriteAnonymousFunctionsPass._rw_expr(ir, v, ctx)
-                pro.extend(p)
+                pro_other.extend(p)
                 setattr(expr, f.name, nv)
                 continue
 
-            if isinstance(v, list) and v and all(isinstance(x, PyIRNode) for x in v):
-                new_list: List[PyIRNode] = []
+            if isinstance(v, list):
+                new_list: List[object] = []
+                changed = False
                 for x in v:
-                    p, nx = RewriteAnonymousFunctionsPass._rw_expr(ir, x, ctx)
-                    pro.extend(p)
-                    new_list.append(nx)
-
-                setattr(expr, f.name, new_list)
+                    if isinstance(x, PyIRNode):
+                        p, nx = RewriteAnonymousFunctionsPass._rw_expr(ir, x, ctx)
+                        pro_other.extend(p)
+                        new_list.append(nx)
+                        changed = True
+                    else:
+                        new_list.append(x)
+                if changed:
+                    setattr(expr, f.name, new_list)
                 continue
 
-            if (
-                isinstance(v, dict)
-                and v
-                and all(isinstance(x, PyIRNode) for x in v.values())
-            ):
-                new_dict: Dict[str, PyIRNode] = {}
+            if isinstance(v, dict):
+                new_dict: Dict[str, object] = {}
+                changed = False
                 for k, x in v.items():
-                    p, nx = RewriteAnonymousFunctionsPass._rw_expr(ir, x, ctx)
-                    pro.extend(p)
-                    new_dict[k] = nx
-
-                setattr(expr, f.name, new_dict)
+                    if isinstance(x, PyIRNode):
+                        p, nx = RewriteAnonymousFunctionsPass._rw_expr(ir, x, ctx)
+                        pro_other.extend(p)
+                        new_dict[k] = nx
+                        changed = True
+                    else:
+                        new_dict[k] = x
+                if changed:
+                    setattr(expr, f.name, new_dict)
                 continue
 
-        return pro, expr
+        return pro_other, expr

@@ -417,7 +417,8 @@ class ConstFoldingPass:
                 return [node]
 
             if isinstance(node, PyIRReturn):
-                node.value = fold_expr(node.value)
+                if node.value is not None:
+                    node.value = fold_expr(node.value)
                 return [node]
 
             if isinstance(node, PyIRFunctionDef):

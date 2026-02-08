@@ -25,7 +25,7 @@ class StripCommentsImportsPass:
 
                 elif isinstance(v, list):
                     changed = False
-                    out = []
+                    out_list: list[object] = []
                     for x in v:
                         if isinstance(x, PyIRNode):
                             nx = rw(x)
@@ -33,16 +33,16 @@ class StripCommentsImportsPass:
                                 changed = True
                                 continue
                             changed = changed or (nx is not x)
-                            out.append(nx)
+                            out_list.append(nx)
                         else:
-                            out.append(x)
+                            out_list.append(x)
 
                     if changed:
-                        setattr(node, f.name, out)
+                        setattr(node, f.name, out_list)
 
                 elif isinstance(v, dict):
                     changed = False
-                    out = {}
+                    out_dict: dict[object, object] = {}
                     for k, x in v.items():
                         nk = k
                         nx = x
@@ -63,10 +63,10 @@ class StripCommentsImportsPass:
                             nx = xx
 
                         changed = changed or (nk is not k) or (nx is not x)
-                        out[nk] = nx
+                        out_dict[nk] = nx
 
                     if changed:
-                        setattr(node, f.name, out)
+                        setattr(node, f.name, out_dict)
 
             return node
 

@@ -111,11 +111,11 @@ class PyLogicBlockBuilder:
     def _expect_block_after(nodes: list[RawSyntaxNode], hdr_idx: int) -> int:
         j = hdr_idx + 1
         if j >= len(nodes) or nodes[j].kind is not RawSyntaxNodeKind.BLOCK:
-            raise SyntaxError(f"Expected BLOCK after {nodes[hdr_idx].kind.name}.")
+            raise SyntaxError(f"Ожидался BLOCK после {nodes[hdr_idx].kind.name}.")
 
         block = nodes[j]
         if not getattr(block, "tokens", None):
-            raise SyntaxError(f"Empty BLOCK after {nodes[hdr_idx].kind.name}.")
+            raise SyntaxError(f"Пустой BLOCK после {nodes[hdr_idx].kind.name}.")
 
         return j
 
@@ -253,7 +253,7 @@ class PyLogicBlockBuilder:
 
             func = dispatch.get(node.kind)
             if func is None:
-                raise ValueError(f"RawNodeKind {node.kind} has no logic builder")
+                raise ValueError(f"Для RawNodeKind {node.kind} не найден logic builder")
 
             offset, blocks = func(nodes, i)
             out.extend(blocks)
@@ -400,7 +400,7 @@ class PyLogicBlockBuilder:
             parts.extend(cls._build_logic_block(blk2.tokens))
 
         if j < len(nodes) and nodes[j].kind is RawSyntaxNodeKind.ELSE:
-            raise SyntaxError("else after try is not supported in py2glua")
+            raise SyntaxError("Ветка else после try не поддерживается в py2glua")
 
         if j < len(nodes) and nodes[j].kind is RawSyntaxNodeKind.FINALLY:
             off4, hdr4, blk4 = cls._consume_header_plus_block(nodes, j)

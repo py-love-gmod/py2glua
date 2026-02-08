@@ -22,6 +22,7 @@ from ....py.ir_dataclass import (
     PyIRImport,
     PyIRNode,
     PyIRVarCreate,
+    PyIRVarStorage,
     PyIRVarUse,
     PyIRWhile,
     PyIRWith,
@@ -243,9 +244,14 @@ class ResolveSymlinksToNamespaceProjectPass:
     def _place_locals_in_scopes_recursive(cls, node: PyIRNode) -> None:
         if isinstance(node, PyIRFunctionDef):
             fn_locals = cls._collect_defs_in_block(node.body, stop_at_boundaries=True)
-            fn_locals.difference_update(node.signature.keys())
+            fn_params = set(node.signature.keys())
+            if node.vararg is not None:
+                fn_params.add(node.vararg)
+            if node.kwarg is not None:
+                fn_params.add(node.kwarg)
+            fn_locals.difference_update(fn_params)
             node.body = cls._place_locals_in_block(
-                node.body, local_names=fn_locals, params=set(node.signature.keys())
+                node.body, local_names=fn_locals, params=fn_params
             )
             for st in node.body:
                 cls._place_locals_in_scopes_recursive(st)
@@ -253,9 +259,14 @@ class ResolveSymlinksToNamespaceProjectPass:
 
         if isinstance(node, PyIRFunctionExpr):
             fn_locals = cls._collect_defs_in_block(node.body, stop_at_boundaries=True)
-            fn_locals.difference_update(node.signature.keys())
+            fn_params = set(node.signature.keys())
+            if node.vararg is not None:
+                fn_params.add(node.vararg)
+            if node.kwarg is not None:
+                fn_params.add(node.kwarg)
+            fn_locals.difference_update(fn_params)
             node.body = cls._place_locals_in_block(
-                node.body, local_names=fn_locals, params=set(node.signature.keys())
+                node.body, local_names=fn_locals, params=fn_params
             )
             for st in node.body:
                 cls._place_locals_in_scopes_recursive(st)
@@ -412,13 +423,12 @@ class ResolveSymlinksToNamespaceProjectPass:
 
     @staticmethod
     def _mk_local_create(*, name: str) -> PyIRVarCreate:
-        fset = {f.name for f in fields(PyIRVarCreate)}
-        kwargs = {}
-        if "is_global" in fset:
-            kwargs["is_global"] = False
-        if "is_local" in fset:
-            kwargs["is_local"] = True
-        return PyIRVarCreate(line=None, offset=None, name=name, **kwargs)
+        return PyIRVarCreate(
+            line=None,
+            offset=None,
+            name=name,
+            storage=PyIRVarStorage.LOCAL,
+        )
 
     @classmethod
     def _append_exports(
@@ -548,31 +558,31 @@ class ResolveSymlinksToNamespaceProjectPass:
 
         if isinstance(v, list):
             changed = False
-            out = []
+            out_list: list[object] = []
             for x in v:
                 nx = cls._rw_value(x, ctx, cur_mod, cur_file, import_binds, ns)
                 changed = changed or (nx is not x)
-                out.append(nx)
-            return out if changed else v
+                out_list.append(nx)
+            return out_list if changed else v
 
         if isinstance(v, dict):
             changed = False
-            out = {}
+            out_dict: dict[object, object] = {}
             for k, x in v.items():
                 nk = cls._rw_value(k, ctx, cur_mod, cur_file, import_binds, ns)
                 nx = cls._rw_value(x, ctx, cur_mod, cur_file, import_binds, ns)
                 changed = changed or (nk is not k) or (nx is not x)
-                out[nk] = nx
-            return out if changed else v
+                out_dict[nk] = nx
+            return out_dict if changed else v
 
         if isinstance(v, tuple):
             changed = False
-            out = []
+            out_tuple: list[object] = []
             for x in v:
                 nx = cls._rw_value(x, ctx, cur_mod, cur_file, import_binds, ns)
                 changed = changed or (nx is not x)
-                out.append(nx)
-            return tuple(out) if changed else v
+                out_tuple.append(nx)
+            return tuple(out_tuple) if changed else v
 
         return v
 

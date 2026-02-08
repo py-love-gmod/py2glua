@@ -210,7 +210,12 @@ class CollectInlineFunctionsPass:
             if not _is_inline_def(st):
                 continue
 
-            params = tuple(st.signature.keys())
+            params_list = list(st.signature.keys())
+            if st.vararg is not None:
+                params_list.append(st.vararg)
+            if st.kwarg is not None:
+                params_list.append(st.kwarg)
+            params = tuple(params_list)
 
             locals_set: Set[str] = set(params)
             _collect_locals_in_body(st.body, locals_set)
@@ -267,29 +272,37 @@ def _rename_vars(node: PyIRNode, rename: Dict[str, str]) -> PyIRNode:
     if not is_dataclass(node):
         return deepcopy(node)
 
-    kw = {}
-    for f in fields(node):
-        v = getattr(node, f.name)
+    clone = deepcopy(node)
+    for f in fields(clone):
+        v = getattr(clone, f.name)
 
         if isinstance(v, PyIRNode):
-            kw[f.name] = _rename_vars(v, rename)
+            setattr(clone, f.name, _rename_vars(v, rename))
             continue
 
-        if isinstance(v, list) and v and all(isinstance(x, PyIRNode) for x in v):
-            kw[f.name] = [_rename_vars(x, rename) for x in v]
+        if isinstance(v, list):
+            new_list: list[object] = []
+            for item in v:
+                if isinstance(item, PyIRNode):
+                    new_list.append(_rename_vars(item, rename))
+                else:
+                    new_list.append(item)
+            setattr(clone, f.name, new_list)
             continue
 
-        if (
-            isinstance(v, dict)
-            and v
-            and all(isinstance(x, PyIRNode) for x in v.values())
-        ):
-            kw[f.name] = {k: _rename_vars(x, rename) for k, x in v.items()}
-            continue
+        if isinstance(v, dict):
+            new_dict: dict[object, object] = {}
+            for key, item in v.items():
+                new_key = (
+                    _rename_vars(key, rename) if isinstance(key, PyIRNode) else key
+                )
+                new_item = (
+                    _rename_vars(item, rename) if isinstance(item, PyIRNode) else item
+                )
+                new_dict[new_key] = new_item
+            setattr(clone, f.name, new_dict)
 
-        kw[f.name] = deepcopy(v)
-
-    return type(node)(**kw)
+    return clone
 
 
 def _has_any_return(stmts: List[PyIRNode]) -> bool:
@@ -379,7 +392,8 @@ def _rewrite_returns_no_label(
     for st in stmts:
         if isinstance(st, PyIRReturn):
             if ret_store is not None:
-                out.append(_mk_assign(ret_store, deepcopy(st.value), ref))  # pyright: ignore[reportArgumentType]
+                ret_value = deepcopy(st.value) if st.value is not None else _mk_nil(ref)
+                out.append(_mk_assign(ret_store, ret_value, ref))
             continue
 
         out.append(st)
@@ -400,7 +414,8 @@ def _rewrite_returns_with_label(
     for st in stmts:
         if isinstance(st, PyIRReturn):
             if ret_store is not None:
-                out.append(_mk_assign(ret_store, deepcopy(st.value), ref))  # pyright: ignore[reportArgumentType]
+                ret_value = deepcopy(st.value) if st.value is not None else _mk_nil(ref)
+                out.append(_mk_assign(ret_store, ret_value, ref))
             out.append(_mk_goto(end_label, ref))
             continue
 
@@ -579,7 +594,10 @@ def _subst_vars(node: PyIRNode, subst: Dict[str, PyIRNode]) -> PyIRNode:
 
         kw[f.name] = deepcopy(v)
 
-    return type(node)(**kw)  # type: ignore[arg-type]
+    out = deepcopy(node)
+    for field_name, field_value in kw.items():
+        setattr(out, field_name, field_value)
+    return out
 
 
 def _collect_remaining_inline_call_keys(
@@ -712,18 +730,18 @@ class RewriteInlineCallsPass:
             return pro_iter + [st]
 
         if isinstance(st, PyIRWith):
-            pro: List[PyIRNode] = []
+            pro_with: List[PyIRNode] = []
             for item in st.items:
                 p, e = RewriteInlineCallsPass._rewrite_expr(
                     ir, item.context_expr, ctx, mod_parts
                 )
-                pro.extend(p)
+                pro_with.extend(p)
                 item.context_expr = e
 
             st.body = RewriteInlineCallsPass._rewrite_stmt_list(
                 ir, st.body, ctx, mod_parts
             )
-            return pro + [st]
+            return pro_with + [st]
 
         if isinstance(st, PyIRFunctionDef):
             st.body = RewriteInlineCallsPass._rewrite_stmt_list(
@@ -755,7 +773,9 @@ class RewriteInlineCallsPass:
             return pro + [st]
 
         if isinstance(st, PyIRReturn):
-            pro, v = RewriteInlineCallsPass._rewrite_expr(ir, st.value, ctx, mod_parts)  # pyright: ignore[reportArgumentType]
+            if st.value is None:
+                return [st]
+            pro, v = RewriteInlineCallsPass._rewrite_expr(ir, st.value, ctx, mod_parts)
             st.value = v
             return pro + [st]
 
@@ -792,26 +812,38 @@ class RewriteInlineCallsPass:
                 setattr(expr, f.name, nv)
                 continue
 
-            if isinstance(v, list) and v and all(isinstance(x, PyIRNode) for x in v):
-                new_list: List[PyIRNode] = []
+            if isinstance(v, list):
+                new_list: List[object] = []
+                changed = False
                 for x in v:
-                    p, nx = RewriteInlineCallsPass._rewrite_expr(ir, x, ctx, mod_parts)
-                    pro.extend(p)
-                    new_list.append(nx)
-                setattr(expr, f.name, new_list)
+                    if isinstance(x, PyIRNode):
+                        p, nx = RewriteInlineCallsPass._rewrite_expr(
+                            ir, x, ctx, mod_parts
+                        )
+                        pro.extend(p)
+                        new_list.append(nx)
+                        changed = True
+                    else:
+                        new_list.append(x)
+                if changed:
+                    setattr(expr, f.name, new_list)
                 continue
 
-            if (
-                isinstance(v, dict)
-                and v
-                and all(isinstance(x, PyIRNode) for x in v.values())
-            ):
-                new_dict: Dict[str, PyIRNode] = {}
+            if isinstance(v, dict):
+                new_dict: Dict[str, object] = {}
+                changed = False
                 for k, x in v.items():
-                    p, nx = RewriteInlineCallsPass._rewrite_expr(ir, x, ctx, mod_parts)
-                    pro.extend(p)
-                    new_dict[k] = nx
-                setattr(expr, f.name, new_dict)
+                    if isinstance(x, PyIRNode):
+                        p, nx = RewriteInlineCallsPass._rewrite_expr(
+                            ir, x, ctx, mod_parts
+                        )
+                        pro.extend(p)
+                        new_dict[k] = nx
+                        changed = True
+                    else:
+                        new_dict[k] = x
+                if changed:
+                    setattr(expr, f.name, new_dict)
                 continue
 
         return pro, expr
@@ -964,7 +996,9 @@ class RewriteInlineCallsPass:
             subst[p] = arg
 
         uses: Dict[str, int] = {}
-        _count_var_uses(ret_expr, uses)  # pyright: ignore[reportArgumentType]
+        if ret_expr is None:
+            return None
+        _count_var_uses(ret_expr, uses)
 
         for p, cnt in uses.items():
             if cnt <= 1:
@@ -972,7 +1006,7 @@ class RewriteInlineCallsPass:
             if p in subst and _has_call(subst[p]):
                 return None
 
-        return _subst_vars(ret_expr, subst)  # pyright: ignore[reportArgumentType]
+        return _subst_vars(ret_expr, subst)
 
     @staticmethod
     def _build_inline_do(

@@ -481,6 +481,8 @@ class PyIRFunctionDef(PyIRNode):
     name: str
     signature: dict[str, tuple[str | None, PyIRNode | None]]
     returns: str | None
+    vararg: str | None = None
+    kwarg: str | None = None
     decorators: list[PyIRDecorator] = field(default_factory=list)
     body: list[PyIRNode] = field(default_factory=list)
 

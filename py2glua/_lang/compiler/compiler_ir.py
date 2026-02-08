@@ -59,6 +59,8 @@ class PyIRFunctionExpr(PyIRNode):
     """
 
     signature: dict[str, tuple[str | None, PyIRNode | None]]
+    vararg: str | None = None
+    kwarg: str | None = None
     body: list[PyIRNode] = field(default_factory=list)
 
     def walk(self):

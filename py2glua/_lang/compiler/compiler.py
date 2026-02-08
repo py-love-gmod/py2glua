@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from importlib import resources
 from pathlib import Path
+from typing import Protocol
 
 from ..._cli import CompilerExit, log_step
 from ...config import Py2GluaConfig
@@ -72,20 +73,50 @@ from .passes.sanity_check import (
 )
 
 
+class _NormalizePass(Protocol):
+    @staticmethod
+    def run(ir: PyIRFile) -> PyIRFile: ...
+
+
+class _SanityCheckPass(Protocol):
+    @staticmethod
+    def run(ir: PyIRFile) -> object: ...
+
+
+class _ExpandPass(Protocol):
+    @staticmethod
+    def run(ir: PyIRFile, ctx: ExpandContext) -> PyIRFile | None: ...
+
+
+class _AnalysisPass(Protocol):
+    @staticmethod
+    def run(ir: PyIRFile, ctx: SymLinkContext) -> object: ...
+
+
+class _LoweringPass(Protocol):
+    @staticmethod
+    def run(ir: PyIRFile, ctx: SymLinkContext) -> object: ...
+
+
+class _ProjectPass(Protocol):
+    @staticmethod
+    def run(all_ir: list[PyIRFile], ctx: SymLinkContext) -> list[PyIRFile]: ...
+
+
 class Compiler:
-    normalize_passes: list = [
+    normalize_passes: list[type[_NormalizePass]] = [
         NormalizeImportsPass,
         AttachDecoratorsPass,
     ]
 
-    sanity_check_passes = [
+    sanity_check_passes: list[type[_SanityCheckPass]] = [
         ImportSanityCheckPass,  # Запрет import внутри блоков
         WithSanityCheckPass,  # Запрет with блоков с as
         RealmDirectiveSanityCheckPass,  # Проверка корректности __realm__
         RecursionSanityCheckPass,  # Запрещает рекурсию экспанд блоков
     ]
 
-    expand_passes = [
+    expand_passes: list[type[_ExpandPass]] = [
         CollectLocalSignaturesPass,  # args+kwargs нормализация
         NormalizeCallArgumentsPass,  # args+kwargs нормализация
         RewriteClassCtorCallsPass,  # class() -> class.__init__()
@@ -97,7 +128,7 @@ class Compiler:
         RewriteAnonymousFunctionsPass,  # anonymous развёртка
     ]
 
-    analysis_passes = [
+    analysis_passes: list[type[_AnalysisPass]] = [
         # === Блок simlinks
         BuildScopesPass,
         CollectDefsPass,
@@ -109,7 +140,7 @@ class Compiler:
         WarnDeprecatedUsesPass,  # Деприкейтед варны
     ]
 
-    lowering_passes = [
+    lowering_passes: list[type[_LoweringPass]] = [
         NilFoldPass,  # Трансформирует в нормальный nil
         FoldCompileTimeBoolConstsPass,  # DEBUG | TYPE_CHECKING -> compile-time if
         CollectDebugCompileOnlyDeclsPass,  # Сбор debug_compile_only()
@@ -134,7 +165,7 @@ class Compiler:
         CollectRegisterArgNetStringsPass,  # Сборка net полей
     ]
 
-    project_passes = [
+    project_passes: list[type[_ProjectPass]] = [
         BuildGmodPrototypesProjectPass,  # Создание "прототипов" гмода
         CleanUpEmptyFilesPass,  # Очистка "пустых" файлов
         ResolveSymlinksToNamespaceProjectPass,  # Ресолв симлинков
@@ -332,7 +363,9 @@ class Compiler:
         for p in cls.expand_passes:
             for ir in (*internal_ir, *project_ir):
                 try:
-                    ir = p.run(ir, ectx)
+                    res = p.run(ir, ectx)
+                    if isinstance(res, PyIRFile):
+                        ir = res
 
                 except Exception as e:
                     CompilerExit.internal_error(

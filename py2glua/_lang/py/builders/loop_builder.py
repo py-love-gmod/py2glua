@@ -12,10 +12,10 @@ class LoopBuilder:
     @staticmethod
     def build(node: PyLogicNode) -> Sequence[PyIRNode]:
         if node.kind is not PyLogicKind.LOOP:
-            raise ValueError("LoopBuilder expects PyLogicKind.LOOP")
+            raise ValueError("LoopBuilder ожидает PyLogicKind.LOOP")
 
         if not node.origins:
-            raise ValueError("PyLogicNode.LOOP has no origins")
+            raise ValueError("У PyLogicNode.LOOP отсутствуют origins")
 
         header = node.origins[0]
 
@@ -33,11 +33,11 @@ class LoopBuilder:
         ]
 
         if not tokens:
-            raise SyntaxError("Empty loop header")
+            raise SyntaxError("Пустой заголовок цикла")
 
         first = tokens[0]
         if first.type != tokenize.NAME:
-            raise SyntaxError("Invalid loop header")
+            raise SyntaxError("Некорректный заголовок цикла")
 
         body = build_block(node.children)
 
@@ -47,7 +47,7 @@ class LoopBuilder:
         if first.string == "for":
             return [LoopBuilder._build_for(tokens, body)]
 
-        raise SyntaxError(f"Unknown loop type: {first.string!r}")
+        raise SyntaxError(f"Неизвестный тип цикла: {first.string!r}")
 
     # while <expr>:
     @staticmethod
@@ -56,16 +56,16 @@ class LoopBuilder:
         body: list[PyIRNode],
     ) -> PyIRWhile:
         if tokens[-1].type != tokenize.OP or tokens[-1].string != ":":
-            raise SyntaxError("While header must end with ':'")
+            raise SyntaxError("Заголовок while должен заканчиваться ':'")
 
         expr_tokens = tokens[1:-1]
         if not expr_tokens:
-            raise SyntaxError("Missing condition in while loop")
+            raise SyntaxError("Отсутствует условие в цикле while")
 
         stream = TokenStream(expr_tokens)
         test = StatementBuilder._parse_expression(stream)
         if not stream.eof():
-            raise SyntaxError("Invalid condition in while loop")
+            raise SyntaxError("Некорректное условие в цикле while")
 
         line, col = tokens[0].start
 
@@ -83,7 +83,7 @@ class LoopBuilder:
         body: list[PyIRNode],
     ) -> PyIRFor:
         if tokens[-1].type != tokenize.OP or tokens[-1].string != ":":
-            raise SyntaxError("For header must end with ':'")
+            raise SyntaxError("Заголовок for должен заканчиваться ':'")
 
         # ищем `in` на верхнем уровне
         depth_paren = depth_brack = depth_brace = 0
@@ -120,26 +120,26 @@ class LoopBuilder:
                 break
 
         if in_index is None:
-            raise SyntaxError("Expected 'in' in for loop")
+            raise SyntaxError("Ожидалось 'in' в цикле for")
 
         target_tokens = tokens[1:in_index]
         iter_tokens = tokens[in_index + 1 : -1]
 
         if not target_tokens:
-            raise SyntaxError("Missing target in for loop")
+            raise SyntaxError("Отсутствует цель в цикле for")
 
         if not iter_tokens:
-            raise SyntaxError("Missing iterable in for loop")
+            raise SyntaxError("Отсутствует итерируемое выражение в цикле for")
 
         target_stream = TokenStream(target_tokens)
         target = StatementBuilder._parse_expression(target_stream)
         if not target_stream.eof():
-            raise SyntaxError("Invalid target in for loop")
+            raise SyntaxError("Некорректная цель в цикле for")
 
         iter_stream = TokenStream(iter_tokens)
         iter_expr = StatementBuilder._parse_expression(iter_stream)
         if not iter_stream.eof():
-            raise SyntaxError("Invalid iterable in for loop")
+            raise SyntaxError("Некорректное итерируемое выражение в цикле for")
 
         line, col = tokens[0].start
 

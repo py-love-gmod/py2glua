@@ -249,13 +249,13 @@ class NormalizeImportsPass:
 
         if isinstance(val, list):
             changed = False
-            out: list[Any] = []
+            out_list: list[Any] = []
             for x in val:
                 nx = cls._rewrite_value(x, mapping)
                 changed = changed or (nx is not x)
-                out.append(nx)
+                out_list.append(nx)
 
-            return out if changed else val
+            return out_list if changed else val
 
         if isinstance(val, dict):
             changed = False
@@ -270,12 +270,12 @@ class NormalizeImportsPass:
 
         if isinstance(val, tuple):
             changed = False
-            out: list[Any] = []
+            out_tuple_items: list[Any] = []
             for x in val:
                 nx = cls._rewrite_value(x, mapping)
                 changed = changed or (nx is not x)
-                out.append(nx)
-            return tuple(out) if changed else val
+                out_tuple_items.append(nx)
+            return tuple(out_tuple_items) if changed else val
 
         return val
 

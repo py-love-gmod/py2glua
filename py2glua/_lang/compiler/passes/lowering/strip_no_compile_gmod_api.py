@@ -6,19 +6,23 @@ from ....py.ir_dataclass import (
     PyIRAttribute,
     PyIRClassDef,
     PyIRDecorator,
-    PyIREmitExpr,
-    PyIREmitKind,
     PyIRFile,
     PyIRFor,
     PyIRFunctionDef,
     PyIRIf,
     PyIRNode,
-    PyIRVarUse,
     PyIRWhile,
     PyIRWith,
     PyIRWithItem,
 )
-from ..analysis.symlinks import PyIRSymLink, SymLinkContext
+from ..rewrite_utils import rewrite_stmt_block
+from ..analysis.symlinks import SymLinkContext
+from ..common import (
+    collect_core_compiler_directive_local_symbol_ids,
+    collect_core_compiler_directive_symbol_ids,
+    decorator_call_parts,
+    is_expr_on_symbol_ids,
+)
 
 
 class StripNoCompileAndGmodApiDefsPass:
@@ -38,50 +42,34 @@ class StripNoCompileAndGmodApiDefsPass:
 
     @staticmethod
     def run(ir: PyIRFile, ctx: SymLinkContext) -> PyIRFile:
-        compiler_directive_symbol_ids = (
-            StripNoCompileAndGmodApiDefsPass._collect_compiler_directive_symbol_ids(ctx)
+        compiler_directive_symbol_ids = set(
+            collect_core_compiler_directive_symbol_ids(ctx)
         )
-
-        def is_compiler_directive_expr(expr: PyIRNode) -> bool:
-            if isinstance(expr, PyIRVarUse):
-                return expr.name == "CompilerDirective"
-
-            if isinstance(expr, PyIRSymLink):
-                try:
-                    if expr.name == "CompilerDirective":
-                        return True
-
-                except Exception:
-                    pass
-
-                try:
-                    return expr.symbol_id in compiler_directive_symbol_ids
-
-                except Exception:
-                    return False
-
-            if isinstance(expr, PyIRAttribute):
-                if expr.attr == "CompilerDirective":
-                    return True
-
-                return is_compiler_directive_expr(expr.value)
-
-            if isinstance(expr, PyIREmitExpr):
-                return (
-                    expr.kind == PyIREmitKind.GLOBAL
-                    and expr.name == "CompilerDirective"
+        if ir.path is not None:
+            current_module = ctx.module_name_by_path.get(ir.path)
+            if current_module:
+                compiler_directive_symbol_ids |= (
+                    collect_core_compiler_directive_local_symbol_ids(
+                        ir,
+                        ctx=ctx,
+                        current_module=current_module,
+                    )
                 )
 
-            return False
-
         def is_target_decorator(d: PyIRDecorator) -> bool:
-            exp = d.exper
-
-            if isinstance(exp, PyIRAttribute):
-                if exp.attr not in StripNoCompileAndGmodApiDefsPass._TARGET_DECORATORS:
+            func_expr, _args_p, _args_kw = decorator_call_parts(d)
+            if isinstance(func_expr, PyIRAttribute):
+                if (
+                    func_expr.attr
+                    not in StripNoCompileAndGmodApiDefsPass._TARGET_DECORATORS
+                ):
                     return False
 
-                return is_compiler_directive_expr(exp.value)
+                return is_expr_on_symbol_ids(
+                    func_expr.value,
+                    symbol_ids=compiler_directive_symbol_ids,
+                    ctx=ctx,
+                )
 
             return False
 
@@ -94,11 +82,7 @@ class StripNoCompileAndGmodApiDefsPass:
             return False
 
         def strip_stmt_list(stmts: list[PyIRNode]) -> list[PyIRNode]:
-            out: list[PyIRNode] = []
-            for s in stmts:
-                out.extend(strip_stmt(s))
-
-            return out
+            return rewrite_stmt_block(stmts, strip_stmt)
 
         def strip_stmt(node: PyIRNode) -> list[PyIRNode]:
             if isinstance(node, PyIRIf):
@@ -139,43 +123,3 @@ class StripNoCompileAndGmodApiDefsPass:
 
         ir.body = strip_stmt_list(ir.body)
         return ir
-
-    @staticmethod
-    def _collect_compiler_directive_symbol_ids(ctx: SymLinkContext) -> set[int]:
-        """
-        Best-effort extraction of exported symbol ids for 'CompilerDirective'
-        across indexed modules. This is what makes aliases work (usually).
-
-        If ctx doesn't support module indexing here, falls back to empty set.
-        """
-        ids: set[int] = set()
-
-        try:
-            ctx.ensure_module_index()
-
-        except Exception:
-            return ids
-
-        try:
-            module_names = set(ctx.module_name_by_path.values())
-
-        except Exception:
-            return ids
-
-        for mn in module_names:
-            try:
-                sym = ctx.get_exported_symbol(mn, "CompilerDirective")
-
-            except Exception:
-                sym = None
-
-            if sym is None:
-                continue
-
-            try:
-                ids.add(sym.id.value)
-
-            except Exception:
-                continue
-
-        return ids

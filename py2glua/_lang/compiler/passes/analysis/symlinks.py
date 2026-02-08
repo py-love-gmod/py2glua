@@ -9,7 +9,6 @@ from ....py.ir_dataclass import (
     PyIRAssign,
     PyIRAttribute,
     PyIRAugAssign,
-    PyIRCall,
     PyIRClassDef,
     PyIRFile,
     PyIRFor,
@@ -21,6 +20,7 @@ from ....py.ir_dataclass import (
     PyIRWithItem,
 )
 from ...compiler_ir import PyIRFunctionExpr
+from ..rewrite_utils import rewrite_expr_with_store_default, rewrite_stmt_block
 
 
 # IR-нода симлинка
@@ -120,6 +120,69 @@ class SymLinkContext:
     project_exports: dict[str, set[str]] = field(default_factory=dict)
     project_path_by_module: dict[str, Path] = field(default_factory=dict)
 
+    # === Typed pass registries ===
+    type_sets_by_symbol_id: dict[int, frozenset[str]] = field(default_factory=dict)
+    type_env_by_uid: dict[int, dict[int, frozenset[str]]] = field(default_factory=dict)
+    _typeflow_warned: set[str] = field(default_factory=set)
+    fn_return_types_by_symbol_id: dict[int, frozenset[str]] = field(
+        default_factory=dict
+    )
+    method_return_types_by_class: dict[tuple[str, str], frozenset[str]] = field(
+        default_factory=dict
+    )
+    fn_return_ann_by_symbol_id: dict[int, str | None] = field(default_factory=dict)
+    method_return_ann_by_class: dict[tuple[str, str], str | None] = field(
+        default_factory=dict
+    )
+    class_bases_by_name: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    fn_typeguard_nil_by_symbol_id: set[int] = field(default_factory=set)
+    method_typeguard_nil_by_class: set[tuple[str, str]] = field(default_factory=set)
+
+    _gmod_api_warned: set[str] = field(default_factory=set)
+    gmod_api_funcs: dict[int, object] = field(default_factory=dict)
+    gmod_api_classes: dict[int, object] = field(default_factory=dict)
+    gmod_api_resolved_methods: dict[tuple[int, str], object] = field(
+        default_factory=dict
+    )
+    gmod_api_name_to_class_id: dict[str, int] = field(default_factory=dict)
+    _gmod_api_registry_ready: bool = False
+
+    _with_condition_class_symids: set[int] = field(default_factory=set)
+    _with_condition_symid_by_decl_cache: dict[tuple[Path, int, str], int] = field(
+        default_factory=dict
+    )
+
+    _debug_compile_only_symids: set[int] = field(default_factory=set)
+    _debug_compile_only_symid_by_decl_cache: dict[tuple[Path, int, str], int] = field(
+        default_factory=dict
+    )
+
+    _raw_symid_by_decl_cache: dict[tuple[Path, int, str], int] = field(
+        default_factory=dict
+    )
+
+    _register_arg_targets: dict[int, int] = field(default_factory=dict)
+    _register_arg_symid_by_decl_cache: dict[tuple[Path, int, str], int] = field(
+        default_factory=dict
+    )
+    _net_string_literals: set[str] = field(default_factory=set)
+
+    _gmod_special_enum_store: dict[int, dict[str, object]] = field(default_factory=dict)
+
+    _deprecated_symid_to_msg: dict[int, str] = field(default_factory=dict)
+    _deprecated_symid_to_disp: dict[int, str] = field(default_factory=dict)
+    _deprecated_method_to_symid: dict[tuple[int, str], int] = field(
+        default_factory=dict
+    )
+    _deprecated_method_to_msg: dict[tuple[int, str], str] = field(default_factory=dict)
+    _deprecated_classname_by_symid: dict[int, str] = field(default_factory=dict)
+    _deprecated_symid_by_decl_cache: dict[tuple[Path, int, str], int] = field(
+        default_factory=dict
+    )
+    _deprecated_warned_callsites: set[tuple[str, int, int, str]] = field(
+        default_factory=set
+    )
+
     def uid(self, node: PyIRNode) -> int:
         k = id(node)
         existing = self._node_uid.get(k)
@@ -196,6 +259,33 @@ class SymLinkContext:
         p = p.resolve()
         parts = p.parts
 
+        # PROJECT: если файл находится внутри source root, используем путь
+        # относительно source (без протекания внешних директорий в module name).
+        src_root = Py2GluaConfig.source.resolve()
+        try:
+            rel = p.relative_to(src_root)
+
+        except Exception:
+            rel = None
+
+        if rel is not None:
+            tail = list(rel.parts)
+            if not tail:
+                return None
+
+            last = tail[-1]
+            if last.endswith(".py"):
+                stem = last[:-3]
+                if stem == "__init__":
+                    tail = tail[:-1]
+                else:
+                    tail[-1] = stem
+
+            if not tail:
+                return None
+
+            return ".".join(tail)
+
         # INTERNAL: по последнему py2glua в пути
         idx = self._last_index(parts, "py2glua")
         if idx is not None:
@@ -219,29 +309,7 @@ class SymLinkContext:
 
             return ".".join(tail)
 
-        src_root = Py2GluaConfig.source.resolve()
-        try:
-            rel = p.relative_to(src_root)
-
-        except Exception:
-            return None
-
-        tail = list(rel.parts)
-        if not tail:
-            return None
-
-        last = tail[-1]
-        if last.endswith(".py"):
-            stem = last[:-3]
-            if stem == "__init__":
-                tail = tail[:-1]
-            else:
-                tail[-1] = stem
-
-        if not tail:
-            return None
-
-        return ".".join(tail)
+        return None
 
     def ensure_module_index(self) -> None:
         if self._module_index_ready:
@@ -414,6 +482,10 @@ class CollectDefsPass:
                 body_scope = ctx.fn_body_scope.get(fn_uid, sc)
                 for arg in node.signature.keys():
                     define(body_scope, arg, node)
+                if node.vararg is not None:
+                    define(body_scope, node.vararg, node)
+                if node.kwarg is not None:
+                    define(body_scope, node.kwarg, node)
 
                 continue
 
@@ -422,6 +494,10 @@ class CollectDefsPass:
                 body_scope = ctx.fn_body_scope.get(fn_uid, sc)
                 for arg in node.signature.keys():
                     define(body_scope, arg, node)
+                if node.vararg is not None:
+                    define(body_scope, node.vararg, node)
+                if node.kwarg is not None:
+                    define(body_scope, node.kwarg, node)
 
                 continue
 
@@ -569,7 +645,13 @@ class RewriteToSymlinksPass:
 
             return n
 
-        def rw(node: PyIRNode, *, store: bool) -> PyIRNode:
+        def rw_block(body: list[PyIRNode]) -> list[PyIRNode]:
+            return rewrite_stmt_block(body, rw_stmt)
+
+        def rw_stmt(st: PyIRNode) -> list[PyIRNode]:
+            return [rw_expr(st, False)]
+
+        def rw_expr(node: PyIRNode, store: bool) -> PyIRNode:
             if isinstance(node, PyIRVarUse):
                 uid = ctx.uid(node)
                 link = ctx.var_links.get(uid)
@@ -589,118 +671,14 @@ class RewriteToSymlinksPass:
                 )
 
             if isinstance(node, PyIRAttribute):
-                node.value = rw(node.value, store=False)
+                node.value = rw_expr(node.value, store=False)
                 return try_collapse_attr(node)
 
-            if isinstance(node, PyIRCall):
-                node.func = rw(node.func, store=False)
-                node.args_p = [rw(a, store=False) for a in node.args_p]
-                node.args_kw = {k: rw(v, store=False) for k, v in node.args_kw.items()}
-                return node
+            return rewrite_expr_with_store_default(
+                node,
+                rw_expr=rw_expr,
+                rw_block=rw_block,
+            )
 
-            if isinstance(node, PyIRAssign):
-                node.targets = [rw(t, store=True) for t in node.targets]
-                node.value = rw(node.value, store=False)
-                return node
-
-            if isinstance(node, PyIRAugAssign):
-                node.target = rw(node.target, store=True)
-                node.value = rw(node.value, store=False)
-                return node
-
-            if isinstance(node, PyIRFor):
-                node.target = rw(node.target, store=True)
-                node.iter = rw(node.iter, store=False)
-                node.body = [rw(n, store=False) for n in node.body]
-                return node
-
-            if isinstance(node, PyIRWithItem):
-                node.context_expr = rw(node.context_expr, store=False)
-                if node.optional_vars is not None:
-                    node.optional_vars = rw(node.optional_vars, store=True)
-                return node
-
-            if isinstance(node, PyIRFunctionDef):
-                node.decorators = [rw(d, store=False) for d in node.decorators]  # type: ignore
-
-                new_sig: dict[str, tuple[str | None, PyIRNode | None]] = {}
-                for k, (ann, default) in node.signature.items():
-                    if default is not None:
-                        default = rw(default, store=False)
-
-                    new_sig[k] = (ann, default)
-
-                node.signature = new_sig
-
-                node.body = [rw(n, store=False) for n in node.body]
-                return node
-
-            if isinstance(node, PyIRFunctionExpr):
-                new_sig: dict[str, tuple[str | None, PyIRNode | None]] = {}
-                for k, (ann, default) in node.signature.items():
-                    if default is not None:
-                        default = rw(default, store=False)
-
-                    new_sig[k] = (ann, default)
-
-                node.signature = new_sig
-
-                node.body = [rw(n, store=False) for n in node.body]
-                return node
-
-            if isinstance(node, PyIRClassDef):
-                node.decorators = [rw(d, store=False) for d in node.decorators]  # type: ignore
-                node.bases = [rw(b, store=False) for b in node.bases]
-                node.body = [rw(n, store=False) for n in node.body]
-                return node
-
-            if is_dataclass(node):
-                for f in fields(node):
-                    v = getattr(node, f.name)
-
-                    if isinstance(v, PyIRNode):
-                        setattr(node, f.name, rw(v, store=False))
-
-                    elif isinstance(v, list):
-                        setattr(
-                            node,
-                            f.name,
-                            [
-                                rw(x, store=False) if isinstance(x, PyIRNode) else x
-                                for x in v
-                            ],
-                        )
-
-                    elif isinstance(v, tuple):
-                        out_t = []
-                        changed = False
-                        for x in v:
-                            if isinstance(x, PyIRNode):
-                                nx = rw(x, store=False)
-                                changed = changed or (nx is not x)
-                                out_t.append(nx)
-
-                            else:
-                                out_t.append(x)
-
-                        if changed:
-                            setattr(node, f.name, tuple(out_t))
-
-                    elif isinstance(v, dict):
-                        setattr(
-                            node,
-                            f.name,
-                            {
-                                k: (
-                                    rw(x, store=False) if isinstance(x, PyIRNode) else x
-                                )
-                                for k, x in v.items()
-                            },
-                        )
-
-                return node
-
-            return node
-
-        ir.body = [rw(n, store=False) for n in ir.body]
+        ir.body = rw_block(ir.body)
         return ir

@@ -1,46 +1,31 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, cast
 
 from ....._cli import CompilerExit, logger
 from ....compiler.passes.analysis.symlinks import PyIRSymLink, SymLinkContext
 from ....py.ir_dataclass import (
-    PyIRAssign,
     PyIRAttribute,
-    PyIRAugAssign,
-    PyIRBinOP,
-    PyIRBreak,
     PyIRCall,
     PyIRClassDef,
-    PyIRComment,
     PyIRConstant,
-    PyIRContinue,
     PyIRDecorator,
-    PyIRDict,
-    PyIRDictItem,
     PyIREmitExpr,
     PyIREmitKind,
     PyIRFile,
-    PyIRFor,
     PyIRFunctionDef,
-    PyIRIf,
-    PyIRImport,
-    PyIRList,
     PyIRNode,
-    PyIRPass,
-    PyIRReturn,
-    PyIRSet,
-    PyIRSubscript,
-    PyIRTuple,
-    PyIRUnaryOP,
-    PyIRVarCreate,
     PyIRVarUse,
-    PyIRWhile,
-    PyIRWith,
-    PyIRWithItem,
 )
-from ...compiler_ir import PyIRFunctionExpr
+from ..rewrite_utils import rewrite_expr_with_store_default, rewrite_stmt_block
+from ..common import (
+    collect_core_compiler_directive_local_symbol_ids,
+    collect_core_compiler_directive_symbol_ids,
+    decorator_call_parts,
+    is_expr_on_symbol_ids,
+    resolve_symbol_ids_by_attr_chain,
+)
 
 
 @dataclass(frozen=True)
@@ -60,11 +45,7 @@ class GmodApiClassInfo:
 
 
 def _warn_once(ctx: SymLinkContext, key: str, msg: str) -> None:
-    warned = getattr(ctx, "_gmod_api_warned", None)
-    if not isinstance(warned, set):
-        warned = set()
-        setattr(ctx, "_gmod_api_warned", warned)
-
+    warned = ctx._gmod_api_warned
     if key in warned:
         return
 
@@ -81,65 +62,13 @@ def _ensure_storage(
     dict[str, int],
     bool,
 ]:
-    funcs = getattr(ctx, "gmod_api_funcs", None)
-    if not isinstance(funcs, dict):
-        funcs = {}
-
-    classes = getattr(ctx, "gmod_api_classes", None)
-    if not isinstance(classes, dict):
-        classes = {}
-
-    resolved = getattr(ctx, "gmod_api_resolved_methods", None)
-    if not isinstance(resolved, dict):
-        resolved = {}
-
-    name_map = getattr(ctx, "gmod_api_name_to_class_id", None)
-    if not isinstance(name_map, dict):
-        name_map = {}
-
-    ready = getattr(ctx, "_gmod_api_registry_ready", False)
-    if not isinstance(ready, bool):
-        ready = False
-
-    setattr(ctx, "gmod_api_funcs", funcs)
-    setattr(ctx, "gmod_api_classes", classes)
-    setattr(ctx, "gmod_api_resolved_methods", resolved)
-    setattr(ctx, "gmod_api_name_to_class_id", name_map)
-    setattr(ctx, "_gmod_api_registry_ready", ready)
-
-    return funcs, classes, resolved, name_map, ready
-
-
-def _collect_compiler_directive_local_names(ir: PyIRFile) -> set[str]:
-    """
-    Supports:
-      from py2glua.glua... import CompilerDirective
-      from py2glua.glua... import CompilerDirective as CD
-    """
-    names: set[str] = {"CompilerDirective"}
-
-    for n in ir.body:
-        if not isinstance(n, PyIRImport):
-            continue
-
-        if not n.if_from:
-            continue
-
-        mod = ".".join(n.modules)
-        if "py2glua.glua" not in mod:
-            continue
-
-        for item in n.names:
-            if isinstance(item, tuple):
-                src, alias = item
-                if src == "CompilerDirective":
-                    names.add(alias)
-
-            else:
-                if item == "CompilerDirective":
-                    names.add(item)
-
-    return names
+    return (
+        cast(dict[int, GmodApiDecl], ctx.gmod_api_funcs),
+        cast(dict[int, GmodApiClassInfo], ctx.gmod_api_classes),
+        cast(dict[tuple[int, str], GmodApiDecl], ctx.gmod_api_resolved_methods),
+        ctx.gmod_api_name_to_class_id,
+        ctx._gmod_api_registry_ready,
+    )
 
 
 def _unwrap_gmod_api_decorator(
@@ -150,30 +79,16 @@ def _unwrap_gmod_api_decorator(
       A) PyIRDecorator(exper=Attr(CD, gmod_api), args_p/args_kw)
       B) PyIRDecorator(exper=Call(func=Attr(CD, gmod_api), args_p/args_kw), args inside call)
     """
-    exp = dec.exper
-
-    if isinstance(exp, PyIRAttribute):
-        return exp, dec.args_p, dec.args_kw
-
-    if isinstance(exp, PyIRCall) and isinstance(exp.func, PyIRAttribute):
-        return exp.func, exp.args_p, exp.args_kw
-
+    fn_expr, args_p, args_kw = decorator_call_parts(dec)
+    if isinstance(fn_expr, PyIRAttribute):
+        return fn_expr, args_p, args_kw
     return None
-
-
-def _is_cd_ref(n: PyIRNode, cd_names: set[str]) -> bool:
-    if isinstance(n, PyIRVarUse):
-        return n.name in cd_names
-
-    if isinstance(n, PyIRSymLink):
-        return n.name in cd_names
-
-    return False
 
 
 def _parse_gmod_api(
     ir: PyIRFile,
-    cd_names: set[str],
+    core_cd_symids: set[int],
+    ctx: SymLinkContext,
     dec: PyIRDecorator,
     ref: PyIRNode,
 ) -> GmodApiDecl | None:
@@ -186,18 +101,62 @@ def _parse_gmod_api(
     if func_attr.attr != "gmod_api":
         return None
 
-    if not _is_cd_ref(func_attr.value, cd_names):
+    if not is_expr_on_symbol_ids(
+        func_attr.value,
+        symbol_ids=core_cd_symids,
+        ctx=ctx,
+    ):
         return None
 
-    name_node: PyIRNode | None = None
-    if args_p:
-        name_node = args_p[0]
-    elif "name" in args_kw:
-        name_node = args_kw["name"]
+    # Signature: gmod_api(name, realm, method=False)
+    allowed_kw = {"name", "realm", "method"}
+    for k in args_kw.keys():
+        if k not in allowed_kw:
+            CompilerExit.user_error_node(
+                f"Неизвестный keyword-аргумент '{k}' в gmod_api.",
+                ir.path,
+                ref,
+            )
+
+    if len(args_p) > 3:
+        CompilerExit.user_error_node(
+            "gmod_api ожидает не более 3 позиционных аргументов (name, realm, method).",
+            ir.path,
+            ref,
+        )
+
+    def pick_arg(idx: int, key: str) -> PyIRNode | None:
+        if idx < len(args_p):
+            if key in args_kw:
+                CompilerExit.user_error_node(
+                    f"Аргумент '{key}' передан дважды (positional + keyword) в gmod_api.",
+                    ir.path,
+                    ref,
+                )
+            return args_p[idx]
+        return args_kw.get(key)
+
+    name_node = pick_arg(0, "name")
+    realm_node = pick_arg(1, "realm")
+    method_node = pick_arg(2, "method")
+
+    if name_node is None:
+        CompilerExit.user_error_node(
+            "gmod_api ожидает аргумент name.",
+            ir.path,
+            ref,
+        )
 
     if not isinstance(name_node, PyIRConstant) or not isinstance(name_node.value, str):
         CompilerExit.user_error_node(
-            "Декоратор gmod_api ожидает строковую константу в аргументе name.",
+            "Декоратор gmod_api ожидает строковый литерал в аргументе name.",
+            ir.path,
+            ref,
+        )
+
+    if realm_node is None:
+        CompilerExit.user_error_node(
+            "gmod_api ожидает аргумент realm.",
             ir.path,
             ref,
         )
@@ -205,19 +164,12 @@ def _parse_gmod_api(
     lua_name = name_node.value
 
     method_val = False
-    method_node: PyIRNode | None = None
-    if "method" in args_kw:
-        method_node = args_kw["method"]
-
-    elif len(args_p) >= 2:
-        method_node = args_p[1]
-
     if method_node is not None:
         if not isinstance(method_node, PyIRConstant) or not isinstance(
             method_node.value, bool
         ):
             CompilerExit.user_error_node(
-                "Параметр method в gmod_api должен быть булевой константой (True/False).",
+                "Параметр method в gmod_api должен быть булевым литералом (True/False).",
                 ir.path,
                 ref,
             )
@@ -255,8 +207,7 @@ class CollectGmodApiDeclsPass:
     @staticmethod
     def run(ir: PyIRFile, ctx: SymLinkContext) -> PyIRFile:
         funcs, classes, _resolved, _name_map, _ready = _ensure_storage(ctx)
-
-        cd_names = _collect_compiler_directive_local_names(ir)
+        core_cd_symids = set(collect_core_compiler_directive_symbol_ids(ctx))
 
         file_uid = ctx.uid(ir)
         file_scope = ctx.file_scope.get(file_uid)
@@ -270,11 +221,20 @@ class CollectGmodApiDeclsPass:
             link = ctx.resolve(scope=file_scope, name=name)
             return link.target.value if link is not None else None
 
+        if ir.path is not None:
+            current_module = ctx.module_name_by_path.get(ir.path)
+            if current_module:
+                core_cd_symids |= collect_core_compiler_directive_local_symbol_ids(
+                    ir,
+                    ctx=ctx,
+                    current_module=current_module,
+                )
+
         for st in ir.body:
             if isinstance(st, PyIRFunctionDef):
                 decl: GmodApiDecl | None = None
                 for d in st.decorators:
-                    decl = _parse_gmod_api(ir, cd_names, d, st)
+                    decl = _parse_gmod_api(ir, core_cd_symids, ctx, d, st)
                     if decl is not None:
                         break
                 if decl is None:
@@ -323,7 +283,7 @@ class CollectGmodApiDeclsPass:
 
                     mdecl: GmodApiDecl | None = None
                     for d in m.decorators:
-                        mdecl = _parse_gmod_api(ir, cd_names, d, m)
+                        mdecl = _parse_gmod_api(ir, core_cd_symids, ctx, d, m)
                         if mdecl is not None:
                             break
 
@@ -332,7 +292,7 @@ class CollectGmodApiDeclsPass:
 
                     info.methods[m.name] = mdecl
 
-        setattr(ctx, "_gmod_api_registry_ready", False)
+        ctx._gmod_api_registry_ready = False
         return ir
 
 
@@ -398,7 +358,7 @@ class FinalizeGmodApiRegistryPass:
             for mname, decl in mm.items():
                 resolved[(cid, mname)] = decl
 
-        setattr(ctx, "_gmod_api_registry_ready", True)
+        ctx._gmod_api_registry_ready = True
         return ir
 
 
@@ -428,13 +388,8 @@ class RewriteGmodApiCallsPass:
             FinalizeGmodApiRegistryPass.run(ir, ctx)
             funcs, classes, resolved, name_map, _ready = _ensure_storage(ctx)
 
-        env_by_uid = getattr(ctx, "type_env_by_uid", None)
-        if not isinstance(env_by_uid, dict):
-            env_by_uid = {}
-
-        base_types = getattr(ctx, "type_sets_by_symbol_id", None)
-        if not isinstance(base_types, dict):
-            base_types = {}
+        env_by_uid = ctx.type_env_by_uid
+        base_types = ctx.type_sets_by_symbol_id
 
         def types_at_call(call: PyIRCall, sym_id: int) -> frozenset[str] | None:
             snap = env_by_uid.get(ctx.uid(call))
@@ -477,11 +432,35 @@ class RewriteGmodApiCallsPass:
 
             return out, had_nullish
 
-        def rw_expr(node: PyIRNode) -> PyIRNode:
+        def pick_single_decl(
+            decls: list[GmodApiDecl],
+            *,
+            mname: str,
+            node: PyIRNode,
+        ) -> GmodApiDecl:
+            first = decls[0]
+            for d in decls[1:]:
+                if d.lua_name != first.lua_name or d.method != first.method:
+                    CompilerExit.user_error_node(
+                        "Невозможно однозначно разрешить вызов gmod_api метода.\n"
+                        f"Метод: {mname}\n"
+                        f"Варианты: {', '.join(dd.lua_name for dd in decls)}",
+                        ir.path,
+                        node,
+                    )
+            return first
+
+        def rw_block(stmts: list[PyIRNode]) -> list[PyIRNode]:
+            return rewrite_stmt_block(stmts, rw_stmt)
+
+        def rw_stmt(st: PyIRNode) -> list[PyIRNode]:
+            return [rw_expr(st, False)]
+
+        def rw_expr(node: PyIRNode, store: bool) -> PyIRNode:
             if isinstance(node, PyIRCall):
-                node.func = rw_expr(node.func)
-                node.args_p = [rw_expr(a) for a in node.args_p]
-                node.args_kw = {k: rw_expr(v) for k, v in node.args_kw.items()}
+                node.func = rw_expr(node.func, False)
+                node.args_p = [rw_expr(a, False) for a in node.args_p]
+                node.args_kw = {k: rw_expr(v, False) for k, v in node.args_kw.items()}
 
                 if node.args_kw:
                     CompilerExit.user_error_node(
@@ -494,10 +473,46 @@ class RewriteGmodApiCallsPass:
                     decl = funcs.get(node.func.symbol_id)
                     if decl is not None:
                         return _make_emit_call(node, decl.lua_name, node.args_p)
+                else:
+                    fn_symids = resolve_symbol_ids_by_attr_chain(ctx, node.func)
+                    fn_decls = [funcs[sid] for sid in fn_symids if sid in funcs]
+                    if fn_decls:
+                        decl = pick_single_decl(
+                            fn_decls,
+                            mname=getattr(node.func, "attr", "<call>"),
+                            node=node,
+                        )
+                        return _make_emit_call(node, decl.lua_name, node.args_p)
 
                 if isinstance(node.func, PyIRAttribute):
                     base = node.func.value
                     mname = node.func.attr
+
+                    cls_symids = [
+                        sid
+                        for sid in resolve_symbol_ids_by_attr_chain(ctx, base)
+                        if sid in classes
+                    ]
+                    if cls_symids:
+                        class_decls = [
+                            resolved[(cid, mname)]
+                            for cid in cls_symids
+                            if (cid, mname) in resolved
+                        ]
+                        if class_decls:
+                            first = pick_single_decl(
+                                class_decls,
+                                mname=mname,
+                                node=node,
+                            )
+                            if first.method:
+                                CompilerExit.user_error_node(
+                                    f"'{mname}' помечен gmod_api как метод (method=True), "
+                                    "но вызывается как Class.method(...).",
+                                    ir.path,
+                                    node,
+                                )
+                            return _make_emit_call(node, first.lua_name, node.args_p)
 
                     if not isinstance(base, PyIRSymLink):
                         return node
@@ -519,33 +534,21 @@ class RewriteGmodApiCallsPass:
                     if not cls_ids:
                         return node
 
-                    decls: list[GmodApiDecl] = []
+                    object_decls: list[GmodApiDecl] = []
                     for cid in cls_ids:
                         d = resolved.get((cid, mname))
                         if d is None:
-                            cname = (
-                                classes.get(cid).name  # type: ignore
-                                if cid in classes
-                                else f"<sym {cid}>"
-                            )
+                            info = classes.get(cid)
+                            cname = info.name if info is not None else f"<sym {cid}>"
                             CompilerExit.user_error_node(
                                 f"Метод '{mname}' не найден в gmod_api для типа '{cname}'.",
                                 ir.path,
                                 node,
                             )
 
-                        decls.append(d)
+                        object_decls.append(d)
 
-                    first = decls[0]
-                    for d in decls[1:]:
-                        if d.lua_name != first.lua_name or d.method != first.method:
-                            CompilerExit.user_error_node(
-                                "Невозможно однозначно разрешить вызов gmod_api метода.\n"
-                                f"Метод: {mname}\n"
-                                f"Варианты: {', '.join(dd.lua_name for dd in decls)}",
-                                ir.path,
-                                node,
-                            )
+                    first = pick_single_decl(object_decls, mname=mname, node=node)
 
                     if not first.method:
                         CompilerExit.user_error_node(
@@ -558,139 +561,11 @@ class RewriteGmodApiCallsPass:
 
                 return node
 
-            if isinstance(node, PyIRAttribute):
-                node.value = rw_expr(node.value)
-                return node
+            return rewrite_expr_with_store_default(
+                node,
+                rw_expr=rw_expr,
+                rw_block=rw_block,
+            )
 
-            if isinstance(node, PyIRUnaryOP):
-                node.value = rw_expr(node.value)
-                return node
-
-            if isinstance(node, PyIRBinOP):
-                node.left = rw_expr(node.left)
-                node.right = rw_expr(node.right)
-                return node
-
-            if isinstance(node, PyIRSubscript):
-                node.value = rw_expr(node.value)
-                node.index = rw_expr(node.index)
-                return node
-
-            if isinstance(node, PyIRList):
-                node.elements = [rw_expr(e) for e in node.elements]
-                return node
-
-            if isinstance(node, PyIRTuple):
-                node.elements = [rw_expr(e) for e in node.elements]
-                return node
-
-            if isinstance(node, PyIRSet):
-                node.elements = [rw_expr(e) for e in node.elements]
-                return node
-
-            if isinstance(node, PyIRDictItem):
-                node.key = rw_expr(node.key)
-                node.value = rw_expr(node.value)
-                return node
-
-            if isinstance(node, PyIRDict):
-                node.items = [rw_expr(i) for i in node.items]  # type: ignore[list-item]
-                return node
-
-            if isinstance(node, PyIRDecorator):
-                node.exper = rw_expr(node.exper)
-                node.args_p = [rw_expr(a) for a in node.args_p]
-                node.args_kw = {k: rw_expr(v) for k, v in node.args_kw.items()}
-                return node
-
-            if isinstance(node, PyIREmitExpr):
-                node.args_p = [rw_expr(a) for a in node.args_p]
-                node.args_kw = {k: rw_expr(v) for k, v in node.args_kw.items()}
-                return node
-
-            return node
-
-        def rw_stmt_list(stmts: list[PyIRNode]) -> list[PyIRNode]:
-            out: list[PyIRNode] = []
-            for s in stmts:
-                out.extend(rw_stmt(s))
-            return out
-
-        def rw_stmt(st: PyIRNode) -> list[PyIRNode]:
-            if isinstance(st, PyIRIf):
-                st.test = rw_expr(st.test)
-                st.body = rw_stmt_list(st.body)
-                st.orelse = rw_stmt_list(st.orelse)
-                return [st]
-
-            if isinstance(st, PyIRWhile):
-                st.test = rw_expr(st.test)
-                st.body = rw_stmt_list(st.body)
-                return [st]
-
-            if isinstance(st, PyIRFor):
-                st.target = rw_expr(st.target)
-                st.iter = rw_expr(st.iter)
-                st.body = rw_stmt_list(st.body)
-                return [st]
-
-            if isinstance(st, PyIRWithItem):
-                st.context_expr = rw_expr(st.context_expr)
-                if st.optional_vars is not None:
-                    st.optional_vars = rw_expr(st.optional_vars)
-                return [st]
-
-            if isinstance(st, PyIRWith):
-                st.items = [rw_expr(i) for i in st.items]  # type: ignore[list-item]
-                st.body = rw_stmt_list(st.body)
-                return [st]
-
-            if isinstance(st, PyIRAssign):
-                st.targets = [rw_expr(t) for t in st.targets]
-                st.value = rw_expr(st.value)
-                return [st]
-
-            if isinstance(st, PyIRAugAssign):
-                st.target = rw_expr(st.target)
-                st.value = rw_expr(st.value)
-                return [st]
-
-            if isinstance(st, PyIRReturn):
-                st.value = rw_expr(st.value)  # pyright: ignore[reportArgumentType]
-                return [st]
-
-            if isinstance(st, PyIRFunctionDef):
-                st.decorators = [rw_expr(d) for d in st.decorators]  # type: ignore[list-item]
-                st.body = rw_stmt_list(st.body)
-                return [st]
-
-            if isinstance(st, PyIRFunctionExpr):
-                st.body = rw_stmt_list(st.body)
-                return [st]
-
-            if isinstance(st, PyIRClassDef):
-                st.bases = [rw_expr(b) for b in st.bases]
-                st.decorators = [rw_expr(d) for d in st.decorators]  # type: ignore[list-item]
-                st.body = rw_stmt_list(st.body)
-                return [st]
-
-            if isinstance(
-                st,
-                (
-                    PyIRImport,
-                    PyIRBreak,
-                    PyIRContinue,
-                    PyIRPass,
-                    PyIRComment,
-                    PyIRVarCreate,
-                    PyIRConstant,
-                    PyIRVarUse,
-                    PyIRSymLink,
-                ),
-            ):
-                return [st]
-
-            return [rw_expr(st)]
-
-        ir.body = rw_stmt_list(ir.body)
+        ir.body = rw_block(ir.body)
         return ir

@@ -87,12 +87,16 @@ class PyParser:
     # region tokens
     @staticmethod
     def _construct_tokens(source: str) -> TokenStream:
+        # Поддержка файлов в UTF-8 с BOM.
+        if source.startswith("\ufeff"):
+            source = source[1:]
+
         try:
             compile(source, "<py2glua-validate>", "exec")
 
         except SyntaxError as e:
             raise SyntaxError(
-                f"Invalid Python syntax: {e.msg} (line {e.lineno}, offset {e.offset})"
+                f"Некорректный синтаксис Python: {e.msg} (line {e.lineno}, offset {e.offset})"
             )
 
         token_list: list[tokenize.TokenInfo] = []
@@ -377,12 +381,15 @@ class PyParser:
             if tok.string in balance:
                 balance[tok.string] += 1
 
-            inline_tokens.append(token_stream.advance())
+            advanced = token_stream.advance()
+            if advanced is None:
+                break
+            inline_tokens.append(advanced)
 
             if tok.type in (tokenize.NEWLINE, tokenize.NL) and not paren_open():
                 break
 
-        first_real = None
+        first_real: tokenize.TokenInfo | None = None
         for t in inline_tokens:
             if t.type not in (
                 tokenize.NL,
@@ -521,7 +528,7 @@ class PyParser:
 
         first = token_stream.advance()
         if first is None or first.type != tokenize.INDENT:
-            raise SyntaxError("Expected INDENT at start of block")
+            raise SyntaxError("Ожидался INDENT в начале блока")
 
         tokens.append(first)
         depth = 1

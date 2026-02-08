@@ -10,6 +10,8 @@ from ....compiler.compiler_ir import PyIRDo, PyIRFunctionExpr, PyIRGoto, PyIRLab
 from ....py.ir_dataclass import (
     PyAugAssignType,
     PyBinOPType,
+    PyIRAnnotatedAssign,
+    PyIRAnnotation,
     PyIRAssign,
     PyIRAttribute,
     PyIRAugAssign,
@@ -422,11 +424,26 @@ class LuaEmitter:
         for item in node.body:
             if isinstance(item, PyIRFunctionDef):
                 self._emit_class_method(node.name, item)
+            elif isinstance(item, PyIRAssign):
+                for target in item.targets:
+                    if isinstance(target, PyIRVarUse):
+                        self._wl(
+                            f"{node.name}.{target.name} = {self._expr(item.value)}"
+                        )
+                    elif isinstance(target, PyIRAttribute):
+                        self._wl(f"{self._expr(target)} = {self._expr(item.value)}")
+                    else:
+                        self._wl(self._leak(type(item).__name__))
+            elif isinstance(item, PyIRAnnotatedAssign):
+                self._wl(f"{node.name}.{item.name} = {self._expr(item.value)}")
+            elif isinstance(item, PyIRAnnotation):
+                # Annotation-only class fields do not have runtime value.
+                continue
             else:
                 self._wl(self._leak(type(item).__name__))
 
     def _emit_class_method(self, class_name: str, fn: PyIRFunctionDef) -> None:
-        args = ", ".join(fn.signature.keys())
+        args = self._format_fn_args(fn.signature, fn.vararg, fn.kwarg)
         self._wl(f"function {class_name}.{fn.name}({args})")
         self._indent_push()
         self._scope_push()
@@ -453,7 +470,7 @@ class LuaEmitter:
         local_init: bool,
         assign_style: bool,
     ) -> None:
-        args = ", ".join(fn.signature.keys())
+        args = self._format_fn_args(fn.signature, fn.vararg, fn.kwarg)
 
         if local_init:
             self._wl(f"local function {fn.name}({args})")
@@ -628,7 +645,7 @@ class LuaEmitter:
         return self._leak(type(node).__name__)
 
     def _emit_function_expr(self, fn: PyIRFunctionExpr) -> str:
-        args = ", ".join(fn.signature.keys())
+        args = self._format_fn_args(fn.signature, fn.vararg, fn.kwarg)
         if not fn.body:
             return f"function({args}) end"
 
@@ -685,6 +702,19 @@ class LuaEmitter:
         if not node.elements:
             return ""
         return ", ".join(self._expr(e) for e in node.elements)
+
+    @staticmethod
+    def _format_fn_args(
+        signature: dict[str, tuple[str | None, PyIRNode | None]],
+        vararg: str | None,
+        kwarg: str | None,
+    ) -> str:
+        args = list(signature.keys())
+        if vararg is not None:
+            args.append(vararg)
+        if kwarg is not None:
+            args.append(kwarg)
+        return ", ".join(args)
 
     @staticmethod
     def _augassign_op(op: PyAugAssignType) -> str | None:

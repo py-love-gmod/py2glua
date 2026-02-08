@@ -14,7 +14,7 @@ class WithBuilder:
     @staticmethod
     def build(node: PyLogicNode) -> Sequence[PyIRNode]:
         if not node.origins:
-            raise ValueError("PyLogicNode.WITH has no origins")
+            raise ValueError("У PyLogicNode.WITH отсутствуют origins")
 
         raw = node.origins[0]
         tokens: List[tokenize.TokenInfo] = [
@@ -35,44 +35,44 @@ class WithBuilder:
 
         first = tokens[0]
         if first.type != tokenize.NAME or first.string != "with":
-            raise SyntaxError("Invalid with statement")
+            raise SyntaxError("Некорректный оператор with")
 
         line, col = first.start
 
         if tokens[-1].type != tokenize.OP or tokens[-1].string != ":":
-            raise SyntaxError("With header must end with ':'")
+            raise SyntaxError("Заголовок with должен заканчиваться ':'")
 
         header_tokens = tokens[1:-1]
         header_tokens = WithBuilder._strip_outer_parens(header_tokens)
 
         if not header_tokens:
-            raise SyntaxError("Expected at least one with-item")
+            raise SyntaxError("Ожидался как минимум один элемент with")
 
         item_tokens_list = WithBuilder._split_top_level_commas(header_tokens)
         if any(len(part) == 0 for part in item_tokens_list):
-            raise SyntaxError("Trailing comma or empty with-item is not supported")
+            raise SyntaxError("Лишняя запятая или пустой элемент with не поддерживается")
 
         items: list[PyIRWithItem] = []
         for item_tokens in item_tokens_list:
             ctx_tokens, opt_tokens = WithBuilder._split_item_as(item_tokens)
 
             if not ctx_tokens:
-                raise SyntaxError("Missing context expression in with-item")
+                raise SyntaxError("Отсутствует context-выражение в элементе with")
 
             ctx_stream = TokenStream(ctx_tokens)
             ctx_expr = StatementBuilder._parse_expression(ctx_stream)
             if not ctx_stream.eof():
-                raise SyntaxError("Invalid context expression in with-item")
+                raise SyntaxError("Некорректное context-выражение в элементе with")
 
             opt_vars = None
             if opt_tokens is not None:
                 if not opt_tokens:
-                    raise SyntaxError("Expected target after 'as' in with-item")
+                    raise SyntaxError("Ожидалась цель после 'as' в элементе with")
 
                 opt_stream = TokenStream(opt_tokens)
                 opt_vars = StatementBuilder._parse_expression(opt_stream)
                 if not opt_stream.eof():
-                    raise SyntaxError("Invalid 'as' target in with-item")
+                    raise SyntaxError("Некорректная цель 'as' в элементе with")
 
             iline, icol = ctx_tokens[0].start
             items.append(

@@ -42,7 +42,7 @@ def parse_bases(tokens: list[tokenize.TokenInfo]) -> list[list[tokenize.TokenInf
         current.append(t)
 
     if depth != 0:
-        raise SyntaxError("Unclosed base class list")
+        raise SyntaxError("Не закрыт список базовых классов")
 
     return bases
 
@@ -51,10 +51,10 @@ class ClassBuilder:
     @staticmethod
     def build(node: PyLogicNode) -> Sequence[PyIRNode]:
         if node.kind is not PyLogicKind.CLASS:
-            raise ValueError("ClassBuilder expects PyLogicKind.CLASS")
+            raise ValueError("ClassBuilder ожидает PyLogicKind.CLASS")
 
         if not node.origins:
-            raise SyntaxError("Class node has no header")
+            raise SyntaxError("У class-узла отсутствует заголовок")
 
         header = node.origins[0]
 
@@ -72,11 +72,11 @@ class ClassBuilder:
         ]
 
         if len(tokens) < 2 or tokens[0].string != "class":
-            raise SyntaxError("Invalid class declaration")
+            raise SyntaxError("Некорректное объявление класса")
 
         name_tok = tokens[1]
         if name_tok.type != tokenize.NAME:
-            raise SyntaxError("Expected class name")
+            raise SyntaxError("Ожидалось имя класса")
 
         class_name = name_tok.string
         bases: list[PyIRNode] = []

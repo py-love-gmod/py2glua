@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import fields, is_dataclass
-from pathlib import Path
-from typing import Final, Iterator, Sequence
+from typing import Final
 
 from ....py.ir_dataclass import (
     PyIRAssign,
@@ -15,42 +13,44 @@ from ....py.ir_dataclass import (
     PyIRFor,
     PyIRFunctionDef,
     PyIRIf,
-    PyIRImport,
     PyIRNode,
     PyIRWhile,
     PyIRWith,
     PyIRWithItem,
 )
 from ...compiler_ir import PyIRFunctionExpr
+from ..rewrite_utils import rewrite_dataclass_children, rewrite_stmt_block
 from ..analysis.symlinks import PyIRSymLink, SymLinkContext
+from ..common import (
+    canon_path,
+    collect_decl_symid_cache,
+    collect_core_compiler_directive_local_symbol_ids,
+    is_attr_on_symbol_ids,
+)
 
 
 class CollectWithConditionClassesPass:
     """
     Lowering-pass (phase 1):
     Collects symids of classes decorated with @CompilerDirective.with_condition(),
-    but ONLY when that decorator is proven to come from CompilerDirective binding
-    in the current file (local class def or imported binding).
+    but ONLY when that decorator is proven to come from core CompilerDirective.
 
     Writes into ctx:
       - ctx._with_condition_class_symids: set[int]
       - ctx._with_condition_symid_by_decl_cache: dict[(Path, line, name) -> symid]
     """
 
-    _SET_FIELD: Final[str] = "_with_condition_class_symids"
     _DECL_CACHE_FIELD: Final[str] = "_with_condition_symid_by_decl_cache"
     _WITH_COND_NAME: Final[str] = "with_condition"
-    _CD_NAME: Final[str] = "CompilerDirective"
 
     @classmethod
     def run(cls, ir: PyIRFile, ctx: SymLinkContext) -> PyIRFile:
         if not isinstance(ir, PyIRFile):
-            raise TypeError("CollectWithConditionClassesPass.run expects PyIRFile")
+            raise TypeError(
+                "CollectWithConditionClassesPass.run РѕР¶РёРґР°РµС‚ PyIRFile"
+            )
 
-        s = getattr(ctx, cls._SET_FIELD, None)
-        if not isinstance(s, set):
-            s = set()
-            setattr(ctx, cls._SET_FIELD, s)
+        s = ctx._with_condition_class_symids
 
         if ir.path is None:
             return ir
@@ -61,23 +61,17 @@ class CollectWithConditionClassesPass:
         if not current_module:
             return ir
 
-        symid_by_decl = cls._get_symid_by_decl(ctx)
-        fp = cls._canon_path(ir.path)
+        symid_by_decl = collect_decl_symid_cache(ctx, cache_field=cls._DECL_CACHE_FIELD)
+        fp = canon_path(ir.path)
         if fp is None:
             return ir
 
-        # Collect local symbol ids that are bound to CompilerDirective in THIS FILE
-        cd_local_symids = cls._collect_local_compiler_directive_symids(
+        # Collect only core CompilerDirective bindings visible in this file.
+        cd_local_symids = collect_core_compiler_directive_local_symbol_ids(
             ir=ir,
             ctx=ctx,
             current_module=current_module,
-            file_path=fp,
-            symid_by_decl=symid_by_decl,
         )
-        if not cd_local_symids:
-            # Without any known CompilerDirective binding, we refuse to match anything.
-            return ir
-
         # Scan classes; collect those decorated with *CompilerDirective*.with_condition()
         for n in ir.walk():
             if not isinstance(n, PyIRClassDef):
@@ -85,7 +79,15 @@ class CollectWithConditionClassesPass:
             if n.line is None:
                 continue
 
-            if not cls._has_with_condition(n.decorators, cd_local_symids):
+            if not any(
+                is_attr_on_symbol_ids(
+                    d.exper,
+                    attr=cls._WITH_COND_NAME,
+                    symbol_ids=cd_local_symids,
+                    ctx=ctx,
+                )
+                for d in (n.decorators or [])
+            ):
                 continue
 
             class_symid = symid_by_decl.get((fp, n.line, n.name))
@@ -98,137 +100,15 @@ class CollectWithConditionClassesPass:
             n.decorators = [
                 d
                 for d in n.decorators
-                if not cls._is_with_condition_expr(d.exper, cd_local_symids)
+                if not is_attr_on_symbol_ids(
+                    d.exper,
+                    attr=cls._WITH_COND_NAME,
+                    symbol_ids=cd_local_symids,
+                    ctx=ctx,
+                )
             ]
 
         return ir
-
-    @staticmethod
-    def _canon_path(p: Path | None) -> Path | None:
-        if p is None:
-            return None
-        try:
-            return p.resolve()
-        except Exception:
-            return p
-
-    @classmethod
-    def _get_symid_by_decl(
-        cls, ctx: SymLinkContext
-    ) -> dict[tuple[Path, int, str], int]:
-        cached = getattr(ctx, cls._DECL_CACHE_FIELD, None)
-        if isinstance(cached, dict):
-            return cached
-
-        out: dict[tuple[Path, int, str], int] = {}
-        for sym in ctx.symbols.values():
-            if sym.decl_file is None or sym.decl_line is None:
-                continue
-            p = cls._canon_path(sym.decl_file)
-            if p is None:
-                continue
-            out[(p, sym.decl_line, sym.name)] = sym.id.value
-
-        setattr(ctx, cls._DECL_CACHE_FIELD, out)
-        return out
-
-    @staticmethod
-    def _iter_imported_names(
-        names: Sequence[str | tuple[str, str]] | None,
-    ) -> Iterator[tuple[str, str]]:
-        if not names:
-            return
-        for n in names:
-            if isinstance(n, tuple):
-                yield n[0], n[1]
-            else:
-                yield n, n
-
-    @classmethod
-    def _collect_local_compiler_directive_symids(
-        cls,
-        *,
-        ir: PyIRFile,
-        ctx: SymLinkContext,
-        current_module: str,
-        file_path: Path,
-        symid_by_decl: dict[tuple[Path, int, str], int],
-    ) -> set[int]:
-        """
-        Returns symids of names in this file that refer to CompilerDirective class:
-          - local class def `class CompilerDirective:`
-          - from-import `from X import CompilerDirective as CD`
-          - from-import `from X import CompilerDirective`
-        """
-        out: set[int] = set()
-
-        def local_symbol_id(name: str) -> int | None:
-            sym = ctx.get_exported_symbol(current_module, name)
-            return sym.id.value if sym is not None else None
-
-        for n in ir.walk():
-            if (
-                isinstance(n, PyIRClassDef)
-                and n.name == cls._CD_NAME
-                and n.line is not None
-            ):
-                sid = symid_by_decl.get((file_path, n.line, n.name))
-                if sid is not None:
-                    out.add(int(sid))
-                break
-
-        for n in ir.walk():
-            if not isinstance(n, PyIRImport):
-                continue
-
-            modules = getattr(n, "modules", None) or []
-            mod = modules[0] if isinstance(modules, list) and modules else ""
-            names = getattr(n, "names", None)
-
-            if not n.if_from or not mod or not names:
-                continue
-
-            for orig, bound in cls._iter_imported_names(names):
-                if orig != cls._CD_NAME:
-                    continue
-                sid = local_symbol_id(bound)
-                if sid is not None:
-                    out.add(int(sid))
-
-        return out
-
-    @classmethod
-    def _has_with_condition(
-        cls,
-        decorators: list[PyIRDecorator],
-        cd_local_symids: set[int],
-    ) -> bool:
-        for d in decorators or []:
-            if cls._is_with_condition_expr(d.exper, cd_local_symids):
-                return True
-        return False
-
-    @classmethod
-    def _is_with_condition_expr(
-        cls,
-        expr: PyIRNode,
-        cd_local_symids: set[int],
-    ) -> bool:
-        # peel calls: @X() / @X(...)
-        while isinstance(expr, PyIRCall):
-            expr = expr.func
-
-        # must be: <CompilerDirectiveBinding>.with_condition
-        if not isinstance(expr, PyIRAttribute):
-            return False
-        if expr.attr != cls._WITH_COND_NAME:
-            return False
-
-        base = expr.value
-        if isinstance(base, PyIRSymLink):
-            return int(base.symbol_id) in cd_local_symids
-
-        return False
 
 
 class RewriteWithConditionBlocksPass:
@@ -258,26 +138,27 @@ class RewriteWithConditionBlocksPass:
                 body
     """
 
-    _SET_FIELD: Final[str] = "_with_condition_class_symids"
-
     @classmethod
     def run(cls, ir: PyIRFile, ctx: SymLinkContext) -> PyIRFile:
         if not isinstance(ir, PyIRFile):
-            raise TypeError("RewriteWithConditionBlocksPass.run expects PyIRFile")
+            raise TypeError(
+                "RewriteWithConditionBlocksPass.run РѕР¶РёРґР°РµС‚ PyIRFile"
+            )
 
-        s = getattr(ctx, cls._SET_FIELD, None)
-        if not isinstance(s, set) or not s:
+        s = ctx._with_condition_class_symids
+        if not s:
             return ir
 
         def rw_block(body: list[PyIRNode]) -> list[PyIRNode]:
-            out: list[PyIRNode] = []
-            for st in body:
-                out.extend(rw_stmt(st))
-            return out
+            return rewrite_stmt_block(body, rw_stmt)
 
         def rw_stmt(st: PyIRNode) -> list[PyIRNode]:
             if isinstance(st, PyIRFunctionDef):
-                st.decorators = [rw_expr(d) for d in st.decorators]  # type: ignore
+                st.decorators = [
+                    d
+                    for d in (rw_expr(d) for d in st.decorators)
+                    if isinstance(d, PyIRDecorator)
+                ]
                 st.body = rw_block(st.body)
                 return [st]
 
@@ -286,7 +167,11 @@ class RewriteWithConditionBlocksPass:
                 return [st]
 
             if isinstance(st, PyIRClassDef):
-                st.decorators = [rw_expr(d) for d in st.decorators]  # type: ignore
+                st.decorators = [
+                    d
+                    for d in (rw_expr(d) for d in st.decorators)
+                    if isinstance(d, PyIRDecorator)
+                ]
                 st.bases = [rw_expr(b) for b in st.bases]
                 st.body = rw_block(st.body)
                 return [st]
@@ -330,28 +215,7 @@ class RewriteWithConditionBlocksPass:
                 node.value = rw_expr(node.value)
                 return node
 
-            if is_dataclass(node):
-                for f in fields(node):
-                    v = getattr(node, f.name)
-                    if isinstance(v, PyIRNode):
-                        setattr(node, f.name, rw_expr(v))
-
-                    elif isinstance(v, list):
-                        setattr(
-                            node,
-                            f.name,
-                            [rw_expr(x) if isinstance(x, PyIRNode) else x for x in v],
-                        )
-
-                    elif isinstance(v, dict):
-                        setattr(
-                            node,
-                            f.name,
-                            {
-                                k: (rw_expr(x) if isinstance(x, PyIRNode) else x)
-                                for k, x in v.items()
-                            },
-                        )
+            rewrite_dataclass_children(node, rw_expr)
 
             return node
 
@@ -366,28 +230,7 @@ class RewriteWithConditionBlocksPass:
                 node.args_kw = {k: rw_expr(v) for k, v in node.args_kw.items()}
                 return node
 
-            if is_dataclass(node):
-                for f in fields(node):
-                    v = getattr(node, f.name)
-                    if isinstance(v, PyIRNode):
-                        setattr(node, f.name, rw_expr(v))
-
-                    elif isinstance(v, list):
-                        setattr(
-                            node,
-                            f.name,
-                            [rw_expr(x) if isinstance(x, PyIRNode) else x for x in v],
-                        )
-
-                    elif isinstance(v, dict):
-                        setattr(
-                            node,
-                            f.name,
-                            {
-                                k: (rw_expr(x) if isinstance(x, PyIRNode) else x)
-                                for k, x in v.items()
-                            },
-                        )
+            rewrite_dataclass_children(node, rw_expr)
             return node
 
         ir.body = rw_block(ir.body)

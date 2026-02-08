@@ -12,14 +12,16 @@ class BranchBuilder:
     @staticmethod
     def build(node: PyLogicNode) -> Sequence[PyIRNode]:
         if node.kind is not PyLogicKind.BRANCH:
-            raise ValueError("BranchBuilder expects PyLogicKind.BRANCH")
+            raise ValueError("BranchBuilder ожидает PyLogicKind.BRANCH")
 
         if not node.children:
-            raise SyntaxError("Empty branch node")
+            raise SyntaxError("Пустой узел ветвления")
 
         parts = node.children
         if any(p.kind is not PyLogicKind.BRANCH_PART for p in parts):
-            raise SyntaxError("Invalid BRANCH structure: expected BRANCH_PART children")
+            raise SyntaxError(
+                "Некорректная структура BRANCH: ожидались дочерние BRANCH_PART"
+            )
 
         built = BranchBuilder._build_chain(parts)
         return [built]
@@ -29,7 +31,7 @@ class BranchBuilder:
         first_hdr = BranchBuilder._get_header(parts[0])
         kw = BranchBuilder._header_keyword(first_hdr)
         if kw != "if":
-            raise SyntaxError("Branch chain must start with 'if'")
+            raise SyntaxError("Цепочка ветвления должна начинаться с 'if'")
 
         test = BranchBuilder._parse_if_test(first_hdr)
         body = build_block(parts[0].children)
@@ -73,7 +75,7 @@ class BranchBuilder:
                 cur.orelse = build_block(p.children)
                 continue
 
-            raise SyntaxError(f"Unexpected branch header: {kw!r}")
+            raise SyntaxError(f"Неожиданный заголовок ветвления: {kw!r}")
 
         return root
 
@@ -81,7 +83,7 @@ class BranchBuilder:
     @staticmethod
     def _get_header(part: PyLogicNode):
         if not part.origins:
-            raise ValueError("BRANCH_PART has no origins")
+            raise ValueError("У BRANCH_PART отсутствуют origins")
 
         return part.origins[0]
 
@@ -89,7 +91,7 @@ class BranchBuilder:
     def _first_token(raw_header) -> tokenize.TokenInfo:
         toks = [t for t in raw_header.tokens if isinstance(t, tokenize.TokenInfo)]
         if not toks:
-            raise SyntaxError("Empty branch header tokens")
+            raise SyntaxError("Пустые токены заголовка ветвления")
 
         return toks[0]
 
@@ -97,7 +99,7 @@ class BranchBuilder:
     def _header_keyword(raw_header) -> str:
         tok0 = BranchBuilder._first_token(raw_header)
         if tok0.type != tokenize.NAME:
-            raise SyntaxError("Invalid branch header")
+            raise SyntaxError("Некорректный заголовок ветвления")
 
         return tok0.string
 
@@ -116,23 +118,23 @@ class BranchBuilder:
             )
         ]
         if not toks:
-            raise SyntaxError("Invalid branch header")
+            raise SyntaxError("Некорректный заголовок ветвления")
 
         kw = toks[0].string
         if kw not in ("if", "elif"):
-            raise SyntaxError(f"Expected if/elif, got {kw!r}")
+            raise SyntaxError(f"Ожидалось if/elif, получено {kw!r}")
 
         if toks[-1].type != tokenize.OP or toks[-1].string != ":":
-            raise SyntaxError("Branch header must end with ':'")
+            raise SyntaxError("Заголовок ветвления должен заканчиваться ':'")
 
         expr_tokens = toks[1:-1]
         if not expr_tokens:
-            raise SyntaxError("Missing condition in if/elif")
+            raise SyntaxError("Отсутствует условие в if/elif")
 
         stream = TokenStream(expr_tokens)
         test = StatementBuilder._parse_expression(stream)
         if not stream.eof():
-            raise SyntaxError("Invalid condition expression in if/elif")
+            raise SyntaxError("Некорректное выражение условия в if/elif")
 
         return test
 

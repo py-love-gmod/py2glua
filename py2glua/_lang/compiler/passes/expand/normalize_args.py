@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 from typing import Dict, List, Tuple
 
 from ....._cli import CompilerExit
@@ -8,10 +9,14 @@ from ....py.ir_dataclass import (
     PyIRAssign,
     PyIRCall,
     PyIRClassDef,
+    PyIRConstant,
+    PyIRDict,
+    PyIRDictItem,
     PyIRFile,
     PyIRFor,
     PyIRFunctionDef,
     PyIRIf,
+    PyIRList,
     PyIRNode,
     PyIRReturn,
     PyIRVarUse,
@@ -36,12 +41,15 @@ def _mk_assign(name: str, value: PyIRNode, ref: PyIRNode) -> PyIRAssign:
 
 class CollectLocalSignaturesPass:
     """
-    Собирает сигнатуры top-level функций текущего файла в ctx.fn_sigs.
+    Собирает сигнатуры top-level функций текущего файла в `ctx.fn_sigs`.
     Последняя дефиниция побеждает (как в Python).
     """
 
     @staticmethod
     def run(ir: PyIRFile, ctx: ExpandContext) -> None:
+        file_key = CollectLocalSignaturesPass._file_key(ir.path)
+        file_sigs: Dict[str, FnSig] = {}
+
         for st in ir.body:
             if not isinstance(st, PyIRFunctionDef):
                 continue
@@ -53,19 +61,37 @@ class CollectLocalSignaturesPass:
                 if default is not None:
                     defaults[name] = default
 
-            ctx.fn_sigs[st.name] = FnSig(params=params, defaults=defaults)
+            file_sigs[st.name] = FnSig(
+                params=params,
+                defaults=defaults,
+                vararg_name=st.vararg,
+                kwarg_name=st.kwarg,
+            )
+
+        ctx.fn_sigs[file_key] = file_sigs
+
+    @staticmethod
+    def _file_key(path: Path | None) -> str:
+        if path is None:
+            return "<none>"
+        try:
+            return str(path.resolve())
+        except Exception:
+            return str(path)
 
 
 class NormalizeCallArgumentsPass:
     """
-    - Hoist nested PyIRCall used as an argument of another PyIRCall into temp vars.
-    - Convert keyword args -> positional args for calls to locally-known functions
-      (ctx.fn_sigs), using defaults when needed.
+    - Поднимает вложенные `PyIRCall`, используемые как аргументы вызова, во временные переменные.
+    - Нормализует вызовы локально известных функций:
+      positional + keyword -> только positional, с подстановкой default-значений.
+    - Для `*args` упаковывает лишние positional в `PyIRList`.
+    - Для `**kwargs` упаковывает лишние keyword в `PyIRDict`.
     """
 
     @staticmethod
     def run(ir: PyIRFile, ctx: ExpandContext) -> PyIRFile:
-        sigs = ctx.fn_sigs
+        sigs = ctx.fn_sigs.get(CollectLocalSignaturesPass._file_key(ir.path), {})
         ir.body = NormalizeCallArgumentsPass._norm_stmt_list(ir, ir.body, ctx, sigs)
         return ir
 
@@ -117,16 +143,16 @@ class NormalizeCallArgumentsPass:
             return pro + [st]
 
         if isinstance(st, PyIRWith):
-            pro: List[PyIRNode] = []
+            pro_with: List[PyIRNode] = []
             for item in st.items:
                 p, e = NormalizeCallArgumentsPass._norm_expr(
                     ir, item.context_expr, ctx, sigs, in_call_arg=False
                 )
-                pro.extend(p)
+                pro_with.extend(p)
                 item.context_expr = e
 
             st.body = NormalizeCallArgumentsPass._norm_stmt_list(ir, st.body, ctx, sigs)
-            return pro + [st]
+            return pro_with + [st]
 
         if isinstance(st, PyIRFunctionDef):
             st.body = NormalizeCallArgumentsPass._norm_stmt_list(ir, st.body, ctx, sigs)
@@ -144,11 +170,14 @@ class NormalizeCallArgumentsPass:
             return pro + [st]
 
         if isinstance(st, PyIRReturn):
-            pro, v = NormalizeCallArgumentsPass._norm_expr(
+            if st.value is None:
+                return [st]
+
+            pro_ret, value = NormalizeCallArgumentsPass._norm_expr(
                 ir, st.value, ctx, sigs, in_call_arg=False
             )
-            st.value = v
-            return pro + [st]
+            st.value = value
+            return pro_ret + [st]
 
         if isinstance(st, PyIRCall):
             pro, c = NormalizeCallArgumentsPass._norm_expr(
@@ -230,46 +259,87 @@ class NormalizeCallArgumentsPass:
         provided: Dict[str, PyIRNode] = {}
 
         extra_pos: List[PyIRNode] = []
-        for i, a in enumerate(call.args_p):
+        for i, arg in enumerate(call.args_p):
             if i < len(params):
-                provided[params[i]] = a
+                provided[params[i]] = arg
             else:
-                extra_pos.append(a)
+                extra_pos.append(arg)
 
-        for k, v in call.args_kw.items():
-            if k not in params:
-                CompilerExit.user_error_node(
-                    f"Неизвестный keyword-аргумент '{k}' для вызова '{fn_name}'",
-                    ir.path,
-                    call,
-                )
-
-            if k in provided:
-                CompilerExit.user_error_node(
-                    f"Аргумент '{k}' для '{fn_name}' передан дважды (positional + keyword)",
-                    ir.path,
-                    call,
-                )
-
-            provided[k] = v
-
-        new_args_p: List[PyIRNode] = []
-        for p in params:
-            if p in provided:
-                new_args_p.append(provided[p])
+        extra_kw: Dict[str, PyIRNode] = {}
+        for key, value in call.args_kw.items():
+            if key in params:
+                if key in provided:
+                    CompilerExit.user_error_node(
+                        f"Аргумент '{key}' для '{fn_name}' передан дважды (позиционно и по имени)",
+                        ir.path,
+                        call,
+                    )
+                provided[key] = value
                 continue
 
-            d = defaults.get(p)
-            if d is None:
+            extra_kw[key] = value
+
+        if extra_pos and sig.vararg_name is None:
+            CompilerExit.user_error_node(
+                f"Слишком много позиционных аргументов при вызове '{fn_name}'",
+                ir.path,
+                call,
+            )
+
+        if extra_kw and sig.kwarg_name is None:
+            bad_names = ", ".join(sorted(extra_kw.keys()))
+            CompilerExit.user_error_node(
+                f"Неизвестные keyword-аргументы для вызова '{fn_name}': {bad_names}",
+                ir.path,
+                call,
+            )
+
+        new_args_p: List[PyIRNode] = []
+        for param_name in params:
+            if param_name in provided:
+                new_args_p.append(provided[param_name])
+                continue
+
+            default_value = defaults.get(param_name)
+            if default_value is None:
                 CompilerExit.user_error_node(
-                    f"Не хватает обязательного аргумента '{p}' для вызова '{fn_name}'",
+                    f"Не хватает обязательного аргумента '{param_name}' для вызова '{fn_name}'",
                     ir.path,
                     call,
                 )
 
-            new_args_p.append(deepcopy(d))
+            new_args_p.append(deepcopy(default_value))
 
-        new_args_p.extend(extra_pos)
+        if sig.vararg_name is not None:
+            new_args_p.append(
+                PyIRList(
+                    line=call.line,
+                    offset=call.offset,
+                    elements=extra_pos,
+                )
+            )
+
+        if sig.kwarg_name is not None:
+            kw_items: List[PyIRDictItem] = [
+                PyIRDictItem(
+                    line=value.line,
+                    offset=value.offset,
+                    key=PyIRConstant(
+                        line=value.line,
+                        offset=value.offset,
+                        value=key,
+                    ),
+                    value=value,
+                )
+                for key, value in extra_kw.items()
+            ]
+            new_args_p.append(
+                PyIRDict(
+                    line=call.line,
+                    offset=call.offset,
+                    items=kw_items,
+                )
+            )
 
         return PyIRCall(
             line=call.line,

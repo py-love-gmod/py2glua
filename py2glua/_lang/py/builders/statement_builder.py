@@ -3,7 +3,7 @@ from __future__ import annotations
 import token as token_mod
 import tokenize
 from io import StringIO
-from typing import List, Sequence
+from typing import List, NoReturn, Sequence
 
 from ...etc import TokenStream
 from ...parse import PyLogicNode
@@ -21,8 +21,10 @@ from ..ir_dataclass import (
     PyIRDict,
     PyIRDictItem,
     PyIRFString,
+    PyIRIf,
     PyIRList,
     PyIRNode,
+    PyIRReturn,
     PyIRSet,
     PyIRSubscript,
     PyIRTuple,
@@ -94,7 +96,7 @@ class StatementBuilder:
         return line, col
 
     @staticmethod
-    def _raise(msg: str, tok: tokenize.TokenInfo | None) -> None:
+    def _raise(msg: str, tok: tokenize.TokenInfo | None) -> NoReturn:
         pos = StatementBuilder._tok_pos(tok)
         if pos is None:
             raise SyntaxError(msg)
@@ -305,7 +307,7 @@ class StatementBuilder:
     @staticmethod
     def build(node: PyLogicNode) -> Sequence[PyIRNode]:
         if not node.origins:
-            raise ValueError("PyLogicNode.STATEMENT has no origins")
+            raise ValueError("У PyLogicNode.STATEMENT отсутствуют origins")
 
         raw = node.origins[0]
         tokens: List[tokenize.TokenInfo] = [
@@ -378,7 +380,8 @@ class StatementBuilder:
                 StatementBuilder._raise_at_start(
                     "Внутренняя ошибка: отсутствует оператор augassign", tokens
                 )
-            return [StatementBuilder._build_augassign(tokens, idx, op_str)]  # pyright: ignore[reportArgumentType]
+                raise AssertionError("unreachable")
+            return [StatementBuilder._build_augassign(tokens, idx, op_str)]
 
         if assign_info and assign_info[0] == "assign":
             _, eq_indices = assign_info
@@ -448,6 +451,7 @@ class StatementBuilder:
                 f"Неизвестный оператор расширенного присваивания: {op_str!r}",
                 tokens[op_index],
             )
+            raise AssertionError("unreachable")
 
         line = left_toks[0].start[0]
         col = left_toks[0].start[1]
@@ -456,7 +460,7 @@ class StatementBuilder:
             line=line,
             offset=col,
             target=target,
-            op=op_enum,  # pyright: ignore[reportArgumentType]
+            op=op_enum,
             value=value,
         )
 
@@ -678,78 +682,195 @@ class StatementBuilder:
 
     @staticmethod
     def _parse_compare(stream: TokenStream) -> PyIRNode:
-        node = StatementBuilder._parse_bit_or(stream)
-        used_comparison = False
+        left = StatementBuilder._parse_bit_or(stream)
+        compare_ops: list[PyBinOPType] = []
+        compare_values: list[PyIRNode] = []
 
         while True:
-            tok = stream.peek()
-            if tok is None:
-                break
-
-            op_enum: PyBinOPType | None = None
-
-            if tok.type == tokenize.OP and tok.string in {
-                "==",
-                "!=",
-                "<",
-                ">",
-                "<=",
-                ">=",
-            }:
-                op_tok = stream.advance()
-                if op_tok is None:
-                    StatementBuilder._raise("Неожиданный конец ввода в сравнении", tok)
-
-                op_enum = StatementBuilder._map_compare_op(op_tok.string)  # pyright: ignore[reportOptionalMemberAccess]
-
-            elif tok.type == tokenize.NAME:
-                if tok.string == "in":
-                    stream.advance()
-                    op_enum = PyBinOPType.IN
-
-                elif tok.string == "is":
-                    stream.advance()
-                    nxt = stream.peek()
-                    if nxt and nxt.type == tokenize.NAME and nxt.string == "not":
-                        stream.advance()
-                        op_enum = PyBinOPType.IS_NOT
-
-                    else:
-                        op_enum = PyBinOPType.IS
-
-                elif tok.string == "not":
-                    start_idx = stream.index
-                    stream.advance()
-                    nxt = stream.peek()
-                    if nxt and nxt.type == tokenize.NAME and nxt.string == "in":
-                        stream.advance()
-                        op_enum = PyBinOPType.NOT_IN
-
-                    else:
-                        stream.index = start_idx
-                        op_enum = None
-
+            op_enum = StatementBuilder._parse_compare_op(stream)
             if op_enum is None:
                 break
 
-            if used_comparison:
-                StatementBuilder._raise(  # TODO:
-                    "Цепочные сравнения (a < b < c) не поддерживаются в py2glua",
-                    tok,
-                )
-
-            used_comparison = True
-
             right = StatementBuilder._parse_bit_or(stream)
-            node = PyIRBinOP(
-                line=node.line,
-                offset=node.offset,
-                op=op_enum,
-                left=node,
-                right=right,
+            compare_ops.append(op_enum)
+            compare_values.append(right)
+
+        if not compare_ops:
+            return left
+
+        if len(compare_ops) == 1:
+            return PyIRBinOP(
+                line=left.line,
+                offset=left.offset,
+                op=compare_ops[0],
+                left=left,
+                right=compare_values[0],
             )
 
-        return node
+        return StatementBuilder._build_chained_compare(left, compare_ops, compare_values)
+
+    @staticmethod
+    def _parse_compare_op(stream: TokenStream) -> PyBinOPType | None:
+        tok = stream.peek()
+        if tok is None:
+            return None
+
+        if tok.type == tokenize.OP and tok.string in {"==", "!=", "<", ">", "<=", ">="}:
+            op_tok = stream.advance()
+            if op_tok is None:
+                StatementBuilder._raise("Неожиданный конец ввода в сравнении", tok)
+            return StatementBuilder._map_compare_op(op_tok.string)
+
+        if tok.type != tokenize.NAME:
+            return None
+
+        if tok.string == "in":
+            stream.advance()
+            return PyBinOPType.IN
+
+        if tok.string == "is":
+            stream.advance()
+            nxt = stream.peek()
+            if nxt and nxt.type == tokenize.NAME and nxt.string == "not":
+                stream.advance()
+                return PyBinOPType.IS_NOT
+            return PyBinOPType.IS
+
+        if tok.string == "not":
+            start_idx = stream.index
+            stream.advance()
+            nxt = stream.peek()
+            if nxt and nxt.type == tokenize.NAME and nxt.string == "in":
+                stream.advance()
+                return PyBinOPType.NOT_IN
+            stream.index = start_idx
+
+        return None
+
+    @staticmethod
+    def _build_chained_compare(
+        first: PyIRNode,
+        ops: list[PyBinOPType],
+        values: list[PyIRNode],
+    ) -> PyIRNode:
+        """
+        Python-like semantics for chained comparisons:
+        `a < b < c` == `(a < b) and (b < c)`, но каждый операнд вычисляется ровно один раз.
+        """
+        all_values = [first, *values]
+        temp_names = [f"__cmp_tmp_{i}" for i in range(len(all_values))]
+
+        body: list[PyIRNode] = [
+            PyIRAssign(
+                line=all_values[0].line,
+                offset=all_values[0].offset,
+                targets=[
+                    PyIRVarUse(
+                        line=all_values[0].line,
+                        offset=all_values[0].offset,
+                        name=temp_names[0],
+                    )
+                ],
+                value=all_values[0],
+            ),
+            PyIRAssign(
+                line=all_values[1].line,
+                offset=all_values[1].offset,
+                targets=[
+                    PyIRVarUse(
+                        line=all_values[1].line,
+                        offset=all_values[1].offset,
+                        name=temp_names[1],
+                    )
+                ],
+                value=all_values[1],
+            ),
+        ]
+
+        for i, op in enumerate(ops):
+            left_name = temp_names[i]
+            right_name = temp_names[i + 1]
+            left_ref = PyIRVarUse(line=first.line, offset=first.offset, name=left_name)
+            right_ref = PyIRVarUse(
+                line=first.line,
+                offset=first.offset,
+                name=right_name,
+            )
+            compare_expr = PyIRBinOP(
+                line=first.line,
+                offset=first.offset,
+                op=op,
+                left=left_ref,
+                right=right_ref,
+            )
+
+            body.append(
+                PyIRIf(
+                    line=first.line,
+                    offset=first.offset,
+                    test=PyIRUnaryOP(
+                        line=first.line,
+                        offset=first.offset,
+                        op=PyUnaryOPType.NOT,
+                        value=compare_expr,
+                    ),
+                    body=[
+                        PyIRReturn(
+                            line=first.line,
+                            offset=first.offset,
+                            value=PyIRConstant(
+                                line=first.line,
+                                offset=first.offset,
+                                value=False,
+                            ),
+                        )
+                    ],
+                    orelse=[],
+                )
+            )
+
+            next_idx = i + 2
+            if next_idx < len(all_values):
+                next_value = all_values[next_idx]
+                body.append(
+                    PyIRAssign(
+                        line=next_value.line,
+                        offset=next_value.offset,
+                        targets=[
+                            PyIRVarUse(
+                                line=next_value.line,
+                                offset=next_value.offset,
+                                name=temp_names[next_idx],
+                            )
+                        ],
+                        value=next_value,
+                    )
+                )
+
+        body.append(
+            PyIRReturn(
+                line=first.line,
+                offset=first.offset,
+                value=PyIRConstant(line=first.line, offset=first.offset, value=True),
+            )
+        )
+
+        # Избегаем import-cycle: py.builder -> compiler package -> py.builder.
+        from ...compiler.compiler_ir import PyIRFunctionExpr
+
+        fn_expr = PyIRFunctionExpr(
+            line=first.line,
+            offset=first.offset,
+            signature={},
+            body=body,
+        )
+        return PyIRCall(
+            line=first.line,
+            offset=first.offset,
+            func=fn_expr,
+            args_p=[],
+            args_kw={},
+        )
 
     @staticmethod
     def _map_compare_op(op: str) -> PyBinOPType:
@@ -832,12 +953,12 @@ class StatementBuilder:
             if tok and tok.type == tokenize.OP and tok.string in {"<<", ">>"}:
                 op_tok = stream.advance()
                 if op_tok is None:
-                    StatementBuilder._raise("Unexpected EOF in shift operator", tok)
+                    StatementBuilder._raise("Неожиданный конец ввода в операторе сдвига", tok)
 
                 right = StatementBuilder._parse_add_sub(stream)
                 op = (
                     PyBinOPType.BIT_LSHIFT
-                    if op_tok.string == "<<"  # pyright: ignore[reportOptionalMemberAccess]
+                    if op_tok.string == "<<"
                     else PyBinOPType.BIT_RSHIFT
                 )
 
@@ -860,10 +981,10 @@ class StatementBuilder:
             if tok and tok.type == tokenize.OP and tok.string in {"+", "-"}:
                 op_tok = stream.advance()
                 if op_tok is None:
-                    StatementBuilder._raise("Unexpected EOF in +/- operator", tok)
+                    StatementBuilder._raise("Неожиданный конец ввода в операторе +/-", tok)
 
                 right = StatementBuilder._parse_mul_div(stream)
-                op = PyBinOPType.ADD if op_tok.string == "+" else PyBinOPType.SUB  # pyright: ignore[reportOptionalMemberAccess]
+                op = PyBinOPType.ADD if op_tok.string == "+" else PyBinOPType.SUB
                 node = PyIRBinOP(
                     line=node.line,
                     offset=node.offset,
@@ -883,15 +1004,15 @@ class StatementBuilder:
             if tok and tok.type == tokenize.OP and tok.string in {"*", "/", "//", "%"}:
                 op_tok = stream.advance()
                 if op_tok is None:
-                    StatementBuilder._raise("Unexpected EOF in */% operator", tok)
+                    StatementBuilder._raise("Неожиданный конец ввода в операторе */%", tok)
 
                 right = StatementBuilder._parse_power(stream)
 
-                if op_tok.string == "*":  # pyright: ignore[reportOptionalMemberAccess]
+                if op_tok.string == "*":
                     op = PyBinOPType.MUL
-                elif op_tok.string == "/":  # pyright: ignore[reportOptionalMemberAccess]
+                elif op_tok.string == "/":
                     op = PyBinOPType.DIV
-                elif op_tok.string == "//":  # pyright: ignore[reportOptionalMemberAccess]
+                elif op_tok.string == "//":
                     op = PyBinOPType.FLOORDIV
                 else:
                     op = PyBinOPType.MOD
@@ -929,21 +1050,21 @@ class StatementBuilder:
     def _parse_unary(stream: TokenStream) -> PyIRNode:
         tok = stream.peek()
         if tok is None:
-            StatementBuilder._raise("Unexpected EOF in unary expression", tok)
+            StatementBuilder._raise("Неожиданный конец ввода в унарном выражении", tok)
 
         assert tok is not None
 
         if tok.type == tokenize.OP and tok.string in {"+", "-", "~"}:
             op_tok = stream.advance()
             if op_tok is None:
-                StatementBuilder._raise("Unexpected EOF after unary operator", tok)
+                StatementBuilder._raise("Неожиданный конец ввода после унарного оператора", tok)
 
             operand = StatementBuilder._parse_unary(stream)
-            line, col = op_tok.start  # pyright: ignore[reportOptionalMemberAccess]
+            line, col = op_tok.start
 
-            if op_tok.string == "+":  # pyright: ignore[reportOptionalMemberAccess]
+            if op_tok.string == "+":
                 op = PyUnaryOPType.PLUS
-            elif op_tok.string == "-":  # pyright: ignore[reportOptionalMemberAccess]
+            elif op_tok.string == "-":
                 op = PyUnaryOPType.MINUS
             else:
                 op = PyUnaryOPType.BIT_INV
@@ -953,10 +1074,10 @@ class StatementBuilder:
         if tok.type == tokenize.NAME and tok.string == "not":
             op_tok = stream.advance()
             if op_tok is None:
-                StatementBuilder._raise("Unexpected EOF after 'not'", tok)
+                StatementBuilder._raise("Неожиданный конец ввода после 'not'", tok)
 
             operand = StatementBuilder._parse_unary(stream)
-            line, col = op_tok.start  # pyright: ignore[reportOptionalMemberAccess]
+            line, col = op_tok.start
             return PyIRUnaryOP(
                 line=line, offset=col, op=PyUnaryOPType.NOT, value=operand
             )
@@ -977,14 +1098,14 @@ class StatementBuilder:
                 name_tok = stream.advance()
                 if name_tok is None or name_tok.type != tokenize.NAME:
                     StatementBuilder._raise(
-                        "Expected attribute name after '.'", name_tok or dot_tok
+                        "Ожидалось имя атрибута после '.'", name_tok or dot_tok
                     )
 
                 node = PyIRAttribute(
                     line=node.line,
                     offset=node.offset,
                     value=node,
-                    attr=name_tok.string,  # pyright: ignore[reportOptionalMemberAccess]
+                    attr=name_tok.string,
                 )
                 continue
 
@@ -1001,10 +1122,10 @@ class StatementBuilder:
         return node
 
     @staticmethod
-    def _parse_atom(stream: TokenStream) -> PyIRNode:  # type: ignore
+    def _parse_atom(stream: TokenStream) -> PyIRNode:
         tok = stream.peek()
         if tok is None:
-            StatementBuilder._raise("Unexpected EOF in expression", tok)
+            StatementBuilder._raise("Неожиданный конец ввода в выражении", tok)
 
         assert tok is not None
 
@@ -1095,7 +1216,7 @@ class StatementBuilder:
         if tok.type == tokenize.OP and tok.string == "{":
             return StatementBuilder._parse_dict_or_set_literal(stream)
 
-        StatementBuilder._raise(f"Unexpected token in expression: {tok!r}", tok)
+        StatementBuilder._raise(f"Неожиданный токен в выражении: {tok!r}", tok)
 
     @staticmethod
     def _parse_call(stream: TokenStream, func_node: PyIRNode) -> PyIRCall:
@@ -1108,7 +1229,7 @@ class StatementBuilder:
         tok = stream.peek()
         if tok and tok.type == tokenize.OP and tok.string in ("*", "**"):
             StatementBuilder._raise(
-                "Argument unpacking (*args / **kwargs) is not supported in py2glua",
+                "Распаковка аргументов (*args / **kwargs) не поддерживается в py2glua",
                 tok,
             )
 
@@ -1117,7 +1238,7 @@ class StatementBuilder:
                 t = stream.peek()
                 if t and t.type == tokenize.OP and t.string in ("*", "**"):
                     StatementBuilder._raise(
-                        "Argument unpacking (*args / **kwargs) is not supported in py2glua",
+                        "Распаковка аргументов (*args / **kwargs) не поддерживается в py2glua",
                         t,
                     )
 
@@ -1253,7 +1374,7 @@ class StatementBuilder:
                     return PyIRDict(line=line, offset=col, items=items)
 
                 StatementBuilder._raise(
-                    f"Expected ',' or '}}' in dict, got {tok!r}", tok
+                    f"Ожидалось ',' или '}}' в словаре, получено: {tok!r}", tok
                 )
 
         elements: list[PyIRNode] = [first]
@@ -1276,14 +1397,17 @@ class StatementBuilder:
                 stream.advance()
                 return PyIRSet(line=line, offset=col, elements=elements)
 
-            StatementBuilder._raise(f"Expected ',' or '}}' in set, got {tok!r}", tok)
+            StatementBuilder._raise(
+                f"Ожидалось ',' или '}}' в множестве, получено: {tok!r}",
+                tok,
+            )
 
     @staticmethod
     def _parse_fstring(stream: TokenStream) -> PyIRFString:
         fs_start, fs_mid, fs_end = _fstring_token_types()
         tok = stream.peek()
         if tok is None:
-            StatementBuilder._raise("Unexpected EOF in f-string", tok)
+            StatementBuilder._raise("Неожиданный конец ввода в f-строке", tok)
 
         assert tok is not None
 
@@ -1294,7 +1418,10 @@ class StatementBuilder:
 
             s = start_tok.string
             if not s or s[-1] not in ("'", '"') or "f" not in s.lower():
-                StatementBuilder._raise("Invalid f-string start token", start_tok)
+                StatementBuilder._raise(
+                    "Некорректный стартовый токен f-строки",
+                    start_tok,
+                )
 
             parts: list[str | PyIRNode] = []
             buf: list[str] = []
@@ -1307,7 +1434,7 @@ class StatementBuilder:
             while True:
                 t = stream.peek()
                 if t is None:
-                    StatementBuilder._raise("Unexpected EOF in f-string", start_tok)
+                    StatementBuilder._raise("Неожиданный конец ввода в f-строке", start_tok)
 
                 if fs_end is not None and t.type == fs_end:
                     stream.advance()
@@ -1334,7 +1461,8 @@ class StatementBuilder:
                         nt = stream.peek()
                         if nt is None:
                             StatementBuilder._raise(
-                                "Unclosed '{' in f-string", start_tok
+                                "Не найдена закрывающая '}' в f-строке",
+                                start_tok,
                             )
 
                         if nt.type == tokenize.OP:
@@ -1365,22 +1493,29 @@ class StatementBuilder:
                                 and depth_brace == 0
                             ):
                                 StatementBuilder._raise(
-                                    "Format specifiers and conversions in f-strings are not supported",
+                                    "Формат-спекификаторы и конвертации в f-строках не поддерживаются",
                                     nt,
                                 )
 
-                        expr_tokens.append(stream.advance())  # type: ignore[arg-type]
+                        next_tok = stream.advance()
+                        if next_tok is None:
+                            StatementBuilder._raise(
+                                "Неожиданный конец ввода внутри выражения f-строки",
+                                nt,
+                            )
+                        expr_tokens.append(next_tok)
 
                     if not expr_tokens:
                         StatementBuilder._raise(
-                            "Empty expression in f-string braces", start_tok
+                            "Пустое выражение внутри фигурных скобок f-строки",
+                            start_tok,
                         )
 
                     ts = TokenStream(expr_tokens)
                     expr = StatementBuilder._parse_expression(ts, stop_ops=set())
                     if not ts.eof():
                         StatementBuilder._raise(
-                            "Invalid expression inside f-string braces",
+                            "Некорректное выражение внутри фигурных скобок f-строки",
                             ts.peek(),
                         )
 
@@ -1388,7 +1523,10 @@ class StatementBuilder:
                     stream.expect_op("}")
                     continue
 
-                StatementBuilder._raise(f"Unexpected token inside f-string: {t!r}", t)
+                StatementBuilder._raise(
+                    f"Неожиданный токен внутри f-строки: {t!r}",
+                    t,
+                )
 
             flush()
 
@@ -1401,28 +1539,28 @@ class StatementBuilder:
         # --- Legacy tokenizer path: single STRING token like f"..." ---
         tok2 = stream.advance()
         if tok2 is None:
-            StatementBuilder._raise("Unexpected EOF in f-string", tok2)
+            StatementBuilder._raise("Неожиданный конец ввода в f-строке", tok2)
 
         raw = tok2.string
         if not raw or "f" not in raw[:2].lower():
-            StatementBuilder._raise("Invalid f-string token", tok2)
+            StatementBuilder._raise("Некорректный токен f-строки", tok2)
 
         # Only simple quotes f"..." / f'...'
         if not raw.startswith(('f"', "f'", 'F"', "F'")):
             StatementBuilder._raise(
-                "Only simple f-strings like f\"...\" or f'...' are supported",
+                "Поддерживаются только простые f-строки вида f\"...\" или f'...'",
                 tok2,
             )
 
         body = raw[2:-1]
 
-        parts: list[str | PyIRNode] = []
-        buf: list[str] = []
+        legacy_parts: list[str | PyIRNode] = []
+        legacy_buf: list[str] = []
 
         def flush_legacy() -> None:
-            if buf:
-                parts.append("".join(buf))
-                buf.clear()
+            if legacy_buf:
+                legacy_parts.append("".join(legacy_buf))
+                legacy_buf.clear()
 
         i = 0
         n = len(body)
@@ -1433,7 +1571,7 @@ class StatementBuilder:
             if c == "{":
                 # escaped "{{"
                 if i + 1 < n and body[i + 1] == "{":
-                    buf.append("{")
+                    legacy_buf.append("{")
                     i += 2
                     continue
 
@@ -1469,47 +1607,54 @@ class StatementBuilder:
                         and depth_brace == 0
                     ):
                         StatementBuilder._raise(
-                            "Format specifiers and conversions in f-strings are not supported",
+                            "Формат-спекификаторы и конвертации в f-строках не поддерживаются",
                             tok2,
                         )
 
                     i += 1
 
                 if i >= n:
-                    StatementBuilder._raise("Unclosed '{' in f-string", tok2)
+                    StatementBuilder._raise(
+                        "Не найдена закрывающая '}' в f-строке",
+                        tok2,
+                    )
 
                 expr_text = body[start:i].strip()
                 if not expr_text:
-                    StatementBuilder._raise("Empty expression in f-string braces", tok2)
+                    StatementBuilder._raise(
+                        "Пустое выражение внутри фигурных скобок f-строки",
+                        tok2,
+                    )
 
                 try:
                     expr_tokens = _tokenize_expr(expr_text)
                 except tokenize.TokenError:
                     StatementBuilder._raise(
-                        "Invalid expression inside f-string braces", tok2
+                        "Некорректное выражение внутри фигурных скобок f-строки",
+                        tok2,
                     )
 
                 ts = TokenStream(expr_tokens)
                 expr = StatementBuilder._parse_expression(ts, stop_ops=set())
                 if not ts.eof():
                     StatementBuilder._raise(
-                        "Invalid expression inside f-string braces",
+                        "Некорректное выражение внутри фигурных скобок f-строки",
                         ts.peek(),
                     )
 
-                parts.append(expr)
+                legacy_parts.append(expr)
                 i += 1  # skip '}'
                 continue
 
             if c == "}":
                 # escaped "}}"
                 if i + 1 < n and body[i + 1] == "}":
-                    buf.append("}")
+                    legacy_buf.append("}")
                     i += 2
                     continue
-                StatementBuilder._raise("Unmatched '}' in f-string", tok2)
+                StatementBuilder._raise("Лишняя закрывающая '}' в f-строке", tok2)
 
-            buf.append(c)
+            legacy_buf.append(c)
             i += 1
 
         flush_legacy()
@@ -1517,5 +1662,6 @@ class StatementBuilder:
         return PyIRFString(
             line=tok2.start[0],
             offset=tok2.start[1],
-            parts=parts,
+            parts=legacy_parts,
         )
+

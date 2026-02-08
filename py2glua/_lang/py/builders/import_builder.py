@@ -10,7 +10,7 @@ class ImportBuilder:
     @staticmethod
     def build(node: PyLogicNode) -> Sequence[PyIRNode]:
         if not node.origins:
-            raise ValueError("PyLogicNode.IMPORT has no origins")
+            raise ValueError("У PyLogicNode.IMPORT отсутствуют origins")
 
         raw = node.origins[0]
         tokens = [
@@ -35,7 +35,7 @@ class ImportBuilder:
         first = stream.advance()
         assert first is not None  # По факту должно быть анричебл
         if first.type != tokenize.NAME:
-            raise SyntaxError("Invalid import statement")
+            raise SyntaxError("Некорректный оператор import")
 
         if first.string == "import":
             return ImportBuilder._build_import(stream, line, col)
@@ -43,7 +43,7 @@ class ImportBuilder:
         if first.string == "from":
             return [ImportBuilder._build_from_import(stream, line, col)]
 
-        raise SyntaxError("Invalid import statement")
+        raise SyntaxError("Некорректный оператор import")
 
     @staticmethod
     def _build_import(stream: TokenStream, line: int, col: int) -> list[PyIRImport]:
@@ -52,7 +52,7 @@ class ImportBuilder:
         while True:
             parts = ImportBuilder._parse_dotted_name(stream)
             if not parts:
-                raise SyntaxError("Expected module name in import")
+                raise SyntaxError("Ожидалось имя модуля в import")
 
             alias = None
             tok = stream.peek()
@@ -60,25 +60,25 @@ class ImportBuilder:
                 stream.advance()
                 a = stream.advance()
                 if a is None or a.type != tokenize.NAME:
-                    raise SyntaxError("Expected alias name after 'as'")
-                
+                    raise SyntaxError("Ожидалось имя алиаса после 'as'")
+
                 alias = a.string
 
             # import a.b.c as d
             if alias:
                 modules = parts[:-1]
-                names = [(parts[-1], alias)]
+                names_out: list[str | tuple[str, str]] = [(parts[-1], alias)]
 
             else:
                 modules = parts
-                names = []
+                names_out = []
 
             out.append(
                 PyIRImport(
                     line=line,
                     offset=col,
                     modules=modules,
-                    names=names,  # type: ignore
+                    names=names_out,
                     if_from=False,
                     level=0,
                     itype=PyIRImportType.UNKNOWN,
@@ -93,7 +93,7 @@ class ImportBuilder:
             break
 
         if not stream.eof():
-            raise SyntaxError("Unexpected tokens in import statement")
+            raise SyntaxError("Лишние токены в операторе import")
 
         return out
 
@@ -115,20 +115,20 @@ class ImportBuilder:
 
         imp = stream.advance()
         if imp is None or imp.type != tokenize.NAME or imp.string != "import":
-            raise SyntaxError("Expected 'import' in from-import")
+            raise SyntaxError("Ожидался 'import' в конструкции from-import")
 
         names: list[str | tuple[str, str]] = []
 
         while True:
             tok = stream.advance()
             if tok is None:
-                raise SyntaxError("Unexpected end of from-import")
+                raise SyntaxError("Неожиданный конец конструкции from-import")
 
             if tok.type == tokenize.OP and tok.string == "*":
-                raise SyntaxError("Wildcard imports are not supported in py2glua")
+                raise SyntaxError("Импорты через '*' не поддерживаются в py2glua")
 
             if tok.type != tokenize.NAME:
-                raise SyntaxError("Expected name in from-import")
+                raise SyntaxError("Ожидалось имя в конструкции from-import")
 
             name = tok.string
             alias = None
@@ -138,7 +138,7 @@ class ImportBuilder:
                 stream.advance()
                 a = stream.advance()
                 if a is None or a.type != tokenize.NAME:
-                    raise SyntaxError("Expected alias after 'as'")
+                    raise SyntaxError("Ожидался алиас после 'as'")
 
                 alias = a.string
 
@@ -152,7 +152,7 @@ class ImportBuilder:
             break
 
         if not stream.eof():
-            raise SyntaxError("Unexpected tokens in from-import")
+            raise SyntaxError("Лишние токены в конструкции from-import")
 
         return PyIRImport(
             line=line,
@@ -182,7 +182,7 @@ class ImportBuilder:
             stream.advance()
             nxt = stream.advance()
             if nxt is None or nxt.type != tokenize.NAME:
-                raise SyntaxError("Expected name after '.'")
+                raise SyntaxError("Ожидалось имя после '.'")
 
             parts.append(nxt.string)
 

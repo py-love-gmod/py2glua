@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from dataclasses import fields, is_dataclass
 from pathlib import Path
-from typing import Final, Iterator, Sequence
-
-from colorama import Fore, Style
+from typing import Final
 
 from ....._cli import logger
+from ....._cli.ansi import Fore, Style
 from ....py.ir_dataclass import (
     PyIRAttribute,
     PyIRCall,
@@ -19,6 +18,12 @@ from ....py.ir_dataclass import (
     PyIRNode,
 )
 from ..analysis.symlinks import PyIRSymLink, SymLinkContext
+from ..common import (
+    canon_path,
+    collect_decl_symid_cache,
+    decorator_call_parts,
+    iter_imported_names,
+)
 
 
 def _warn_deprecated(
@@ -79,38 +84,19 @@ class CollectDeprecatedDeclsPass:
     @classmethod
     def run(cls, ir: PyIRFile, ctx: SymLinkContext) -> PyIRFile:
         if not isinstance(ir, PyIRFile):
-            raise TypeError("CollectDeprecatedDeclsPass.run expects PyIRFile")
+            raise TypeError("CollectDeprecatedDeclsPass.run ожидает PyIRFile")
 
         if ir.path is None:
             return ir
 
-        sym_msg = getattr(ctx, cls._SYM_MSG, None)
-        if not isinstance(sym_msg, dict):
-            sym_msg = {}
-            setattr(ctx, cls._SYM_MSG, sym_msg)
+        sym_msg = ctx._deprecated_symid_to_msg
+        sym_disp = ctx._deprecated_symid_to_disp
+        meth_symid = ctx._deprecated_method_to_symid
+        meth_msg = ctx._deprecated_method_to_msg
+        clsname = ctx._deprecated_classname_by_symid
 
-        sym_disp = getattr(ctx, cls._SYM_DISP, None)
-        if not isinstance(sym_disp, dict):
-            sym_disp = {}
-            setattr(ctx, cls._SYM_DISP, sym_disp)
-
-        meth_symid = getattr(ctx, cls._METH_SYMID, None)
-        if not isinstance(meth_symid, dict):
-            meth_symid = {}
-            setattr(ctx, cls._METH_SYMID, meth_symid)
-
-        meth_msg = getattr(ctx, cls._METH_MSG, None)
-        if not isinstance(meth_msg, dict):
-            meth_msg = {}
-            setattr(ctx, cls._METH_MSG, meth_msg)
-
-        clsname = getattr(ctx, cls._CLSNAME, None)
-        if not isinstance(clsname, dict):
-            clsname = {}
-            setattr(ctx, cls._CLSNAME, clsname)
-
-        symid_by_decl = cls._get_symid_by_decl(ctx)
-        fp = cls._canon_path(ir.path)
+        symid_by_decl = collect_decl_symid_cache(ctx, cache_field=cls._DECL_CACHE)
+        fp = canon_path(ir.path)
         if fp is None:
             return ir
 
@@ -171,27 +157,13 @@ class CollectDeprecatedDeclsPass:
                 if is_dataclass(st):
                     for f in fields(st):
                         v = getattr(st, f.name)
-                        if (
-                            isinstance(v, list)
-                            and v
-                            and all(isinstance(x, PyIRNode) for x in v)
-                        ):
-                            walk_body(v)
+                        if isinstance(v, list):
+                            nested = [x for x in v if isinstance(x, PyIRNode)]
+                            if nested:
+                                walk_body(nested)
 
         walk_body(ir.body)
         return ir
-
-    @staticmethod
-    def _iter_imported_names(
-        names: Sequence[str | tuple[str, str]] | None,
-    ) -> Iterator[tuple[str, str]]:
-        if not names:
-            return
-        for n in names:
-            if isinstance(n, tuple):
-                yield n[0], n[1]
-            else:
-                yield n, n
 
     @classmethod
     def _collect_deprecated_bindings(cls, ir: PyIRFile) -> tuple[set[str], set[str]]:
@@ -212,13 +184,13 @@ class CollectDeprecatedDeclsPass:
             names = getattr(n, "names", None)
 
             if n.if_from and mod == cls._WARNINGS_MOD and names:
-                for orig, bound in cls._iter_imported_names(names):
+                for orig, bound in iter_imported_names(names):
                     if orig == cls._DEPR_NAME:
                         deprecated_bindings.add(bound)
 
             if (not n.if_from) and mod == cls._WARNINGS_MOD:
                 if names:
-                    for orig, bound in cls._iter_imported_names(names):
+                    for orig, bound in iter_imported_names(names):
                         if orig == cls._WARNINGS_MOD:
                             warnings_module_bindings.add(bound)
                 else:
@@ -239,7 +211,7 @@ class CollectDeprecatedDeclsPass:
         Requires a proven binding in this file.
         """
         for d in decorators or []:
-            fn_expr, args_p, args_kw = cls._decorator_call_parts(d)
+            fn_expr, args_p, args_kw = decorator_call_parts(d)
 
             if not cls._is_deprecated_fn_expr(
                 fn_expr,
@@ -253,20 +225,6 @@ class CollectDeprecatedDeclsPass:
             return msg if msg is not None else ""
 
         return None
-
-    @staticmethod
-    def _decorator_call_parts(
-        d: PyIRDecorator,
-    ) -> tuple[PyIRNode, list[PyIRNode], dict[str, PyIRNode]]:
-        """
-        Supports two shapes:
-          A) PyIRDecorator(exper=<expr>, args_p=[...], args_kw={...})
-          B) PyIRDecorator(exper=PyIRCall(func=<expr>, args_p=[...], args_kw={...}), args_p empty)
-        """
-        if isinstance(d.exper, PyIRCall):
-            c = d.exper
-            return c.func, list(c.args_p or []), dict(c.args_kw or {})
-        return d.exper, list(d.args_p or []), dict(d.args_kw or {})
 
     @classmethod
     def _is_deprecated_fn_expr(
@@ -317,35 +275,6 @@ class CollectDeprecatedDeclsPass:
 
         return None
 
-    @staticmethod
-    def _canon_path(p: Path | None) -> Path | None:
-        if p is None:
-            return None
-        try:
-            return p.resolve()
-        except Exception:
-            return p
-
-    @classmethod
-    def _get_symid_by_decl(
-        cls, ctx: SymLinkContext
-    ) -> dict[tuple[Path, int, str], int]:
-        cached = getattr(ctx, cls._DECL_CACHE, None)
-        if isinstance(cached, dict):
-            return cached
-
-        out: dict[tuple[Path, int, str], int] = {}
-        for sym in ctx.symbols.values():
-            if sym.decl_file is None or sym.decl_line is None:
-                continue
-            p = cls._canon_path(sym.decl_file)
-            if p is None:
-                continue
-            out[(p, sym.decl_line, sym.name)] = sym.id.value
-
-        setattr(ctx, cls._DECL_CACHE, out)
-        return out
-
 
 class WarnDeprecatedUsesPass:
     """
@@ -376,36 +305,22 @@ class WarnDeprecatedUsesPass:
     @classmethod
     def run(cls, ir: PyIRFile, ctx: SymLinkContext) -> PyIRFile:
         if not isinstance(ir, PyIRFile):
-            raise TypeError("WarnDeprecatedUsesPass.run expects PyIRFile")
+            raise TypeError("WarnDeprecatedUsesPass.run ожидает PyIRFile")
 
         if ir.path is None:
             return ir
 
-        sym_msg = getattr(ctx, cls._SYM_MSG, None)
-        meth_msg = getattr(ctx, cls._METH_MSG, None)
-        sym_disp = getattr(ctx, cls._SYM_DISP, None)
-        clsname = getattr(ctx, cls._CLSNAME, None)
+        sym_msg = ctx._deprecated_symid_to_msg
+        meth_msg = ctx._deprecated_method_to_msg
+        sym_disp = ctx._deprecated_symid_to_disp
+        clsname = ctx._deprecated_classname_by_symid
 
-        if not isinstance(sym_msg, dict) or (
-            not sym_msg and not isinstance(meth_msg, dict)
-        ):
+        if not sym_msg and not meth_msg:
             return ir
 
-        if not isinstance(meth_msg, dict):
-            meth_msg = {}
+        seen = ctx._deprecated_warned_callsites
 
-        if not isinstance(sym_disp, dict):
-            sym_disp = {}
-
-        if not isinstance(clsname, dict):
-            clsname = {}
-
-        seen = getattr(ctx, cls._SEEN, None)
-        if not isinstance(seen, set):
-            seen = set()
-            setattr(ctx, cls._SEEN, seen)
-
-        fp = cls._canon_path(ir.path) or ir.path
+        fp = canon_path(ir.path) or ir.path
 
         def warn(display_name: str, msg: str, call: PyIRCall) -> None:
             line = call.line
@@ -474,14 +389,3 @@ class WarnDeprecatedUsesPass:
             rw(st)
 
         return ir
-
-    @staticmethod
-    def _canon_path(p: Path | None) -> Path | None:
-        if p is None:
-            return None
-
-        try:
-            return p.resolve()
-
-        except Exception:
-            return p

@@ -7,12 +7,12 @@ from typing import Final
 from ....._cli import CompilerExit
 from ....py.ir_dataclass import (
     FileRealm,
+    PyIRAnnotatedAssign,
     PyIRAssign,
     PyIRAttribute,
     PyIRCall,
     PyIRClassDef,
     PyIRConstant,
-    PyIRDecorator,
     PyIREmitExpr,
     PyIREmitKind,
     PyIRFile,
@@ -23,6 +23,12 @@ from ....py.ir_dataclass import (
     PyIRVarUse,
 )
 from ..analysis.symlinks import PyIRSymLink, SymLinkContext
+from ..common import (
+    canon_path,
+    collect_core_compiler_directive_local_symbol_ids,
+    decorator_call_parts,
+    is_expr_on_symbol_ids,
+)
 
 
 @dataclass(slots=True)
@@ -103,22 +109,51 @@ class BuildGmodPrototypesProjectPass:
     def run(cls, files: list[PyIRFile], ctx: SymLinkContext) -> list[PyIRFile]:
         ctx.ensure_module_index()
 
-        proto_by_decl: dict[tuple[Path, str], _ProtoClass] = {}
+        core_cd_symids_by_file: dict[Path, set[int]] = {}
         for ir in files:
             if ir.path is None:
                 continue
+            current_module = ctx.module_name_by_path.get(ir.path)
+            if not current_module:
+                continue
+            core_cd_symids_by_file[ir.path] = (
+                collect_core_compiler_directive_local_symbol_ids(
+                    ir,
+                    ctx=ctx,
+                    current_module=current_module,
+                )
+            )
+
+        proto_by_decl: dict[tuple[str, str], _ProtoClass] = {}
+        for ir in files:
+            if ir.path is None:
+                continue
+            core_cd_symids = core_cd_symids_by_file.get(ir.path, set())
 
             for st in ir.body:
                 if not isinstance(st, PyIRClassDef):
                     continue
 
-                fold = cls._extract_gmod_prototype_fold(n=st, ir=ir)
+                fold = cls._extract_gmod_prototype_fold(
+                    n=st,
+                    ir=ir,
+                    core_cd_symids=core_cd_symids,
+                    ctx=ctx,
+                )
                 if fold is None:
                     continue
 
-                fields_by_realm, methods_by_realm = cls._collect_class_members(st)
+                fields_by_realm, methods_by_realm = cls._collect_class_members(
+                    st,
+                    core_cd_symids=core_cd_symids,
+                    ctx=ctx,
+                )
 
-                key = (cls._canon_path(ir.path), st.name)
+                canon = canon_path(ir.path)
+                if canon is None:
+                    continue
+
+                key = (canon.as_posix(), st.name)
                 proto_by_decl[key] = _ProtoClass(
                     class_name=st.name,
                     fold=fold,
@@ -146,6 +181,8 @@ class BuildGmodPrototypesProjectPass:
                 body=list(ir.body),
                 ir=ir,
                 proto_by_decl=proto_by_decl,
+                core_cd_symids=core_cd_symids_by_file.get(ir.path, set()),
+                ctx=ctx,
                 inst_by_var=inst_by_var,
                 instances_out=instances,
                 realm_ctx="SHARED",
@@ -182,7 +219,9 @@ class BuildGmodPrototypesProjectPass:
         *,
         body: list[PyIRNode],
         ir: PyIRFile,
-        proto_by_decl: dict[tuple[Path, str], _ProtoClass],
+        proto_by_decl: dict[tuple[str, str], _ProtoClass],
+        core_cd_symids: set[int],
+        ctx: SymLinkContext,
         inst_by_var: dict[str, _ProtoInstance],
         instances_out: list[_ProtoInstance],
         realm_ctx: str,
@@ -198,6 +237,8 @@ class BuildGmodPrototypesProjectPass:
                         body=list(st.body or []),
                         ir=ir,
                         proto_by_decl=proto_by_decl,
+                        core_cd_symids=core_cd_symids,
+                        ctx=ctx,
                         inst_by_var=inst_by_var,
                         instances_out=instances_out,
                         realm_ctx=r,
@@ -207,6 +248,8 @@ class BuildGmodPrototypesProjectPass:
                         body=list(st.orelse or []),
                         ir=ir,
                         proto_by_decl=proto_by_decl,
+                        core_cd_symids=core_cd_symids,
+                        ctx=ctx,
                         inst_by_var=inst_by_var,
                         instances_out=instances_out,
                         realm_ctx=realm_ctx,
@@ -217,6 +260,8 @@ class BuildGmodPrototypesProjectPass:
                         body=list(st.body or []),
                         ir=ir,
                         proto_by_decl=proto_by_decl,
+                        core_cd_symids=core_cd_symids,
+                        ctx=ctx,
                         inst_by_var=inst_by_var,
                         instances_out=instances_out,
                         realm_ctx=realm_ctx,
@@ -226,6 +271,8 @@ class BuildGmodPrototypesProjectPass:
                         body=list(st.orelse or []),
                         ir=ir,
                         proto_by_decl=proto_by_decl,
+                        core_cd_symids=core_cd_symids,
+                        ctx=ctx,
                         inst_by_var=inst_by_var,
                         instances_out=instances_out,
                         realm_ctx=realm_ctx,
@@ -239,7 +286,10 @@ class BuildGmodPrototypesProjectPass:
                 continue
 
             if isinstance(st, PyIRClassDef) and cls._is_gmod_prototype_classdef(
-                st, ir=ir
+                st,
+                ir=ir,
+                core_cd_symids=core_cd_symids,
+                ctx=ctx,
             ):
                 continue
 
@@ -285,14 +335,25 @@ class BuildGmodPrototypesProjectPass:
 
     @classmethod
     def _extract_gmod_prototype_fold(
-        cls, *, n: PyIRClassDef, ir: PyIRFile
+        cls,
+        *,
+        n: PyIRClassDef,
+        ir: PyIRFile,
+        core_cd_symids: set[int],
+        ctx: SymLinkContext,
     ) -> str | None:
         for d in n.decorators or []:
-            func, args_p, args_kw = cls._parse_decorator_call(d)
+            func, args_p, args_kw = decorator_call_parts(d)
 
             if not isinstance(func, PyIRAttribute):
                 continue
             if func.attr != cls._DEC_GMOD_PROTO:
+                continue
+            if not is_expr_on_symbol_ids(
+                func.value,
+                symbol_ids=core_cd_symids,
+                ctx=ctx,
+            ):
                 continue
 
             fold_node: PyIRNode | None = None
@@ -342,12 +403,31 @@ class BuildGmodPrototypesProjectPass:
         return None
 
     @classmethod
-    def _is_gmod_prototype_classdef(cls, n: PyIRClassDef, *, ir: PyIRFile) -> bool:
-        return cls._extract_gmod_prototype_fold(n=n, ir=ir) is not None
+    def _is_gmod_prototype_classdef(
+        cls,
+        n: PyIRClassDef,
+        *,
+        ir: PyIRFile,
+        core_cd_symids: set[int],
+        ctx: SymLinkContext,
+    ) -> bool:
+        return (
+            cls._extract_gmod_prototype_fold(
+                n=n,
+                ir=ir,
+                core_cd_symids=core_cd_symids,
+                ctx=ctx,
+            )
+            is not None
+        )
 
     @classmethod
     def _collect_class_members(
-        cls, n: PyIRClassDef
+        cls,
+        n: PyIRClassDef,
+        *,
+        core_cd_symids: set[int],
+        ctx: SymLinkContext,
     ) -> tuple[dict[str, dict[str, PyIRNode]], dict[str, dict[str, PyIRFunctionDef]]]:
         fields_by_realm: dict[str, dict[str, PyIRNode]] = {}
         methods_by_realm: dict[str, dict[str, PyIRFunctionDef]] = {}
@@ -363,7 +443,7 @@ class BuildGmodPrototypesProjectPass:
 
             if fn.name in (cls._DEC_OVERRIDE, cls._DEC_ADD_METHOD):
                 return
-            if cls._is_gmod_api_method(fn):
+            if cls._is_gmod_api_method(fn, core_cd_symids=core_cd_symids, ctx=ctx):
                 return
             if cls._is_effectively_pass(fn):
                 return
@@ -378,23 +458,13 @@ class BuildGmodPrototypesProjectPass:
                         add_field(realm_ctx, name, st.value)
                 return True
 
-            if type(st).__name__ == "PyIRAnnAssign":
-                tgt = getattr(st, "target", None)
-                val = getattr(st, "value", None)
-                if val is None:
-                    return True
-                if isinstance(tgt, PyIRNode):
-                    name = cls._extract_name(tgt)
-                    if name:
-                        add_field(realm_ctx, name, val)
+            if isinstance(st, PyIRAnnotatedAssign):
+                val = st.value
+                if isinstance(val, PyIRNode):
+                    add_field(realm_ctx, st.name, val)
                 return True
 
             if isinstance(st, PyIRVarCreate):
-                val = getattr(st, "value", None)
-                if val is None:
-                    return True
-                if isinstance(val, PyIRNode):
-                    add_field(realm_ctx, st.name, val)
                 return True
 
             return False
@@ -445,10 +515,24 @@ class BuildGmodPrototypesProjectPass:
         return None
 
     @classmethod
-    def _is_gmod_api_method(cls, fn: PyIRFunctionDef) -> bool:
+    def _is_gmod_api_method(
+        cls,
+        fn: PyIRFunctionDef,
+        *,
+        core_cd_symids: set[int],
+        ctx: SymLinkContext,
+    ) -> bool:
         for d in fn.decorators or []:
-            func, _args_p, _args_kw = cls._parse_decorator_call(d)
-            if isinstance(func, PyIRAttribute) and func.attr == cls._DEC_GMOD_API:
+            func, _args_p, _args_kw = decorator_call_parts(d)
+            if not isinstance(func, PyIRAttribute):
+                continue
+            if func.attr != cls._DEC_GMOD_API:
+                continue
+            if is_expr_on_symbol_ids(
+                func.value,
+                symbol_ids=core_cd_symids,
+                ctx=ctx,
+            ):
                 return True
         return False
 
@@ -478,7 +562,7 @@ class BuildGmodPrototypesProjectPass:
         *,
         st: PyIRNode,
         ir: PyIRFile,
-        proto_by_decl: dict[tuple[Path, str], _ProtoClass],
+        proto_by_decl: dict[tuple[str, str], _ProtoClass],
     ) -> _ProtoInstance | None:
         if not isinstance(st, PyIRAssign):
             return None
@@ -511,7 +595,7 @@ class BuildGmodPrototypesProjectPass:
     def _extract_called_proto(
         cls,
         expr: PyIRNode,
-        proto_by_decl: dict[tuple[Path, str], _ProtoClass],
+        proto_by_decl: dict[tuple[str, str], _ProtoClass],
     ) -> _ProtoClass | None:
         if not isinstance(expr, PyIRCall):
             return None
@@ -529,12 +613,15 @@ class BuildGmodPrototypesProjectPass:
     def _proto_from_callable(
         cls,
         callee: PyIRNode,
-        proto_by_decl: dict[tuple[Path, str], _ProtoClass],
+        proto_by_decl: dict[tuple[str, str], _ProtoClass],
     ) -> _ProtoClass | None:
         if isinstance(callee, PyIRSymLink):
             if callee.decl_file is None:
                 return None
-            key = (cls._canon_path(callee.decl_file), callee.name)
+            decl_path = canon_path(callee.decl_file)
+            if decl_path is None:
+                return None
+            key = (decl_path.as_posix(), callee.name)
             return proto_by_decl.get(key)
 
         if isinstance(callee, PyIRVarUse):
@@ -555,7 +642,7 @@ class BuildGmodPrototypesProjectPass:
         inst_by_var: dict[str, _ProtoInstance],
     ) -> tuple[_ProtoInstance, _ProtoInjectedMethod] | None:
         for d in fn.decorators or []:
-            func, args_p, args_kw = cls._parse_decorator_call(d)
+            func, args_p, args_kw = decorator_call_parts(d)
 
             if args_kw:
                 CompilerExit.user_error_node(
@@ -696,7 +783,7 @@ class BuildGmodPrototypesProjectPass:
                     cls._raw('include("shared.lua")'),
                 ]
                 + (init_body if init_body else [cls._raw("")])
-            ),  # type: ignore
+            ),
             imports=[],
             realm=FileRealm.SERVER,
         )
@@ -708,7 +795,7 @@ class BuildGmodPrototypesProjectPass:
             body=(
                 [cls._raw('include("shared.lua")')]
                 + (cl_body if cl_body else [cls._raw("")])
-            ),  # type: ignore
+            ),
             imports=[],
             realm=FileRealm.CLIENT,
         )
@@ -783,7 +870,7 @@ class BuildGmodPrototypesProjectPass:
                 continue
 
             CompilerExit.user_error_node(
-                f"internal: unknown injected kind {inj.kind!r}",
+                f"internal: неизвестный тип injected-метода {inj.kind!r}",
                 path=inj.at_path,
                 node=inj.at_node,
             )
@@ -833,27 +920,11 @@ class BuildGmodPrototypesProjectPass:
             name=f"{g}.{method_name}",
             signature=dict(src.signature),
             returns=src.returns,
+            vararg=src.vararg,
+            kwarg=src.kwarg,
             decorators=[],
             body=list(src.body),
         )
-
-    @staticmethod
-    def _parse_decorator_call(
-        d: PyIRDecorator,
-    ) -> tuple[PyIRNode, list[PyIRNode], dict[str, PyIRNode]]:
-        if isinstance(d.exper, PyIRCall):
-            c = d.exper
-            return c.func, list(c.args_p or []), dict(c.args_kw or {})
-
-        return d.exper, list(d.args_p or []), dict(d.args_kw or {})
-
-    @staticmethod
-    def _canon_path(p: Path) -> Path:
-        try:
-            return p.resolve()
-
-        except Exception:
-            return p
 
     @staticmethod
     def _extract_name(n: PyIRNode) -> str | None:
