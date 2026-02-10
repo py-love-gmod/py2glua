@@ -484,6 +484,46 @@ class RewriteGmodApiCallsPass:
                         )
                         return _make_emit_call(node, decl.lua_name, node.args_p)
 
+                # Constructor form: Class(...)
+                # Supports normalized imports like: utils.Angle(...)
+                ctor_cls_symids = [
+                    sid
+                    for sid in resolve_symbol_ids_by_attr_chain(ctx, node.func)
+                    if sid in classes
+                ]
+                if ctor_cls_symids:
+                    ctor_decls: list[GmodApiDecl] = []
+                    for cid in ctor_cls_symids:
+                        info = classes.get(cid)
+                        if info is None:
+                            continue
+
+                        if (
+                            isinstance(node.func, PyIRAttribute)
+                            and node.func.attr != info.name
+                        ):
+                            continue
+
+                        d = resolved.get((cid, "__init__"))
+                        if d is not None:
+                            ctor_decls.append(d)
+
+                    if ctor_decls:
+                        ctor_decl = pick_single_decl(
+                            ctor_decls,
+                            mname="__init__",
+                            node=node,
+                        )
+
+                        if ctor_decl.method:
+                            CompilerExit.user_error_node(
+                                "Конструктор gmod_api не может быть объявлен с method=True.",
+                                ir.path,
+                                node,
+                            )
+
+                        return _make_emit_call(node, ctor_decl.lua_name, node.args_p)
+
                 if isinstance(node.func, PyIRAttribute):
                     base = node.func.value
                     mname = node.func.attr

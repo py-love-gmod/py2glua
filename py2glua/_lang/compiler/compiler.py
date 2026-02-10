@@ -47,7 +47,9 @@ from .passes.lowering import (
     FoldGmodSpecialEnumUsesPass,
     NilFoldPass,
     RewriteAndStripDebugCompileOnlyPass,
+    RewriteForIteratorStrategyPass,
     RewriteGmodApiCallsPass,
+    RewriteLuaTableCtorPass,
     RewriteRawCallsPass,
     RewriteWithConditionBlocksPass,
     StripCommentsImportsPass,
@@ -55,6 +57,7 @@ from .passes.lowering import (
     StripEnumsAndGmodSpecialEnumDefsPass,
     StripLazyCompileUnusedDefsPass,
     StripNoCompileAndGmodApiDefsPass,
+    StripTypingRuntimeArtifactsPass,
 )
 from .passes.normalize import (
     AttachDecoratorsPass,
@@ -116,8 +119,9 @@ class Compiler:
     ]
 
     lowering_passes = [
-        NilFoldPass,  # Трансформирует в нормальный nil
+        NilFoldPass,  # nil fold
         FoldCompileTimeBoolConstsPass,  # DEBUG | TYPE_CHECKING -> compile-time if
+        StripTypingRuntimeArtifactsPass,  # strip typing/collections.abc runtime artifacts
         CollectDebugCompileOnlyDeclsPass,  # Сбор debug_compile_only()
         RewriteAndStripDebugCompileOnlyPass,  # Замена debug_compile_only()
         RewriteRawCallsPass,  # Обработка raw
@@ -125,9 +129,11 @@ class Compiler:
         RewriteWithConditionBlocksPass,  # with -> if замена
         CollectGmodSpecialEnumDeclsPass,  #  gmod_special_enum сбор
         FoldGmodSpecialEnumUsesPass,  #  gmod_special_enum подстановка
+        RewriteLuaTableCtorPass,  # lua_table(...) -> Lua table literal
         CollectGmodApiDeclsPass,  # gmod_api сбор
         FinalizeGmodApiRegistryPass,  # Финализация реестра GMod API
         RewriteGmodApiCallsPass,  # Переписывание вызовов GMod API
+        RewriteForIteratorStrategyPass,  # auto iterator strategy for for-loops
         StripEnumsAndGmodSpecialEnumDefsPass,  # Удаление Enum и gmod_special_enum дефиниций из IR
         StripNoCompileAndGmodApiDefsPass,  # Удаление no_compile и gmod_api реализаций
         StripCompilerDirectiveDefPass,  # Удаление определений CompilerDirective из IR

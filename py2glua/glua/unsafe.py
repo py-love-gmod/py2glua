@@ -20,7 +20,7 @@ class Unsafe:
     )
     def AddCSLuaFile(file_path: Path) -> None:
         """Метод заставляет клиента загрузить файл который указан."""
-        pass
+        ...
 
     @staticmethod
     @deprecated(
@@ -32,4 +32,4 @@ class Unsafe:
     )
     def include(file_path: Path) -> Any:
         """Запускает файл по указаному пути."""
-        pass
+        ...

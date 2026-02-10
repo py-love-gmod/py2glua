@@ -1,7 +1,10 @@
 from collections.abc import Callable
 from enum import Enum
+from typing import TypeVar
 
 from .core import CompilerDirective, nil
+
+F = TypeVar("F", bound=Callable[..., object])
 
 
 class ENTType(Enum):
@@ -48,9 +51,9 @@ class ENT:
     @staticmethod
     def override(
         realm: CompilerDirective.RealmMarker,
-        target: Callable,
+        target: Callable[[F], F],
     ) -> Callable:
-        def decorator(fn: Callable) -> Callable:
+        def decorator(fn: Callable[[F], F]) -> Callable[[F], F]:
             return fn
 
         return decorator

@@ -28,12 +28,20 @@ from ....py.ir_dataclass import (
 from ...compiler_ir import PyIRDo, PyIRGoto, PyIRLabel
 from .expand_context import ExpandContext, InlineTemplate
 
-_CD_PREFIX = (
-    "py2glua",
-    "glua",
-    "core",
-    "compiler_directive",
-    "CompilerDirective",
+_CD_PREFIXES = (
+    (
+        "py2glua",
+        "glua",
+        "core",
+        "compiler_directive",
+        "CompilerDirective",
+    ),
+    (
+        "py2glua",
+        "glua",
+        "core",
+        "CompilerDirective",
+    ),
 )
 
 _KEY_SEP = "::"
@@ -63,7 +71,7 @@ def _is_compiler_directive_attr(attr: PyIRAttribute, *, method: str) -> bool:
     if parts is None:
         return False
 
-    return tuple(parts) == _CD_PREFIX
+    return tuple(parts) in _CD_PREFIXES
 
 
 def _compiler_directive_kind(dec: PyIRDecorator) -> str | None:

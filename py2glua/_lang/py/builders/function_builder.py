@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import token as token_mod
 import tokenize
 from typing import List, NoReturn, Sequence
 
@@ -170,9 +171,13 @@ class FunctionBuilder:
 
     @staticmethod
     def _tokens_to_clean_src(tokens: list[tokenize.TokenInfo]) -> str:
+        ellipsis_type = getattr(token_mod, "ELLIPSIS", None)
         parts: list[str] = []
         for t in tokens:
             if t.type in (tokenize.NAME, tokenize.OP, tokenize.STRING, tokenize.NUMBER):
+                parts.append(t.string)
+                continue
+            if ellipsis_type is not None and t.type == ellipsis_type:
                 parts.append(t.string)
 
         return "".join(parts)

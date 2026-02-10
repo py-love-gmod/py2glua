@@ -1189,6 +1189,21 @@ class StatementBuilder:
                 value=value,
             )
 
+        # Ellipsis literal (mainly needed for typing constructs like Callable[..., T]).
+        # Runtime semantics are intentionally not preserved; later passes strip typing-only code.
+        ellipsis_type = getattr(token_mod, "ELLIPSIS", None)
+        if (tok.type == tokenize.OP and tok.string == "...") or (
+            ellipsis_type is not None and tok.type == ellipsis_type
+        ):
+            tok2 = stream.advance()
+            assert tok2 is not None
+            line, col = tok2.start
+            return PyIRConstant(
+                line=line,
+                offset=col,
+                value="...",
+            )
+
         # Parenthesized expression / empty tuple
         if tok.type == tokenize.OP and tok.string == "(":
             lpar = stream.advance()

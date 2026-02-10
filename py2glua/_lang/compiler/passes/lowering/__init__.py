@@ -15,6 +15,10 @@ from .lazy_compile import (
     CountSymlinkUsesPass,
     StripLazyCompileUnusedDefsPass,
 )
+from .lua_table import (
+    RewriteForIteratorStrategyPass,
+    RewriteLuaTableCtorPass,
+)
 from .net_string import CollectRegisterArgDeclsPass, CollectRegisterArgNetStringsPass
 from .nil_fold import NilFoldPass
 from .raw import RewriteRawCallsPass
@@ -22,6 +26,7 @@ from .strip_cd import StripCompilerDirectiveDefPass
 from .strip_comments_imports import StripCommentsImportsPass
 from .strip_enums import StripEnumsAndGmodSpecialEnumDefsPass
 from .strip_no_compile_gmod_api import StripNoCompileAndGmodApiDefsPass
+from .strip_typing import StripTypingRuntimeArtifactsPass
 from .with_condition import (
     CollectWithConditionClassesPass,
     RewriteWithConditionBlocksPass,

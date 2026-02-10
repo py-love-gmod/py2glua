@@ -17,14 +17,22 @@ from ....py.ir_dataclass import (
 )
 from .expand_context import ContextManagerTemplate, ExpandContext
 
-_CD_PREFIX = (
-    "py2glua",
-    "glua",
-    "core",
-    "compiler_directive",
-    "CompilerDirective",
+_CD_PREFIXES = (
+    (
+        "py2glua",
+        "glua",
+        "core",
+        "compiler_directive",
+        "CompilerDirective",
+    ),
+    (
+        "py2glua",
+        "glua",
+        "core",
+        "CompilerDirective",
+    ),
 )
-_CMDBODY_CHAIN = _CD_PREFIX + ("contextmanager_body",)
+_CMDBODY_CHAINS = tuple(prefix + ("contextmanager_body",) for prefix in _CD_PREFIXES)
 
 
 def _attr_chain_parts(node: PyIRNode) -> List[str] | None:
@@ -51,7 +59,7 @@ def _is_compiler_directive_attr(attr: PyIRAttribute, *, method: str) -> bool:
     if parts is None:
         return False
 
-    return tuple(parts) == _CD_PREFIX
+    return tuple(parts) in _CD_PREFIXES
 
 
 def _compiler_directive_kind(dec: PyIRDecorator) -> str | None:
@@ -80,7 +88,7 @@ def _is_contextmanager_body_marker(node: PyIRNode) -> bool:
     if parts is None:
         return False
 
-    return tuple(parts) == _CMDBODY_CHAIN
+    return tuple(parts) in _CMDBODY_CHAINS
 
 
 def _get_param_names(fn: PyIRFunctionDef) -> Tuple[str, ...]:

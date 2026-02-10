@@ -12,12 +12,21 @@ from ....py.ir_dataclass import (
 )
 
 # py2glua.glua.core.compiler_directive.CompilerDirective.<method>
-_CD_PREFIX = (
-    "py2glua",
-    "glua",
-    "core",
-    "compiler_directive",
-    "CompilerDirective",
+# or py2glua.glua.core.CompilerDirective.<method> (re-export path)
+_CD_PREFIXES = (
+    (
+        "py2glua",
+        "glua",
+        "core",
+        "compiler_directive",
+        "CompilerDirective",
+    ),
+    (
+        "py2glua",
+        "glua",
+        "core",
+        "CompilerDirective",
+    ),
 )
 
 _CT_METHODS = {"inline", "anonymous", "contextmanager"}
@@ -93,7 +102,7 @@ class RecursionSanityCheckPass:
         if parts is None:
             return False
 
-        return tuple(parts) == _CD_PREFIX
+        return tuple(parts) in _CD_PREFIXES
 
     @staticmethod
     def _attr_chain_parts(node: PyIRNode) -> list[str] | None:
