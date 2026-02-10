@@ -386,7 +386,7 @@ class RewriteClassCtorCallsPass:
             returns=(user_init.returns if user_init is not None else None),
             vararg=wrapper_vararg,
             kwarg=wrapper_kwarg,
-            decorators=[],
+            decorators=(deepcopy(user_init.decorators) if user_init is not None else []),
             body=body,
         )
 
