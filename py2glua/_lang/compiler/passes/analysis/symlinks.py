@@ -6,6 +6,7 @@ from typing import Literal
 
 from ....._config import Py2GluaConfig
 from ....py.ir_dataclass import (
+    PyIRCall,
     PyIRAssign,
     PyIRAttribute,
     PyIRAugAssign,
@@ -47,6 +48,173 @@ class PyIRSymLink(PyIRNode):
 
     def __str__(self) -> str:
         return f"<sym {self.symbol_id}>"
+
+
+@dataclass(frozen=True)
+class SymLinkUsageStats:
+    reads: dict[int, int]
+    stores: dict[int, int]
+    call_func_reads: dict[int, int]
+
+
+def collect_symlink_usage_stats(
+    ir: PyIRFile,
+    *,
+    skip_def_reads: bool = False,
+    symid_by_decl: dict[tuple[Path, int, str], int] | None = None,
+    file_path: Path | None = None,
+) -> SymLinkUsageStats:
+    """
+    Collects basic read/store usage stats for PyIRSymLink nodes in file IR.
+
+    Parameters:
+      - skip_def_reads:
+          when True, reads of currently-walked function/class symbol are ignored.
+      - symid_by_decl + file_path:
+          required only for skip_def_reads mode.
+    """
+    reads: dict[int, int] = {}
+    stores: dict[int, int] = {}
+    call_func_reads: dict[int, int] = {}
+
+    def_stack: set[int] = set()
+
+    def node_symid(n: PyIRNode) -> int | None:
+        if not skip_def_reads or symid_by_decl is None or file_path is None:
+            return None
+        if not isinstance(n, (PyIRFunctionDef, PyIRClassDef)):
+            return None
+        if n.line is None:
+            return None
+        return symid_by_decl.get((file_path, n.line, n.name))
+
+    def inc(bucket: dict[int, int], sid: int, n: int = 1) -> None:
+        bucket[sid] = bucket.get(sid, 0) + n
+
+    def count_call_func_reads(func: PyIRNode) -> None:
+        for sub in func.walk():
+            if not isinstance(sub, PyIRSymLink):
+                continue
+            if sub.is_store:
+                continue
+            sid = int(sub.symbol_id)
+            if skip_def_reads and sid in def_stack:
+                continue
+            inc(call_func_reads, sid)
+
+    def walk(n: PyIRNode) -> None:
+        sid_for_scope = node_symid(n)
+        if sid_for_scope is not None:
+            def_stack.add(sid_for_scope)
+
+        if isinstance(n, PyIRSymLink):
+            sid = int(n.symbol_id)
+            if n.is_store:
+                inc(stores, sid)
+            elif not (skip_def_reads and sid in def_stack):
+                inc(reads, sid)
+
+            if sid_for_scope is not None:
+                def_stack.remove(sid_for_scope)
+            return
+
+        if isinstance(n, PyIRCall):
+            count_call_func_reads(n.func)
+
+        if is_dataclass(n):
+            for f in fields(n):
+                v = getattr(n, f.name)
+                if isinstance(v, PyIRNode):
+                    walk(v)
+                    continue
+
+                if isinstance(v, list):
+                    for x in v:
+                        if isinstance(x, PyIRNode):
+                            walk(x)
+                    continue
+
+                if isinstance(v, dict):
+                    for x in v.values():
+                        if isinstance(x, PyIRNode):
+                            walk(x)
+
+        if sid_for_scope is not None:
+            def_stack.remove(sid_for_scope)
+
+    for st in ir.body:
+        walk(st)
+
+    return SymLinkUsageStats(
+        reads=reads,
+        stores=stores,
+        call_func_reads=call_func_reads,
+    )
+
+
+def _canon_path(p: Path | None) -> Path | None:
+    if p is None:
+        return None
+    try:
+        return p.resolve()
+    except Exception:
+        return p
+
+
+def _collect_symid_by_decl_cache(ctx: "SymLinkContext") -> dict[tuple[Path, int, str], int]:
+    cached = ctx._raw_symid_by_decl_cache
+    if cached:
+        return cached
+
+    out: dict[tuple[Path, int, str], int] = {}
+    for sym in ctx.symbols.values():
+        if sym.decl_file is None or sym.decl_line is None:
+            continue
+
+        p = _canon_path(sym.decl_file)
+        if p is None:
+            continue
+
+        out[(p, sym.decl_line, sym.name)] = int(sym.id.value)
+
+    ctx._raw_symid_by_decl_cache = out
+    return out
+
+
+def get_cached_symlink_usage_stats(
+    ir: PyIRFile,
+    ctx: "SymLinkContext",
+    *,
+    skip_def_reads: bool = False,
+) -> SymLinkUsageStats:
+    fp = _canon_path(ir.path)
+    if fp is not None:
+        bucket = (
+            ctx.symlink_usage_skip_def_by_file
+            if skip_def_reads
+            else ctx.symlink_usage_by_file
+        )
+        cached = bucket.get(fp)
+        if cached is not None:
+            return cached
+
+    if skip_def_reads:
+        usage = collect_symlink_usage_stats(
+            ir,
+            skip_def_reads=True,
+            symid_by_decl=_collect_symid_by_decl_cache(ctx),
+            file_path=fp,
+        )
+    else:
+        usage = collect_symlink_usage_stats(ir)
+
+    if fp is not None:
+        if skip_def_reads:
+            ctx.symlink_usage_skip_def_by_file[fp] = usage
+        else:
+            ctx.symlink_usage_by_file[fp] = usage
+
+    return usage
 
 
 # Модель скоупов/символов
@@ -102,6 +270,12 @@ class SymLinkContext:
 
     var_links: dict[int, Link] = field(default_factory=dict)
     unresolved_uses: set[int] = field(default_factory=set)
+
+    # usage caches by file (filled after RewriteToSymlinksPass)
+    symlink_usage_by_file: dict[Path, SymLinkUsageStats] = field(default_factory=dict)
+    symlink_usage_skip_def_by_file: dict[Path, SymLinkUsageStats] = field(
+        default_factory=dict
+    )
 
     _node_uid: dict[int, int] = field(default_factory=dict)
 
@@ -681,4 +855,8 @@ class RewriteToSymlinksPass:
             )
 
         ir.body = rw_block(ir.body)
+        # Cache usage statistics once right after symlink rewrite.
+        # Lowering passes can reuse it instead of re-walking the file IR.
+        get_cached_symlink_usage_stats(ir, ctx, skip_def_reads=False)
+        get_cached_symlink_usage_stats(ir, ctx, skip_def_reads=True)
         return ir

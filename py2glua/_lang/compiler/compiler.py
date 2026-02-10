@@ -45,6 +45,7 @@ from .passes.lowering import (
     FinalizeGmodApiRegistryPass,
     FoldCompileTimeBoolConstsPass,
     FoldGmodSpecialEnumUsesPass,
+    InlineFinalLiteralPass,
     NilFoldPass,
     RewriteAndStripDebugCompileOnlyPass,
     RewriteForIteratorStrategyPass,
@@ -121,6 +122,7 @@ class Compiler:
     lowering_passes = [
         NilFoldPass,  # nil fold
         FoldCompileTimeBoolConstsPass,  # DEBUG | TYPE_CHECKING -> compile-time if
+        InlineFinalLiteralPass,  # inline safe Final literals
         StripTypingRuntimeArtifactsPass,  # strip typing/collections.abc runtime artifacts
         CollectDebugCompileOnlyDeclsPass,  # Сбор debug_compile_only()
         RewriteAndStripDebugCompileOnlyPass,  # Замена debug_compile_only()

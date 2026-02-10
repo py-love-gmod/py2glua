@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import ast
+import tokenize
 from dataclasses import fields, is_dataclass
 from importlib import resources
+from io import StringIO
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -232,6 +233,36 @@ class NormalizeImportsPass:
         for f in fields(node):
             val = getattr(node, f.name)
 
+            if f.name in {"annotation", "returns"} and isinstance(val, str):
+                new_ann = cls._rewrite_annotation_text(val, mapping)
+                if new_ann != val:
+                    setattr(node, f.name, new_ann)
+                continue
+
+            if f.name == "signature" and isinstance(val, dict):
+                new_sig: dict[Any, tuple[str | None, Any]] = {}
+                changed = False
+                for arg_name, pair in val.items():
+                    ann = None
+                    default = None
+                    if isinstance(pair, tuple) and len(pair) == 2:
+                        ann, default = pair
+
+                    new_ann = (
+                        cls._rewrite_annotation_text(ann, mapping)
+                        if isinstance(ann, str)
+                        else ann
+                    )
+                    new_default = cls._rewrite_value(default, mapping)
+                    changed = (
+                        changed or (new_ann != ann) or (new_default is not default)
+                    )
+                    new_sig[arg_name] = (new_ann, new_default)
+
+                if changed:
+                    setattr(node, f.name, new_sig)
+                continue
+
             new_val = cls._rewrite_value(val, mapping)
             if new_val is not val:
                 setattr(node, f.name, new_val)
@@ -278,6 +309,43 @@ class NormalizeImportsPass:
             return tuple(out_tuple_items) if changed else val
 
         return val
+
+    @classmethod
+    def _rewrite_annotation_text(
+        cls,
+        annotation: str,
+        mapping: dict[str, tuple[tuple[str, ...], tuple[str, ...]]],
+    ) -> str:
+        if not annotation or not mapping:
+            return annotation
+
+        try:
+            toks = list(tokenize.generate_tokens(StringIO(annotation).readline))
+        except Exception:
+            return annotation
+
+        out: list[tuple[int, str]] = []
+        changed = False
+        for tok in toks:
+            if tok.type == tokenize.ENDMARKER:
+                continue
+
+            if tok.type == tokenize.NAME and tok.string in mapping:
+                mod_parts, attr_parts = mapping[tok.string]
+                repl = ".".join([*mod_parts, *attr_parts])
+                out.append((tok.type, repl))
+                changed = True
+                continue
+
+            out.append((tok.type, tok.string))
+
+        if not changed:
+            return annotation
+
+        try:
+            return tokenize.untokenize(out).strip()
+        except Exception:
+            return annotation
 
     @classmethod
     def _resolve_export_if_needed(
@@ -384,33 +452,148 @@ class NormalizeImportsPass:
             cls._reexport_cache[key] = out
             return out
 
-        try:
-            tree = ast.parse(text, filename=str(init_py))
-        except SyntaxError:
-            cls._reexport_cache[key] = out
-            return out
-
         base_pkg = pkg_modules
+        text = text.lstrip("\ufeff")
 
-        for stmt in tree.body:
-            if not isinstance(stmt, ast.ImportFrom):
-                continue
-
+        for level, module, names in cls._iter_import_from_statements(text):
             target_mod = cls._absolutize_importfrom_module(
                 base_pkg=base_pkg,
-                module=stmt.module,
-                level=stmt.level or 0,
+                module=module,
+                level=level,
             )
             if target_mod is None:
                 continue
 
-            for a in stmt.names:
-                src_name = a.name
-                exported_name = a.asname or a.name
+            for src_name, exported_name in names:
                 out[exported_name] = (target_mod, src_name)
 
         cls._reexport_cache[key] = out
         return out
+
+    @classmethod
+    def _iter_import_from_statements(
+        cls,
+        text: str,
+    ) -> Iterable[tuple[int, str | None, list[tuple[str, str]]]]:
+        _ = cls
+        try:
+            tokens = list(tokenize.generate_tokens(StringIO(text).readline))
+        except Exception:
+            return []
+
+        stmts: list[list[tokenize.TokenInfo]] = []
+        cur: list[tokenize.TokenInfo] = []
+        depth = 0
+
+        for tok in tokens:
+            if tok.type in (
+                tokenize.ENCODING,
+                tokenize.INDENT,
+                tokenize.DEDENT,
+                tokenize.COMMENT,
+            ):
+                continue
+
+            if tok.type == tokenize.OP:
+                if tok.string in "([{":
+                    depth += 1
+                elif tok.string in ")]}" and depth > 0:
+                    depth -= 1
+
+            if tok.type in (tokenize.NEWLINE, tokenize.NL) and depth == 0:
+                if cur:
+                    stmts.append(cur)
+                    cur = []
+                continue
+
+            if tok.type == tokenize.ENDMARKER:
+                break
+
+            cur.append(tok)
+
+        if cur:
+            stmts.append(cur)
+
+        out: list[tuple[int, str | None, list[tuple[str, str]]]] = []
+        for stmt in stmts:
+            parsed = cls._parse_import_from_stmt(stmt)
+            if parsed is not None:
+                out.append(parsed)
+
+        return out
+
+    @classmethod
+    def _parse_import_from_stmt(
+        cls,
+        tokens: list[tokenize.TokenInfo],
+    ) -> tuple[int, str | None, list[tuple[str, str]]] | None:
+        _ = cls
+        i = 0
+        n = len(tokens)
+        if n == 0:
+            return None
+
+        if tokens[i].type != tokenize.NAME or tokens[i].string != "from":
+            return None
+        i += 1
+
+        level = 0
+        while i < n and tokens[i].type == tokenize.OP and tokens[i].string == ".":
+            level += 1
+            i += 1
+
+        module_parts: list[str] = []
+        if i < n and tokens[i].type == tokenize.NAME:
+            module_parts.append(tokens[i].string)
+            i += 1
+            while i + 1 < n:
+                if tokens[i].type == tokenize.OP and tokens[i].string == ".":
+                    if tokens[i + 1].type != tokenize.NAME:
+                        return None
+                    module_parts.append(tokens[i + 1].string)
+                    i += 2
+                    continue
+                break
+
+        module_name = ".".join(module_parts) if module_parts else None
+
+        if i >= n or tokens[i].type != tokenize.NAME or tokens[i].string != "import":
+            return None
+        i += 1
+
+        names: list[tuple[str, str]] = []
+        while i < n:
+            tok = tokens[i]
+
+            if tok.type == tokenize.OP and tok.string in {",", "(", ")"}:
+                i += 1
+                continue
+
+            if tok.type == tokenize.OP and tok.string == "*":
+                break
+
+            if tok.type != tokenize.NAME:
+                return None
+
+            src_name = tok.string
+            exported_name = src_name
+            i += 1
+
+            if (
+                i + 1 < n
+                and tokens[i].type == tokenize.NAME
+                and tokens[i].string == "as"
+                and tokens[i + 1].type == tokenize.NAME
+            ):
+                exported_name = tokens[i + 1].string
+                i += 2
+
+            names.append((src_name, exported_name))
+
+        if not names:
+            return None
+
+        return level, module_name, names
 
     @staticmethod
     def _absolutize_importfrom_module(

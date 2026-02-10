@@ -22,7 +22,12 @@ from ....py.ir_dataclass import (
     PyIRWith,
     PyIRWithItem,
 )
-from ..analysis.symlinks import PyIRSymLink, ScopeId, SymLinkContext
+from ..analysis.symlinks import (
+    PyIRSymLink,
+    ScopeId,
+    SymLinkContext,
+    get_cached_symlink_usage_stats,
+)
 
 
 class CountSymlinkUsesPass:
@@ -136,22 +141,14 @@ class CountSymlinkUsesPass:
     ) -> None:
         fp = cls._canon_path(ir.path) if ir.path is not None else None
 
+        usage = get_cached_symlink_usage_stats(ir, ctx, skip_def_reads=True)
+
         def inc(symid: int, n: int = 1) -> None:
             counts[symid] = counts.get(symid, 0) + n
 
-        def node_symid(n: PyIRNode) -> int | None:
-            if fp is None:
-                return None
-
-            if isinstance(n, (PyIRFunctionDef, PyIRClassDef)):
-                if n.line is None:
-                    return None
-
-                return symid_by_decl.get((fp, n.line, n.name))
-
-            return None
-
-        def_stack: set[int] = set()
+        for sid, ncount in usage.reads.items():
+            if ncount > 0:
+                inc(int(sid), int(ncount))
 
         def resolve_class_attr_use(class_symid: int, attr: str, n: int = 1) -> None:
             key = (class_symid, attr)
@@ -215,11 +212,6 @@ class CountSymlinkUsesPass:
                 register_class_if_needed(node)
 
             if isinstance(node, PyIRSymLink):
-                if not node.is_store:
-                    sid = int(node.symbol_id)
-                    if sid not in def_stack:
-                        inc(sid)
-
                 return
 
             if isinstance(node, PyIRAttribute):
@@ -295,25 +287,15 @@ class CountSymlinkUsesPass:
                 return
 
             if isinstance(node, PyIRFunctionDef):
-                fn_sid = node_symid(node)
-                if fn_sid is not None:
-                    def_stack.add(fn_sid)
-
                 for d in node.decorators:
                     walk(d, store=False)
 
                 for b in node.body:
                     walk(b, store=False)
 
-                if fn_sid is not None:
-                    def_stack.remove(fn_sid)
                 return
 
             if isinstance(node, PyIRClassDef):
-                cls_sid = node_symid(node)
-                if cls_sid is not None:
-                    def_stack.add(cls_sid)
-
                 for d in node.decorators:
                     walk(d, store=False)
 
@@ -322,9 +304,6 @@ class CountSymlinkUsesPass:
 
                 for x in node.body:
                     walk(x, store=False)
-
-                if cls_sid is not None:
-                    def_stack.remove(cls_sid)
 
                 return
 

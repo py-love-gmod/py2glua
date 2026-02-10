@@ -6,6 +6,7 @@ from .debug_compile_only import (
     RewriteAndStripDebugCompileOnlyPass,
 )
 from .enum_fold import CollectGmodSpecialEnumDeclsPass, FoldGmodSpecialEnumUsesPass
+from .final_literal_inline import InlineFinalLiteralPass
 from .gmod_api import (
     CollectGmodApiDeclsPass,
     FinalizeGmodApiRegistryPass,
