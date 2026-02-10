@@ -5,8 +5,8 @@ import string
 from pathlib import Path
 
 from ._cli import CompilerExit, logger, setup_logging
-from ._lang.compiler import Compiler
 from ._config import Py2GluaConfig
+from ._lang.compiler import Compiler
 
 _LUA_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -107,41 +107,41 @@ def _build() -> None:
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
-
-    setup_logging(args.verbose)
-
-    Py2GluaConfig.verbose = args.verbose
-    Py2GluaConfig.debug = args.debug
-
-    Py2GluaConfig.source = args.src.resolve()
-    Py2GluaConfig.output = args.out.resolve()
-
-    if args.namespace:
-        _validate_namespace(args.namespace)
-        Py2GluaConfig.namespace = args.namespace
-
-    else:
-        ns = _gen_namespace()
-        Py2GluaConfig.namespace = ns
-        logger.warning(
-            "Namespace не задан\n"
-            f"Namespace задан автоматически: {ns}\n"
-            "Установить свой можно через параметр -n | --namespace"
-        )
-
-    logger.debug(
-        f"""Py2Glua
-Version  : {Py2GluaConfig.version()}
-Source   : {Py2GluaConfig.source}
-Output   : {Py2GluaConfig.output}
-Namespace: {Py2GluaConfig.namespace}
-Verbose  : {Py2GluaConfig.verbose}
-Debug    : {Py2GluaConfig.debug}
-"""
-    )
+    verbose = getattr(args, "verbose", False)
+    setup_logging(verbose)
 
     match args.cmd:
         case "build":
+            Py2GluaConfig.verbose = verbose
+            Py2GluaConfig.debug = args.debug
+
+            Py2GluaConfig.source = args.src.resolve()
+            Py2GluaConfig.output = args.out.resolve()
+
+            if args.namespace:
+                _validate_namespace(args.namespace)
+                Py2GluaConfig.namespace = args.namespace
+
+            else:
+                ns = _gen_namespace()
+                Py2GluaConfig.namespace = ns
+                logger.warning(
+                    "Namespace не задан\n"
+                    f"Namespace задан автоматически: {ns}\n"
+                    "Установить свой можно через параметр -n | --namespace"
+                )
+
+            logger.debug(
+                (
+                    "Py2Glua\n"
+                    f"Version  : {Py2GluaConfig.version()}\n"
+                    f"Source   : {Py2GluaConfig.source}\n"
+                    f"Output   : {Py2GluaConfig.output}\n"
+                    f"Namespace: {Py2GluaConfig.namespace}\n"
+                    f"Verbose  : {Py2GluaConfig.verbose}\n"
+                    f"Debug    : {Py2GluaConfig.debug}"
+                )
+            )
             _build()
             CompilerExit.generic(0)
 
