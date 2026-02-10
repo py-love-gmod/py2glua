@@ -20,23 +20,8 @@ from ....py.ir_dataclass import (
     PyIRWith,
 )
 from ...compiler_ir import PyIRFunctionExpr
+from ..common import CORE_COMPILER_DIRECTIVE_ATTR_PREFIXES
 from .expand_context import ExpandContext
-
-_CD_PREFIXES = (
-    (
-        "py2glua",
-        "glua",
-        "core",
-        "compiler_directive",
-        "CompilerDirective",
-    ),
-    (
-        "py2glua",
-        "glua",
-        "core",
-        "CompilerDirective",
-    ),
-)
 
 
 def _attr_chain_parts(node: PyIRNode) -> List[str] | None:
@@ -63,7 +48,7 @@ def _is_compiler_directive_attr(attr: PyIRAttribute, *, method: str) -> bool:
     if parts is None:
         return False
 
-    return tuple(parts) in _CD_PREFIXES
+    return tuple(parts) in CORE_COMPILER_DIRECTIVE_ATTR_PREFIXES
 
 
 def _compiler_directive_kind(dec: PyIRDecorator) -> str | None:

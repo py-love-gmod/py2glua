@@ -7,10 +7,10 @@ from ....py.ir_dataclass import (
     PyAugAssignType,
     PyBinOPType,
     PyIRAssign,
+    PyIRAttribute,
     PyIRAugAssign,
     PyIRBinOP,
     PyIRCall,
-    PyIRAttribute,
     PyIRConstant,
     PyIRDict,
     PyIRDictItem,
@@ -27,6 +27,8 @@ from ....py.ir_dataclass import (
 )
 from ..analysis.symlinks import PyIRSymLink, SymLinkContext
 from ..common import (
+    CORE_TYPES_MODULES,
+    attr_chain_parts,
     collect_local_imported_symbol_ids,
     collect_symbol_ids_in_modules,
     is_expr_on_symbol_ids,
@@ -48,7 +50,7 @@ class RewriteLuaTableCtorPass:
       - lua_table.__init__(...) (на случай уже нормализованного ctor-вызова)
     """
 
-    _TYPES_MODULE: Final[str] = "py2glua.glua.core.types"
+    _TYPES_MODULES: Final[tuple[str, ...]] = CORE_TYPES_MODULES
     _LUA_TABLE_NAME: Final[str] = "lua_table"
 
     @classmethod
@@ -58,7 +60,7 @@ class RewriteLuaTableCtorPass:
         lua_table_symbol_ids = collect_symbol_ids_in_modules(
             ctx,
             symbol_name=cls._LUA_TABLE_NAME,
-            modules=(cls._TYPES_MODULE,),
+            modules=cls._TYPES_MODULES,
         )
 
         if ir.path is not None:
@@ -69,7 +71,7 @@ class RewriteLuaTableCtorPass:
                     ctx=ctx,
                     current_module=current_module,
                     imported_name=cls._LUA_TABLE_NAME,
-                    allowed_modules=(cls._TYPES_MODULE,),
+                    allowed_modules=cls._TYPES_MODULES,
                 )
 
         if not lua_table_symbol_ids:
@@ -160,15 +162,40 @@ class RewriteLuaTableCtorPass:
         ctx: SymLinkContext,
         lua_table_symbol_ids: set[int],
     ) -> bool:
+        def is_lua_table_attr_chain(n: PyIRNode) -> bool:
+            parts = attr_chain_parts(n)
+            if not parts:
+                return False
+            return (
+                tuple(parts[-2:]) == ("glua", "lua_table")
+                or tuple(parts[-2:]) == ("core", "lua_table")
+                or tuple(parts[-2:]) == ("types", "lua_table")
+            )
+
+        def is_lua_table_emit_ref(n: PyIRNode) -> bool:
+            if not isinstance(n, PyIREmitExpr):
+                return False
+            if n.kind == PyIREmitKind.GLOBAL:
+                return n.name.endswith(".lua_table") or n.name == "lua_table"
+            if n.kind == PyIREmitKind.ATTR:
+                return n.name == "lua_table"
+            return False
+
         if isinstance(expr, PyIRAttribute) and expr.attr == "__init__":
             return is_expr_on_symbol_ids(
                 expr.value,
                 symbol_ids=lua_table_symbol_ids,
                 ctx=ctx,
-            )
+            ) or is_lua_table_attr_chain(expr.value)
 
         if isinstance(expr, PyIRSymLink):
             return int(expr.symbol_id) in lua_table_symbol_ids
+
+        if is_lua_table_emit_ref(expr):
+            return True
+
+        if is_lua_table_attr_chain(expr):
+            return True
 
         resolved_ids = resolve_symbol_ids_by_attr_chain(ctx, expr)
         return any(symbol_id in lua_table_symbol_ids for symbol_id in resolved_ids)
@@ -279,7 +306,7 @@ class RewriteForIteratorStrategyPass:
           for key in {"a": 1} -> pairs(...)
     """
 
-    _TYPES_MODULE: Final[str] = "py2glua.glua.core.types"
+    _TYPES_MODULES: Final[tuple[str, ...]] = CORE_TYPES_MODULES
     _LUA_TABLE_NAME: Final[str] = "lua_table"
     _EXPLICIT_ITERATORS: Final[frozenset[str]] = frozenset(
         {"pairs", "ipairs", "RandomPairs", "SortedPairs", "SortedPairsByValue"}
@@ -299,7 +326,7 @@ class RewriteForIteratorStrategyPass:
         lua_table_symbol_ids = collect_symbol_ids_in_modules(
             ctx,
             symbol_name=cls._LUA_TABLE_NAME,
-            modules=(cls._TYPES_MODULE,),
+            modules=cls._TYPES_MODULES,
         )
         if ir.path is not None:
             current_module = ctx.module_name_by_path.get(ir.path)
@@ -309,7 +336,7 @@ class RewriteForIteratorStrategyPass:
                     ctx=ctx,
                     current_module=current_module,
                     imported_name=cls._LUA_TABLE_NAME,
-                    allowed_modules=(cls._TYPES_MODULE,),
+                    allowed_modules=cls._TYPES_MODULES,
                 )
 
         def new_hidden_target(ref: PyIRNode) -> PyIRVarUse:
@@ -381,6 +408,25 @@ class RewriteForIteratorStrategyPass:
         expr: PyIRNode,
         lua_table_symbol_ids: set[int],
     ) -> PyIRNode | None:
+        def is_lua_table_attr_chain(n: PyIRNode) -> bool:
+            parts = attr_chain_parts(n)
+            if not parts:
+                return False
+            return (
+                tuple(parts[-2:]) == ("glua", "lua_table")
+                or tuple(parts[-2:]) == ("core", "lua_table")
+                or tuple(parts[-2:]) == ("types", "lua_table")
+            )
+
+        def is_lua_table_emit_ref(n: PyIRNode) -> bool:
+            if not isinstance(n, PyIREmitExpr):
+                return False
+            if n.kind == PyIREmitKind.GLOBAL:
+                return n.name.endswith(".lua_table") or n.name == "lua_table"
+            if n.kind == PyIREmitKind.ATTR:
+                return n.name == "lua_table"
+            return False
+
         if not isinstance(expr, PyIRCall):
             return None
 
@@ -390,10 +436,14 @@ class RewriteForIteratorStrategyPass:
         if func.attr != cls._BY_LEN_ITERATOR_METHOD:
             return None
 
-        if not is_expr_on_symbol_ids(
-            func.value,
-            symbol_ids=lua_table_symbol_ids,
-            ctx=ctx,
+        if not (
+            is_expr_on_symbol_ids(
+                func.value,
+                symbol_ids=lua_table_symbol_ids,
+                ctx=ctx,
+            )
+            or is_lua_table_attr_chain(func.value)
+            or is_lua_table_emit_ref(func.value)
         ):
             return None
 

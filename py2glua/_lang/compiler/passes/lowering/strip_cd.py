@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ....compiler.passes.analysis.symlinks import SymLinkContext
 from ....py.ir_dataclass import PyIRClassDef, PyIRFile, PyIRNode
+from ..common import GLUA_INTERNAL_NAMESPACE_PREFIX
 
 
 class StripCompilerDirectiveDefPass:
@@ -9,7 +10,7 @@ class StripCompilerDirectiveDefPass:
     Removes the *definition* of class CompilerDirective from INTERNAL output,
     without relying on @no_compile on itself (avoids weird self-references).
 
-    It only triggers for internal modules (module_name starts with 'py2glua.glua').
+    It only triggers for internal modules.
     """
 
     @staticmethod
@@ -30,7 +31,9 @@ class StripCompilerDirectiveDefPass:
         except Exception:
             module_name = None
 
-        if not module_name or not module_name.startswith("py2glua.glua"):
+        if not module_name or not module_name.startswith(
+            GLUA_INTERNAL_NAMESPACE_PREFIX
+        ):
             return ir
 
         def keep(n: PyIRNode) -> bool:

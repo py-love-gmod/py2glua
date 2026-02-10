@@ -35,7 +35,10 @@ from ....py.ir_dataclass import (
     PyUnaryOPType,
 )
 from ..common import (
+    CORE_TYPES_MODULES,
     collect_core_compiler_directive_local_symbol_ids,
+    collect_local_imported_symbol_ids,
+    collect_symbol_ids_in_modules,
     iter_imported_names,
     unwrap_decorator_attribute,
 )
@@ -90,7 +93,7 @@ class TypeFlowPass:
         but after loop returns original env (no guarantees)
     """
 
-    TYPES_MODULE = "py2glua.glua.core.types"
+    TYPES_MODULES = CORE_TYPES_MODULES
     _TYPEGUARD_NIL_DEC = "typeguard_nil"
 
     _ITERABLE_PREFIXES = (
@@ -195,14 +198,18 @@ class TypeFlowPass:
         if not current_module:
             return set(), set()
 
-        def local_symbol_id(name: str) -> int | None:
-            sym = ctx.get_exported_symbol(current_module, name)
-            return sym.id.value if sym is not None else None
-
-        nil_canon_sym = ctx.get_exported_symbol(TypeFlowPass.TYPES_MODULE, "nil")
-        nil_canon_id = nil_canon_sym.id.value if nil_canon_sym is not None else None
-
-        nil_name_ids: set[int] = set()
+        nil_name_ids: set[int] = collect_symbol_ids_in_modules(
+            ctx,
+            symbol_name="nil",
+            modules=TypeFlowPass.TYPES_MODULES,
+        )
+        nil_name_ids |= collect_local_imported_symbol_ids(
+            ir,
+            ctx=ctx,
+            current_module=current_module,
+            imported_name="nil",
+            allowed_modules=TypeFlowPass.TYPES_MODULES,
+        )
         types_module_alias_ids: set[int] = set()
 
         for node in ir.walk():
@@ -210,29 +217,17 @@ class TypeFlowPass:
                 continue
 
             mod = ".".join(node.modules) if node.modules else ""
-            if mod != TypeFlowPass.TYPES_MODULE:
-                continue
-
-            if node.if_from:
-                for orig, bound in iter_imported_names(node.names):
-                    if orig != "nil":
-                        continue
-
-                    sid = local_symbol_id(bound)
-                    if sid is not None:
-                        nil_name_ids.add(sid)
-
+            if mod not in TypeFlowPass.TYPES_MODULES:
                 continue
 
             if node.names:
                 for _orig, bound in iter_imported_names(node.names):
-                    sid = local_symbol_id(bound)
+                    sym = ctx.get_exported_symbol(current_module, bound)
+                    sid = sym.id.value if sym is not None else None
                     if sid is not None:
                         types_module_alias_ids.add(sid)
 
         nil_ids: set[int] = set(nil_name_ids)
-        if nil_canon_id is not None:
-            nil_ids.add(nil_canon_id)
 
         return nil_ids, types_module_alias_ids
 

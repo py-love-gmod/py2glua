@@ -16,8 +16,48 @@ from ...py.ir_dataclass import (
 from .analysis.symlinks import PyIRSymLink, SymLinkContext
 
 _CORE_COMPILER_DIRECTIVE_MODULES: tuple[str, ...] = (
+    "py2glua.glua",
     "py2glua.glua.core",
     "py2glua.glua.core.compiler_directive",
+)
+
+GLUA_INTERNAL_NAMESPACE_PREFIX: str = "py2glua.glua"
+
+CORE_TYPES_MODULES: tuple[str, ...] = (
+    "py2glua.glua.core.types",
+    "py2glua.glua.core",
+    "py2glua.glua",
+)
+
+# Canonical attribute-chain roots for core CompilerDirective access.
+# Supported forms:
+#   py2glua.glua.CompilerDirective
+#   py2glua.glua.core.CompilerDirective
+#   py2glua.glua.core.compiler_directive.CompilerDirective
+CORE_COMPILER_DIRECTIVE_ATTR_PREFIXES: tuple[tuple[str, ...], ...] = (
+    (
+        "py2glua",
+        "glua",
+        "CompilerDirective",
+    ),
+    (
+        "py2glua",
+        "glua",
+        "core",
+        "CompilerDirective",
+    ),
+    (
+        "py2glua",
+        "glua",
+        "core",
+        "compiler_directive",
+        "CompilerDirective",
+    ),
+)
+
+CORE_CONTEXTMANAGER_BODY_CHAINS: tuple[tuple[str, ...], ...] = tuple(
+    prefix + ("contextmanager_body",)
+    for prefix in CORE_COMPILER_DIRECTIVE_ATTR_PREFIXES
 )
 
 _IMPORTED_LOCAL_NAMES_CACHE: dict[

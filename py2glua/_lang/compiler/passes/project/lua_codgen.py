@@ -608,11 +608,13 @@ class LuaEmitter:
                 PyIRVarUse,
                 PyIRVarCreate,
                 PyIRSubscript,
-                PyIREmitExpr,
                 PyIRSymLink,
             ),
         ):
             return str(node)
+
+        if isinstance(node, PyIREmitExpr):
+            return self._emit_emit_expr(node)
 
         if isinstance(node, PyIRCall):
             return self._call(node)
@@ -660,6 +662,35 @@ class LuaEmitter:
         body = "".join(sub._buf).rstrip("\n")
         return f"function({args})\n{body}\nend"
 
+    def _emit_emit_expr(self, node: PyIREmitExpr) -> str:
+        if node.kind == PyIREmitKind.GLOBAL:
+            return node.name
+
+        if node.kind == PyIREmitKind.RAW:
+            return node.name
+
+        if node.kind == PyIREmitKind.ATTR:
+            if len(node.args_p) != 1:
+                return self._leak("emit ATTR arity")
+            return f"{self._expr(node.args_p[0])}.{node.name}"
+
+        if node.kind == PyIREmitKind.INDEX:
+            if len(node.args_p) != 2:
+                return self._leak("emit INDEX arity")
+            return f"{self._expr(node.args_p[0])}[{self._expr(node.args_p[1])}]"
+
+        if node.kind == PyIREmitKind.CALL:
+            if node.args_kw:
+                return self._leak("emit CALL with kwargs")
+            if not node.args_p and node.name.endswith(".nil"):
+                return "nil"
+            if not node.args_p and node.name == "nil":
+                return "nil"
+            args = ", ".join(self._expr(a) for a in node.args_p)
+            return f"{node.name}({args})"
+
+        return self._leak(f"emit {node.kind}")
+
     def _call(self, node: PyIRCall) -> str:
         if node.args_kw:
             return self._leak("call with kwargs")
@@ -670,6 +701,8 @@ class LuaEmitter:
             return f"({self._expr(node.func)})({args})"
 
         func_s = self._expr(node.func)
+        if not node.args_p and func_s == "nil":
+            return "nil"
         return f"{func_s}({args})"
 
     def _emit_list(self, node: PyIRList) -> str:
