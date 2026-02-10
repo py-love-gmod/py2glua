@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum, IntEnum, auto
 from pathlib import Path
 
-from ...config import Py2GluaConfig
+from ..._config import Py2GluaConfig
 
 
 # Base

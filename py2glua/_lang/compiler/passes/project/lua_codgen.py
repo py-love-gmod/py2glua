@@ -5,7 +5,7 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Final
 
-from .....config import Py2GluaConfig
+from ....._config import Py2GluaConfig
 from ....compiler.compiler_ir import PyIRDo, PyIRFunctionExpr, PyIRGoto, PyIRLabel
 from ....py.ir_dataclass import (
     PyAugAssignType,

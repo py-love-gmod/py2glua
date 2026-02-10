@@ -5,7 +5,7 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
-from .....config import Py2GluaConfig
+from ....._config import Py2GluaConfig
 from ....py.ir_dataclass import (
     LuaNil,
     PyIRAssign,

@@ -6,7 +6,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any, Iterable
 
-from .....config import Py2GluaConfig
+from ....._config import Py2GluaConfig
 from ....py.ir_builder import PyIRFile
 from ....py.ir_dataclass import (
     PyIRAttribute,

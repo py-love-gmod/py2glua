@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Final
 
-from .....config import Py2GluaConfig
+from ....._config import Py2GluaConfig
 from ....py.ir_dataclass import (
     PyIRCall,
     PyIRClassDef,

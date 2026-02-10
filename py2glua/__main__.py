@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ._cli import CompilerExit, logger, setup_logging
 from ._lang.compiler import Compiler
-from .config import Py2GluaConfig
+from ._config import Py2GluaConfig
 
 _LUA_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 

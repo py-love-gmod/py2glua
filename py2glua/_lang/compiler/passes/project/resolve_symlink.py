@@ -4,7 +4,7 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Final
 
-from .....config import Py2GluaConfig
+from ....._config import Py2GluaConfig
 from ....py.ir_dataclass import (
     PyIRAssign,
     PyIRAttribute,

@@ -4,7 +4,7 @@ from importlib import resources
 from pathlib import Path
 
 from ..._cli import CompilerExit, log_step
-from ...config import Py2GluaConfig
+from ..._config import Py2GluaConfig
 from ..py.ir_builder import PyIRBuilder, PyIRFile
 from .import_resolver import ImportResolver
 from .passes.analysis import (

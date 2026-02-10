@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final
 
-from .....config import Py2GluaConfig
+from ....._config import Py2GluaConfig
 from ....py.ir_dataclass import (
     FileRealm,
     PyIRComment,

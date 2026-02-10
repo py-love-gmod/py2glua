@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .....config import Py2GluaConfig
+from ....._config import Py2GluaConfig
 from ....py.ir_dataclass import (
     PyIRAttribute,
     PyIRConstant,
