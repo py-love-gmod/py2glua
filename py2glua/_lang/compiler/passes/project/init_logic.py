@@ -32,6 +32,7 @@ class BuildAutorunInitProjectPass:
     """
 
     _INIT_VIRTUAL_PATH: Final[Path] = Path("lua") / "autorun" / "init.py"
+    _INTERNAL_RUNTIME_PREFIX: Final[tuple[str, str]] = ("py2glua", "glua")
 
     @classmethod
     def run(cls, files: list[PyIRFile], ctx: SymLinkContext) -> list[PyIRFile]:
@@ -274,7 +275,25 @@ class BuildAutorunInitProjectPass:
             return rel.with_suffix(".lua").as_posix()
 
         except Exception:
+            internal_rel = cls._internal_runtime_rel_from_module(mod)
+            if internal_rel is not None:
+                return internal_rel.with_suffix(".lua").as_posix()
+
             return (Path(*mod.split("."))).with_suffix(".lua").as_posix()
+
+    @classmethod
+    def _internal_runtime_rel_from_module(cls, mod: str) -> Path | None:
+        parts = tuple(x for x in mod.split(".") if x)
+        if len(parts) < 2 or parts[:2] != cls._INTERNAL_RUNTIME_PREFIX:
+            return None
+
+        ns = (Py2GluaConfig.namespace or "").strip()
+        if not ns:
+            raise RuntimeError(
+                "BuildAutorunInitProjectPass: namespace is empty; cannot place internal runtime."
+            )
+
+        return Path("py2glua", ns, *parts[2:])
 
     @classmethod
     def _add_resolved_path_aliases(cls, ctx: SymLinkContext) -> None:
