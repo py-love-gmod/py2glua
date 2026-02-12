@@ -6,6 +6,7 @@ from ....._cli import CompilerExit
 from ....py.ir_builder import PyIRFile
 from ....py.ir_dataclass import (
     PyIRClassDef,
+    PyIRComment,
     PyIRDecorator,
     PyIRFor,
     PyIRFunctionDef,
@@ -43,6 +44,10 @@ class AttachDecoratorsPass:
         for node in body:
             if isinstance(node, PyIRDecorator):
                 pending.append(node)
+                continue
+
+            if isinstance(node, PyIRComment):
+                new_body.append(node)
                 continue
 
             if isinstance(node, (PyIRFunctionDef, PyIRClassDef)):

@@ -633,6 +633,7 @@ class PyIREmitKind(IntEnum):
     ATTR = auto()
     INDEX = auto()
     RAW = auto()
+    METHOD_CALL = auto()
 
 
 @dataclass
@@ -677,5 +678,18 @@ class PyIREmitExpr(PyIRNode):
 
             args = ", ".join(str(a) for a in self.args_p)
             return f"{self.name}({args})"
+
+        if self.kind == PyIREmitKind.METHOD_CALL:
+            if self.args_kw:
+                raise AssertionError(
+                    "METHOD_CALL does not support keyword args in emit expr"
+                )
+
+            if not self.args_p:
+                raise AssertionError("METHOD_CALL expects base object in args_p[0]")
+
+            base = self.args_p[0]
+            args = ", ".join(str(a) for a in self.args_p[1:])
+            return f"{base}:{self.name}({args})"
 
         raise AssertionError("Unknown emit kind")

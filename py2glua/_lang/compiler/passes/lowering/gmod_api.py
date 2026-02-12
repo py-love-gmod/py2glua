@@ -18,7 +18,6 @@ from ....py.ir_dataclass import (
     PyIRNode,
     PyIRVarUse,
 )
-from ..rewrite_utils import rewrite_expr_with_store_default, rewrite_stmt_block
 from ..common import (
     collect_core_compiler_directive_local_symbol_ids,
     collect_core_compiler_directive_symbol_ids,
@@ -26,6 +25,7 @@ from ..common import (
     is_expr_on_symbol_ids,
     resolve_symbol_ids_by_attr_chain,
 )
+from ..rewrite_utils import rewrite_expr_with_store_default, rewrite_stmt_block
 
 
 @dataclass(frozen=True)
@@ -191,6 +191,22 @@ def _make_emit_call(ref: PyIRNode, lua_name: str, args: list[PyIRNode]) -> PyIRE
         kind=PyIREmitKind.CALL,
         name=lua_name,
         args_p=args,
+        args_kw={},
+    )
+
+
+def _make_emit_method_call(
+    ref: PyIRNode,
+    lua_method_name: str,
+    base_obj: PyIRNode,
+    args: list[PyIRNode],
+) -> PyIREmitExpr:
+    return PyIREmitExpr(
+        line=ref.line,
+        offset=ref.offset,
+        kind=PyIREmitKind.METHOD_CALL,
+        name=lua_method_name,
+        args_p=[base_obj, *args],
         args_kw={},
     )
 
@@ -597,7 +613,13 @@ class RewriteGmodApiCallsPass:
                             node,
                         )
 
-                    return _make_emit_call(node, first.lua_name, [base, *node.args_p])
+                    lua_method_name = first.lua_name.rsplit(".", 1)[-1]
+                    return _make_emit_method_call(
+                        node,
+                        lua_method_name,
+                        base,
+                        node.args_p,
+                    )
 
                 return node
 

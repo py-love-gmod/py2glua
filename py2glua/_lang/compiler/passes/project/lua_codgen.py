@@ -689,6 +689,15 @@ class LuaEmitter:
             args = ", ".join(self._expr(a) for a in node.args_p)
             return f"{node.name}({args})"
 
+        if node.kind == PyIREmitKind.METHOD_CALL:
+            if node.args_kw:
+                return self._leak("emit METHOD_CALL with kwargs")
+            if not node.args_p:
+                return self._leak("emit METHOD_CALL arity")
+            base = self._expr(node.args_p[0])
+            args = ", ".join(self._expr(a) for a in node.args_p[1:])
+            return f"{base}:{node.name}({args})"
+
         return self._leak(f"emit {node.kind}")
 
     def _call(self, node: PyIRCall) -> str:
