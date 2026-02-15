@@ -2,7 +2,7 @@ from collections.abc import Callable
 from enum import Enum
 from typing import TypeVar
 
-from .core import CompilerDirective, nil
+from .core import CompilerDirective, nil_type
 
 F = TypeVar("F", bound=Callable[..., object])
 
@@ -33,7 +33,7 @@ class ENTType(Enum):
 class ENT:
     # Блок "шорткат" полей. Они не существуют в обычном lua
     # Но мне удобнее их добавить чтобы работать через них
-    uid: str | nil
+    uid: str | nil_type
     """Указание ID энтити.
     По умолчанию идёт значение имени переменной
     """

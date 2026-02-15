@@ -1,11 +1,16 @@
-from typing import Any, Iterable
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any, Final, TypeVar
 
 from ..realm import Realm
 from .compiler_directive import CompilerDirective
 
+_K = TypeVar("_K")
+_V = TypeVar("_V")
+_T = TypeVar("_T")
+
 
 @CompilerDirective.no_compile()
-class nil:
+class nil_type:
     """
     Glua-тип отсутствующего значения.
     - `None` означает "пустой объект", то есть значение существует.
@@ -24,6 +29,10 @@ class nil:
 
     def __bool__(self) -> bool:
         return False
+
+
+# Runtime singleton for typing/user-facing nil marker.
+nil: Final[nil_type] = nil_type()
 
 
 @CompilerDirective.no_compile()
@@ -52,7 +61,7 @@ class lua_table:
 
     @staticmethod
     @CompilerDirective.gmod_api("pairs", realm=[Realm.SHARED], method=False)
-    def pairs(table_value: Any) -> Iterable[tuple[Any, Any]]:
+    def pairs(table_value: Mapping[_K, _V]) -> Iterable[tuple[_K, _V]]:
         """
         TODO: NORMAL DOCS
         Явный выбор итерации через `pairs`.
@@ -61,7 +70,7 @@ class lua_table:
 
     @staticmethod
     @CompilerDirective.gmod_api("ipairs", realm=[Realm.SHARED], method=False)
-    def ipairs(table_value: Any) -> Iterable[tuple[int, Any]]:
+    def ipairs(table_value: Sequence[_T]) -> Iterable[tuple[int, _T]]:
         """
         TODO: NORMAL DOCS
         Явный выбор итерации через `ipairs`.
@@ -69,7 +78,7 @@ class lua_table:
         ...
 
     @staticmethod
-    def by_len(table_value: Any) -> Iterable[Any]:
+    def by_len(table_value: Sequence[_T]) -> Iterable[_T]:
         """
         TODO: NORMAL DOCS
         WARN: MAGIC METHOD
@@ -81,7 +90,7 @@ class lua_table:
 
     @staticmethod
     @CompilerDirective.gmod_api("RandomPairs", realm=[Realm.SHARED], method=False)
-    def random_pairs(table_value: Any) -> Iterable[tuple[Any, Any]]:
+    def random_pairs(table_value: Mapping[_K, _V]) -> Iterable[tuple[_K, _V]]:
         """
         TODO: NORMAL DOCS
         Явный выбор итерации через `RandomPairs`.
@@ -90,7 +99,7 @@ class lua_table:
 
     @staticmethod
     @CompilerDirective.gmod_api("SortedPairs", realm=[Realm.SHARED], method=False)
-    def sorted_pairs(table_value: Any) -> Iterable[tuple[Any, Any]]:
+    def sorted_pairs(table_value: Mapping[_K, _V]) -> Iterable[tuple[_K, _V]]:
         """
         TODO: NORMAL DOCS
         Явный выбор итерации через `SortedPairs`.
@@ -103,7 +112,7 @@ class lua_table:
         realm=[Realm.SHARED],
         method=False,
     )
-    def sorted_pairs_by_value(table_value: Any) -> Iterable[tuple[Any, Any]]:
+    def sorted_pairs_by_value(table_value: Mapping[_K, _V]) -> Iterable[tuple[_K, _V]]:
         """
         TODO: NORMAL DOCS
         Явный выбор итерации через `SortedPairsByValue`.

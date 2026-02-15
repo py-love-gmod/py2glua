@@ -5,6 +5,8 @@ from typing import Iterable
 from ....compiler.passes.analysis.symlinks import PyIRSymLink, SymLinkContext
 from ....py.ir_dataclass import (
     LuaNil,
+    PyIRAnnotatedAssign,
+    PyIRAssign,
     PyIRAttribute,
     PyIRCall,
     PyIRConstant,
@@ -193,4 +195,22 @@ class NilFoldPass:
             )
 
         ir.body = rw_block(ir.body)
+
+        if current_module == "py2glua.glua.core.types":
+            pruned: list[PyIRNode] = []
+            for st in ir.body:
+                if isinstance(st, PyIRAnnotatedAssign) and st.name == "nil":
+                    continue
+                if isinstance(st, PyIRAssign) and len(st.targets) == 1:
+                    t = st.targets[0]
+                    tname: str | None = None
+                    if isinstance(t, PyIRVarUse):
+                        tname = t.name
+                    elif isinstance(t, PyIRSymLink):
+                        tname = t.name
+                    if tname == "nil":
+                        continue
+                pruned.append(st)
+            ir.body = pruned
+
         return ir

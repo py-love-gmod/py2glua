@@ -6,10 +6,10 @@ from typing import Literal
 
 from ....._config import Py2GluaConfig
 from ....py.ir_dataclass import (
-    PyIRCall,
     PyIRAssign,
     PyIRAttribute,
     PyIRAugAssign,
+    PyIRCall,
     PyIRClassDef,
     PyIRFile,
     PyIRFor,
@@ -161,7 +161,9 @@ def _canon_path(p: Path | None) -> Path | None:
         return p
 
 
-def _collect_symid_by_decl_cache(ctx: "SymLinkContext") -> dict[tuple[Path, int, str], int]:
+def _collect_symid_by_decl_cache(
+    ctx: "SymLinkContext",
+) -> dict[tuple[Path, int, str], int]:
     cached = ctx._raw_symid_by_decl_cache
     if cached:
         return cached
@@ -342,6 +344,9 @@ class SymLinkContext:
     _net_string_literals: set[str] = field(default_factory=set)
 
     _gmod_special_enum_store: dict[int, dict[str, object]] = field(default_factory=dict)
+    _gmod_special_enum_nested_ids: dict[tuple[int, str], int] = field(
+        default_factory=dict
+    )
 
     _deprecated_symid_to_msg: dict[int, str] = field(default_factory=dict)
     _deprecated_symid_to_disp: dict[int, str] = field(default_factory=dict)

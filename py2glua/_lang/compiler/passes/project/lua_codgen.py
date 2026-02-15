@@ -65,6 +65,8 @@ class LuaEmitter:
         PyBinOPType.AND: "and",
         PyBinOPType.EQ: "==",
         PyBinOPType.NE: "~=",
+        PyBinOPType.IS: "==",
+        PyBinOPType.IS_NOT: "~=",
         PyBinOPType.LT: "<",
         PyBinOPType.GT: ">",
         PyBinOPType.LE: "<=",
@@ -438,6 +440,9 @@ class LuaEmitter:
                 self._wl(f"{node.name}.{item.name} = {self._expr(item.value)}")
             elif isinstance(item, PyIRAnnotation):
                 # Annotation-only class fields do not have runtime value.
+                continue
+            elif isinstance(item, PyIRPass):
+                # `pass` inside class body should not leak to output.
                 continue
             else:
                 self._wl(self._leak(type(item).__name__))

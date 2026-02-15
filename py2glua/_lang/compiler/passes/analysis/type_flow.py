@@ -34,6 +34,7 @@ from ....py.ir_dataclass import (
     PyIRWithItem,
     PyUnaryOPType,
 )
+from ...compiler_ir import PyIRFunctionExpr
 from ..common import (
     CORE_TYPES_MODULES,
     collect_core_compiler_directive_local_symbol_ids,
@@ -122,7 +123,7 @@ class TypeFlowPass:
         ) = TypeFlowPass._collect_return_types(ir, ctx)
 
         for node in ir.walk():
-            if isinstance(node, PyIRFunctionDef):
+            if isinstance(node, (PyIRFunctionDef, PyIRFunctionExpr)):
                 TypeFlowPass._process_fn(
                     ir,
                     ctx,
@@ -399,7 +400,7 @@ class TypeFlowPass:
             if p in ("None", "NoneType"):
                 out.add(TYPE_NONE)
 
-            elif p in ("nil", "LuaNil", "LuaNilType"):
+            elif p in ("nil", "nil_type", "LuaNil", "LuaNilType"):
                 out.add(TYPE_NIL)
 
             elif p == "Value":
@@ -477,7 +478,7 @@ class TypeFlowPass:
     def _process_fn(
         ir: PyIRFile,
         ctx: SymLinkContext,
-        fn: PyIRFunctionDef,
+        fn: PyIRFunctionDef | PyIRFunctionExpr,
         type_sets: Dict[int, frozenset[str]],
         snapshots: Dict[int, Dict[int, frozenset[str]]],
         warn_once,

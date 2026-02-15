@@ -576,7 +576,6 @@ class RewriteGmodApiCallsPass:
                     tset = types_at_call(node, base.symbol_id)
                     if tset is None:
                         return node
-
                     cls_ids, had_nullish = candidate_class_ids(tset)
 
                     if had_nullish:

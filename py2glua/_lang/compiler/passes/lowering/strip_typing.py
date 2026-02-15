@@ -230,13 +230,17 @@ class StripTypingRuntimeArtifactsPass:
                 node.decorators = cleaned_decorators
 
                 node.bases = [rw_expr(base, False) for base in node.bases]
-                node.bases = [base for base in node.bases if not is_typing_only_expr(base)]
+                node.bases = [
+                    base for base in node.bases if not is_typing_only_expr(base)
+                ]
                 node.body = rw_block(node.body)
                 return [node]
 
             if isinstance(node, PyIRAssign):
                 node.targets = [rw_expr(target, True) for target in node.targets]
                 node.value = rw_expr(node.value, False)
+                if cls._is_trivial_self_assign(node):
+                    return []
                 if is_typing_only_expr(node.value):
                     return []
                 return [node]
@@ -254,6 +258,25 @@ class StripTypingRuntimeArtifactsPass:
 
         ir.body = rw_block(ir.body)
         return ir
+
+    @classmethod
+    def _is_trivial_self_assign(cls, node: PyIRAssign) -> bool:
+        _ = cls
+        if len(node.targets) != 1:
+            return False
+
+        lhs = node.targets[0]
+        rhs = node.value
+
+        if not isinstance(lhs, (PyIRVarUse, PyIRSymLink)):
+            return False
+        if not isinstance(rhs, (PyIRVarUse, PyIRSymLink)):
+            return False
+
+        if isinstance(lhs, PyIRSymLink) and isinstance(rhs, PyIRSymLink):
+            return int(lhs.symbol_id) == int(rhs.symbol_id)
+
+        return lhs.name == rhs.name
 
     @classmethod
     def _collect_stripped_symbol_ids(cls, ctx: SymLinkContext) -> set[int]:
@@ -448,7 +471,9 @@ class StripTypingRuntimeArtifactsPass:
             kept_names = []
             for source_name, local_name in iter_imported_names(node.names):
                 full_module_name = (
-                    ".".join([*node.modules, source_name]) if node.modules else source_name
+                    ".".join([*node.modules, source_name])
+                    if node.modules
+                    else source_name
                 )
                 if full_module_name in cls._STRIPPED_MODULES:
                     continue

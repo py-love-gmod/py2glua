@@ -314,6 +314,16 @@ class RewriteForIteratorStrategyPass:
     _BY_LEN_ITERATOR_METHOD: Final[str] = "by_len"
     _AUTO_VALUE_ITERATOR: Final[str] = "ipairs"
     _AUTO_PAIRS_ITERATOR: Final[str] = "pairs"
+    _DICT_ITEMS_METHOD: Final[str] = "items"
+    _DICT_KEYS_METHOD: Final[str] = "keys"
+    _DICT_VALUES_METHOD: Final[str] = "values"
+    _DICT_ITER_METHODS: Final[frozenset[str]] = frozenset(
+        {
+            _DICT_ITEMS_METHOD,
+            _DICT_KEYS_METHOD,
+            _DICT_VALUES_METHOD,
+        }
+    )
     _AUTO_IDX_PREFIX: Final[str] = "__p2g_i_"
     _BY_LEN_TBL_PREFIX: Final[str] = "__p2g_len_tbl_"
     _BY_LEN_IDX_PREFIX: Final[str] = "__p2g_len_i_"
@@ -384,7 +394,11 @@ class RewriteForIteratorStrategyPass:
                         new_tmp_name=new_tmp_name,
                     )
 
-                cls._rewrite_for_header(st, new_hidden_target)
+                cls._rewrite_for_header(
+                    ir=ir,
+                    st=st,
+                    new_hidden_target=new_hidden_target,
+                )
                 return [st]
 
             return [rw_expr(st, False)]
@@ -571,31 +585,129 @@ class RewriteForIteratorStrategyPass:
     @classmethod
     def _rewrite_for_header(
         cls,
-        node: PyIRFor,
+        *,
+        ir: PyIRFile,
+        st: PyIRFor,
         new_hidden_target,
     ) -> None:
-        if cls._is_explicit_iterator_expr(node.iter):
+        dict_iter = cls._extract_dict_iter_source(st.iter)
+        if dict_iter is not None:
+            method_name, source = dict_iter
+            cls._rewrite_for_dict_iter_method(
+                ir=ir,
+                st=st,
+                method_name=method_name,
+                source=source,
+                new_hidden_target=new_hidden_target,
+            )
             return
 
-        pair_target, value_target = cls._split_for_target(node.target)
+        if cls._is_explicit_iterator_expr(st.iter):
+            return
+
+        pair_target, value_target = cls._split_for_target(st.target)
         if pair_target is not None:
-            node.iter = cls._wrap_iter(node.iter, cls._AUTO_PAIRS_ITERATOR)
+            st.iter = cls._wrap_iter(st.iter, cls._AUTO_PAIRS_ITERATOR)
             return
 
         if value_target is None:
             return
 
-        if isinstance(node.iter, PyIRDict):
-            node.iter = cls._wrap_iter(node.iter, cls._AUTO_PAIRS_ITERATOR)
+        if isinstance(st.iter, PyIRDict):
+            st.iter = cls._wrap_iter(st.iter, cls._AUTO_PAIRS_ITERATOR)
             return
 
-        node.iter = cls._wrap_iter(node.iter, cls._AUTO_VALUE_ITERATOR)
-        hidden = new_hidden_target(node.target)
-        node.target = PyIRTuple(
-            line=node.target.line,
-            offset=node.target.offset,
+        st.iter = cls._wrap_iter(st.iter, cls._AUTO_VALUE_ITERATOR)
+        hidden = new_hidden_target(st.target)
+        st.target = PyIRTuple(
+            line=st.target.line,
+            offset=st.target.offset,
             elements=[hidden, value_target],
         )
+
+    @classmethod
+    def _extract_dict_iter_source(cls, expr: PyIRNode) -> tuple[str, PyIRNode] | None:
+        _ = cls
+        if not isinstance(expr, PyIRCall):
+            return None
+        if expr.args_kw:
+            return None
+        if expr.args_p:
+            return None
+        if not isinstance(expr.func, PyIRAttribute):
+            return None
+        if expr.func.attr not in cls._DICT_ITER_METHODS:
+            return None
+        return expr.func.attr, expr.func.value
+
+    @classmethod
+    def _rewrite_for_dict_iter_method(
+        cls,
+        *,
+        ir: PyIRFile,
+        st: PyIRFor,
+        method_name: str,
+        source: PyIRNode,
+        new_hidden_target,
+    ) -> None:
+        pair_target, value_target = cls._split_for_target(st.target)
+
+        if method_name == cls._DICT_ITEMS_METHOD:
+            st.iter = cls._wrap_iter(source, cls._AUTO_PAIRS_ITERATOR)
+            if pair_target is not None:
+                if len(pair_target.elements) != 2:
+                    CompilerExit.user_error_node(
+                        "dict.items() в for поддерживает только 2 переменные в цели.",
+                        ir.path,
+                        st,
+                    )
+                return
+
+            _ = value_target
+            CompilerExit.user_error_node(
+                "dict.items() в for требует распаковку: for key, value in dict.items().",
+                ir.path,
+                st,
+            )
+
+        if method_name == cls._DICT_KEYS_METHOD:
+            if pair_target is not None:
+                CompilerExit.user_error_node(
+                    "dict.keys() в for поддерживает только одну переменную в цели.",
+                    ir.path,
+                    st,
+                )
+            if value_target is None:
+                CompilerExit.user_error_node(
+                    "Некорректная цель цикла for для dict.keys().",
+                    ir.path,
+                    st,
+                )
+            st.iter = cls._wrap_iter(source, cls._AUTO_PAIRS_ITERATOR)
+            st.target = value_target
+            return
+
+        if method_name == cls._DICT_VALUES_METHOD:
+            if pair_target is not None:
+                CompilerExit.user_error_node(
+                    "dict.values() в for поддерживает только одну переменную в цели.",
+                    ir.path,
+                    st,
+                )
+            if value_target is None:
+                CompilerExit.user_error_node(
+                    "Некорректная цель цикла for для dict.values().",
+                    ir.path,
+                    st,
+                )
+            st.iter = cls._wrap_iter(source, cls._AUTO_PAIRS_ITERATOR)
+            hidden = new_hidden_target(st.target)
+            st.target = PyIRTuple(
+                line=st.target.line,
+                offset=st.target.offset,
+                elements=[hidden, value_target],
+            )
+            return
 
     @classmethod
     def _split_for_target(

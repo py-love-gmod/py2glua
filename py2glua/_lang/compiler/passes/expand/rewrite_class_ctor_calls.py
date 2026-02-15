@@ -233,20 +233,54 @@ class RewriteClassCtorCallsPass:
                 expr.args_kw = {k: rw_expr(v, False) for k, v in expr.args_kw.items()}
 
                 if not store and isinstance(expr.func, PyIRVarUse):
-                    if expr.func.name in local_classes:
+                    class_name = expr.func.name
+                    if class_name in local_classes:
+                        template = templates.get(class_name)
+                        if template is None:
+                            return expr
+
                         if expr.args_kw:
                             CompilerExit.user_error_node(
-                                f"Вызов конструктора класса '{expr.func.name}' с keyword-аргументами пока не поддерживается",
+                                f"Вызов конструктора класса '{class_name}' с keyword-аргументами пока не поддерживается",
                                 ir.path,
                                 expr,
                             )
-                        base = expr.func
-                        expr.func = PyIRAttribute(
-                            line=base.line,
-                            offset=base.offset,
-                            value=base,
-                            attr=RewriteClassCtorCallsPass._CTOR_NAME,
-                        )
+
+                        if template.has_init:
+                            base = expr.func
+                            expr.func = PyIRAttribute(
+                                line=base.line,
+                                offset=base.offset,
+                                value=base,
+                                attr=RewriteClassCtorCallsPass._CTOR_NAME,
+                            )
+                        else:
+                            if expr.args_p:
+                                CompilerExit.user_error_node(
+                                    f"Класс '{class_name}' не имеет __init__; аргументы конструктора недопустимы",
+                                    ir.path,
+                                    expr,
+                                )
+                            expr = PyIRCall(
+                                line=expr.line,
+                                offset=expr.offset,
+                                func=PyIRVarUse(
+                                    line=expr.line,
+                                    offset=expr.offset,
+                                    name="setmetatable",
+                                ),
+                                args_p=[
+                                    PyIRDict(
+                                        line=expr.line, offset=expr.offset, items=[]
+                                    ),
+                                    PyIRVarUse(
+                                        line=expr.line,
+                                        offset=expr.offset,
+                                        name=class_name,
+                                    ),
+                                ],
+                                args_kw={},
+                            )
 
                 return expr
 
@@ -266,6 +300,9 @@ class RewriteClassCtorCallsPass:
         cls: PyIRClassDef,
         template: ClassTemplate,
     ) -> None:
+        if not template.has_init:
+            return
+
         user_init: PyIRFunctionDef | None = None
         user_init_idx: int | None = None
 
@@ -386,7 +423,9 @@ class RewriteClassCtorCallsPass:
             returns=(user_init.returns if user_init is not None else None),
             vararg=wrapper_vararg,
             kwarg=wrapper_kwarg,
-            decorators=(deepcopy(user_init.decorators) if user_init is not None else []),
+            decorators=(
+                deepcopy(user_init.decorators) if user_init is not None else []
+            ),
             body=body,
         )
 

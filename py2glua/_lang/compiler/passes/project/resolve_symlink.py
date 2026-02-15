@@ -214,18 +214,107 @@ class ResolveSymlinksToNamespaceProjectPass:
         cur_mod = cls._module_of_path(ir.path, ctx)
         ns = (Py2GluaConfig.namespace or "").strip()
         import_binds = cls._import_bind_map(ir)
+        used_alias_names = cls._collect_defs_in_block(ir.body, stop_at_boundaries=True)
+        used_alias_names.update(import_binds.keys())
+        module_alias_by_parts: dict[tuple[str, ...], str] = {}
 
         cls._place_locals_project_style(ir, import_binds=import_binds)
 
         ir.body = [
-            cls._rw_stmt(n, ctx, cur_mod, ir.path, import_binds, ns) for n in ir.body
+            cls._rw_stmt(
+                n,
+                ctx,
+                cur_mod,
+                ir.path,
+                import_binds,
+                ns,
+                module_alias_by_parts,
+                used_alias_names,
+            )
+            for n in ir.body
         ]
+
+        if ns and module_alias_by_parts:
+            ir.body = [
+                *cls._build_module_alias_bindings(ns, module_alias_by_parts),
+                *ir.body,
+            ]
 
         if cur_mod and ns:
             exported = sorted(project_exports.get(cur_mod, set()))
             if exported:
                 ns_mod_parts = cls._ns_module_parts(cur_mod)
                 ir.body = cls._append_exports(ir.body, ns, ns_mod_parts, exported)
+
+    @classmethod
+    def _get_or_create_module_alias(
+        cls,
+        module_parts: tuple[str, ...],
+        module_alias_by_parts: dict[tuple[str, ...], str],
+        used_alias_names: set[str],
+    ) -> str:
+        hit = module_alias_by_parts.get(module_parts)
+        if hit is not None:
+            return hit
+
+        idx = len(module_alias_by_parts)
+        while True:
+            cand = f"__m{idx}"
+            idx += 1
+            if cand in used_alias_names:
+                continue
+            used_alias_names.add(cand)
+            module_alias_by_parts[module_parts] = cand
+            return cand
+
+    @classmethod
+    def _module_ref_expr(
+        cls,
+        *,
+        ns: str,
+        module_parts: tuple[str, ...],
+        line: int | None,
+        offset: int | None,
+        module_alias_by_parts: dict[tuple[str, ...], str],
+        used_alias_names: set[str],
+    ) -> PyIRNode:
+        alias = cls._get_or_create_module_alias(
+            module_parts,
+            module_alias_by_parts,
+            used_alias_names,
+        )
+        return PyIRVarUse(line=line, offset=offset, name=alias)
+
+    @classmethod
+    def _build_module_alias_bindings(
+        cls,
+        ns: str,
+        module_alias_by_parts: dict[tuple[str, ...], str],
+    ) -> list[PyIRNode]:
+        out: list[PyIRNode] = []
+        for parts, alias in module_alias_by_parts.items():
+            out.append(
+                PyIRVarCreate(
+                    line=None,
+                    offset=None,
+                    name=alias,
+                    storage=PyIRVarStorage.LOCAL,
+                )
+            )
+            out.append(
+                PyIRAssign(
+                    line=None,
+                    offset=None,
+                    targets=[PyIRVarUse(line=None, offset=None, name=alias)],
+                    value=cls._attr_chain(
+                        base=PyIRVarUse(line=None, offset=None, name=ns),
+                        parts=parts,
+                        line=None,
+                        offset=None,
+                    ),
+                )
+            )
+        return out
 
     @classmethod
     def _place_locals_project_style(
@@ -511,24 +600,44 @@ class ResolveSymlinksToNamespaceProjectPass:
         cur_file: Path,
         import_binds: dict[str, tuple[str, ...]],
         ns: str,
+        module_alias_by_parts: dict[tuple[str, ...], str],
+        used_alias_names: set[str],
     ) -> PyIRNode:
         if isinstance(node, PyIRVarUse):
             imported = import_binds.get(node.name)
             if imported and ns:
-                return cls._attr_chain(
-                    base=PyIRVarUse(line=node.line, offset=node.offset, name=ns),
-                    parts=imported,
+                return cls._module_ref_expr(
+                    ns=ns,
+                    module_parts=imported,
                     line=node.line,
                     offset=node.offset,
+                    module_alias_by_parts=module_alias_by_parts,
+                    used_alias_names=used_alias_names,
                 )
             return node
 
         if isinstance(node, PyIRSymLink):
-            return cls._resolve_symlink(node, ctx, cur_mod, cur_file, import_binds, ns)
+            return cls._resolve_symlink(
+                node,
+                ctx,
+                cur_mod,
+                cur_file,
+                import_binds,
+                ns,
+                module_alias_by_parts,
+                used_alias_names,
+            )
 
         if isinstance(node, PyIRAttribute):
             node.value = cls._rw_stmt(
-                node.value, ctx, cur_mod, cur_file, import_binds, ns
+                node.value,
+                ctx,
+                cur_mod,
+                cur_file,
+                import_binds,
+                ns,
+                module_alias_by_parts,
+                used_alias_names,
             )
             return node
 
@@ -537,7 +646,16 @@ class ResolveSymlinksToNamespaceProjectPass:
 
         for f in fields(node):
             v = getattr(node, f.name)
-            nv = cls._rw_value(v, ctx, cur_mod, cur_file, import_binds, ns)
+            nv = cls._rw_value(
+                v,
+                ctx,
+                cur_mod,
+                cur_file,
+                import_binds,
+                ns,
+                module_alias_by_parts,
+                used_alias_names,
+            )
             if nv is not v:
                 setattr(node, f.name, nv)
 
@@ -552,15 +670,35 @@ class ResolveSymlinksToNamespaceProjectPass:
         cur_file: Path,
         import_binds: dict[str, tuple[str, ...]],
         ns: str,
+        module_alias_by_parts: dict[tuple[str, ...], str],
+        used_alias_names: set[str],
     ):
         if isinstance(v, PyIRNode):
-            return cls._rw_stmt(v, ctx, cur_mod, cur_file, import_binds, ns)
+            return cls._rw_stmt(
+                v,
+                ctx,
+                cur_mod,
+                cur_file,
+                import_binds,
+                ns,
+                module_alias_by_parts,
+                used_alias_names,
+            )
 
         if isinstance(v, list):
             changed = False
             out_list: list[object] = []
             for x in v:
-                nx = cls._rw_value(x, ctx, cur_mod, cur_file, import_binds, ns)
+                nx = cls._rw_value(
+                    x,
+                    ctx,
+                    cur_mod,
+                    cur_file,
+                    import_binds,
+                    ns,
+                    module_alias_by_parts,
+                    used_alias_names,
+                )
                 changed = changed or (nx is not x)
                 out_list.append(nx)
             return out_list if changed else v
@@ -569,8 +707,26 @@ class ResolveSymlinksToNamespaceProjectPass:
             changed = False
             out_dict: dict[object, object] = {}
             for k, x in v.items():
-                nk = cls._rw_value(k, ctx, cur_mod, cur_file, import_binds, ns)
-                nx = cls._rw_value(x, ctx, cur_mod, cur_file, import_binds, ns)
+                nk = cls._rw_value(
+                    k,
+                    ctx,
+                    cur_mod,
+                    cur_file,
+                    import_binds,
+                    ns,
+                    module_alias_by_parts,
+                    used_alias_names,
+                )
+                nx = cls._rw_value(
+                    x,
+                    ctx,
+                    cur_mod,
+                    cur_file,
+                    import_binds,
+                    ns,
+                    module_alias_by_parts,
+                    used_alias_names,
+                )
                 changed = changed or (nk is not k) or (nx is not x)
                 out_dict[nk] = nx
             return out_dict if changed else v
@@ -579,7 +735,16 @@ class ResolveSymlinksToNamespaceProjectPass:
             changed = False
             out_tuple: list[object] = []
             for x in v:
-                nx = cls._rw_value(x, ctx, cur_mod, cur_file, import_binds, ns)
+                nx = cls._rw_value(
+                    x,
+                    ctx,
+                    cur_mod,
+                    cur_file,
+                    import_binds,
+                    ns,
+                    module_alias_by_parts,
+                    used_alias_names,
+                )
                 changed = changed or (nx is not x)
                 out_tuple.append(nx)
             return tuple(out_tuple) if changed else v
@@ -595,14 +760,18 @@ class ResolveSymlinksToNamespaceProjectPass:
         cur_file: Path,
         import_binds: dict[str, tuple[str, ...]],
         ns: str,
+        module_alias_by_parts: dict[tuple[str, ...], str],
+        used_alias_names: set[str],
     ) -> PyIRNode:
         imported = import_binds.get(n.name)
         if imported and ns:
-            return cls._attr_chain(
-                base=PyIRVarUse(line=n.line, offset=n.offset, name=ns),
-                parts=imported,
+            return cls._module_ref_expr(
+                ns=ns,
+                module_parts=imported,
                 line=n.line,
                 offset=n.offset,
+                module_alias_by_parts=module_alias_by_parts,
+                used_alias_names=used_alias_names,
             )
 
         if n.decl_file is None or not ns:
@@ -614,8 +783,15 @@ class ResolveSymlinksToNamespaceProjectPass:
 
         parts = cls._ns_module_parts(decl_mod)
         return cls._attr_chain(
-            base=PyIRVarUse(line=n.line, offset=n.offset, name=ns),
-            parts=(*parts, n.name),
+            base=cls._module_ref_expr(
+                ns=ns,
+                module_parts=parts,
+                line=n.line,
+                offset=n.offset,
+                module_alias_by_parts=module_alias_by_parts,
+                used_alias_names=used_alias_names,
+            ),
+            parts=(n.name,),
             line=n.line,
             offset=n.offset,
         )
