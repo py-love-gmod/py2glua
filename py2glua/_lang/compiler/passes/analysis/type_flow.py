@@ -41,9 +41,10 @@ from ..common import (
     collect_local_imported_symbol_ids,
     collect_symbol_ids_in_modules,
     iter_imported_names,
+    resolve_symbol_ids_by_attr_chain,
     unwrap_decorator_attribute,
 )
-from .symlinks import PyIRSymLink, SymLinkContext
+from .symlinks import PyIRSymLink, SymbolId, SymLinkContext
 
 TYPE_NONE = "None"
 TYPE_NIL = "Nil"
@@ -961,15 +962,51 @@ class TypeFlowPass:
             mname = call.func.attr
             base = call.func.value
 
+            direct_attr_func_sids = resolve_symbol_ids_by_attr_chain(ctx, call.func)
+            if direct_attr_func_sids:
+                out_direct: Set[str] = set()
+                found_direct = False
+                for sid in direct_attr_func_sids:
+                    ret = fn_ret_by_sym.get(sid)
+                    if ret is None:
+                        ret = ctx.fn_return_types_by_symbol_id.get(sid)
+                    if isinstance(ret, frozenset):
+                        out_direct |= set(ret)
+                        found_direct = True
+                if found_direct:
+                    return out_direct
+
             if isinstance(base, PyIRSymLink):
                 base_types = env.get(base.symbol_id)
                 if not base_types:
+                    out_static = (
+                        TypeFlowPass._infer_attr_method_return_atoms_from_owner_symbols(
+                            ctx,
+                            base,
+                            mname,
+                            method_ret_by_class,
+                            class_bases_by_name,
+                        )
+                    )
+                    if out_static is not None:
+                        return out_static
                     return {TYPE_VALUE}
 
                 candidates = [
                     t for t in base_types if t not in (TYPE_NONE, TYPE_NIL, TYPE_VALUE)
                 ]
                 if not candidates:
+                    out_static = (
+                        TypeFlowPass._infer_attr_method_return_atoms_from_owner_symbols(
+                            ctx,
+                            base,
+                            mname,
+                            method_ret_by_class,
+                            class_bases_by_name,
+                        )
+                    )
+                    if out_static is not None:
+                        return out_static
                     return {TYPE_VALUE}
 
                 out: Set[str] = set()
@@ -1022,6 +1059,18 @@ class TypeFlowPass:
             mname = call.func.attr
             base = call.func.value
 
+            direct_attr_func_sids = resolve_symbol_ids_by_attr_chain(ctx, call.func)
+            if direct_attr_func_sids:
+                out_direct: list[str | None] = []
+                for sid in direct_attr_func_sids:
+                    ann = fn_ret_ann_by_sym.get(sid)
+                    if ann is None:
+                        ann = ctx.fn_return_ann_by_symbol_id.get(sid)
+                    if isinstance(ann, (str, type(None))):
+                        out_direct.append(ann)
+                if out_direct:
+                    return out_direct
+
             if isinstance(base, PyIRSymLink):
                 base_types = env.get(base.symbol_id) or set()
                 candidates = [
@@ -1043,9 +1092,95 @@ class TypeFlowPass:
                             out.append(ann)
                             break
 
+                if not out:
+                    out = TypeFlowPass._infer_attr_method_return_ann_from_owner_symbols(
+                        ctx,
+                        base,
+                        mname,
+                        method_ret_ann_by_class,
+                        class_bases_by_name,
+                    )
                 return out
 
         return []
+
+    @staticmethod
+    def _infer_attr_method_return_atoms_from_owner_symbols(
+        ctx: SymLinkContext,
+        base: PyIRNode,
+        method_name: str,
+        method_ret_by_class: dict[tuple[str, str], frozenset[str]],
+        class_bases_by_name: dict[str, tuple[str, ...]],
+    ) -> Set[str] | None:
+        owner_names = TypeFlowPass._resolve_owner_class_names(ctx, base)
+        if not owner_names:
+            return None
+
+        out: Set[str] = set()
+        found_any = False
+
+        for cls_name in owner_names:
+            for owner in TypeFlowPass._iter_class_lineage(
+                ctx, cls_name, class_bases_by_name
+            ):
+                ret = method_ret_by_class.get((owner, method_name))
+                if ret is None:
+                    ret = ctx.method_return_types_by_class.get((owner, method_name))
+
+                if isinstance(ret, frozenset):
+                    out |= set(ret)
+                    found_any = True
+                    break
+
+        return out if found_any else None
+
+    @staticmethod
+    def _infer_attr_method_return_ann_from_owner_symbols(
+        ctx: SymLinkContext,
+        base: PyIRNode,
+        method_name: str,
+        method_ret_ann_by_class: dict[tuple[str, str], str | None],
+        class_bases_by_name: dict[str, tuple[str, ...]],
+    ) -> list[str | None]:
+        owner_names = TypeFlowPass._resolve_owner_class_names(ctx, base)
+        if not owner_names:
+            return []
+
+        out: list[str | None] = []
+        for cls_name in owner_names:
+            for owner in TypeFlowPass._iter_class_lineage(
+                ctx, cls_name, class_bases_by_name
+            ):
+                ann = method_ret_ann_by_class.get((owner, method_name))
+                if ann is None:
+                    ann = ctx.method_return_ann_by_class.get((owner, method_name))
+
+                if isinstance(ann, (str, type(None))):
+                    out.append(ann)
+                    break
+
+        return out
+
+    @staticmethod
+    def _resolve_owner_class_names(ctx: SymLinkContext, base: PyIRNode) -> list[str]:
+        symids = resolve_symbol_ids_by_attr_chain(ctx, base)
+        if not symids:
+            return []
+
+        out: list[str] = []
+        seen: set[str] = set()
+
+        for sid in symids:
+            sym = ctx.symbols.get(SymbolId(sid))
+            if sym is None:
+                continue
+            name = (sym.name or "").strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            out.append(name)
+
+        return out
 
     @staticmethod
     def _narrow_from_test(

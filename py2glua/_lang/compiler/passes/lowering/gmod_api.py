@@ -458,13 +458,49 @@ class RewriteGmodApiCallsPass:
             for d in decls[1:]:
                 if d.lua_name != first.lua_name or d.method != first.method:
                     CompilerExit.user_error_node(
-                        "Невозможно однозначно разрешить вызов gmod_api метода.\n"
-                        f"Метод: {mname}\n"
-                        f"Варианты: {', '.join(dd.lua_name for dd in decls)}",
+                        "Не удалось однозначно определить, какой gmod_api-вызов использовать.\n"
+                        f"Имя метода: {mname}\n"
+                        f"Подходящие варианты: {', '.join(dd.lua_name for dd in decls)}\n"
+                        "Уточни тип объекта (receiver), чтобы компилятор выбрал один вариант.",
                         ir.path,
                         node,
                     )
             return first
+
+        def pick_fallback_object_method_decl(
+            *,
+            mname: str,
+            node: PyIRNode,
+        ) -> GmodApiDecl | None:
+            by_name = [d for (cid, mn), d in resolved.items() if mn == mname]
+            if not by_name:
+                return None
+
+            method_decls = [d for d in by_name if d.method]
+            func_decls = [d for d in by_name if not d.method]
+
+            if not method_decls:
+                return None
+
+            if func_decls:
+                CompilerExit.user_error_node(
+                    f"Нельзя безопасно переписать вызов '{mname}'.\n"
+                    "В gmod_api это имя объявлено и как метод (`method=True`), "
+                    "и как обычная функция (`method=False`).\n"
+                    "Добавь или уточни тип объекта, у которого вызывается метод.",
+                    ir.path,
+                    node,
+                )
+
+            decl = pick_single_decl(method_decls, mname=mname, node=node)
+            _warn_once(
+                ctx,
+                f"gmod_api_heuristic_method_{ctx.uid(node)}",
+                f"WARN: Вызов '{mname}' переписан как gmod_api-метод по эвристике.\n"
+                "Тип объекта не удалось вывести точно, поэтому выбран `obj:method(...)`.\n"
+                f"Файл: {ir.path}\nLINE|OFFSET: {node.line}|{node.offset}",
+            )
+            return decl
 
         def rw_block(stmts: list[PyIRNode]) -> list[PyIRNode]:
             return rewrite_stmt_block(stmts, rw_stmt)
@@ -480,7 +516,9 @@ class RewriteGmodApiCallsPass:
 
                 if node.args_kw:
                     CompilerExit.user_error_node(
-                        "Для вызовов gmod_api ключевые аргументы должны быть предварительно нормализованы.",
+                        "Ключевые аргументы в gmod_api-вызове не были нормализованы.\n"
+                        "Это внутренняя ошибка пайплайна: NormalizeCallArgumentsPass должен "
+                        "сработать раньше.",
                         ir.path,
                         node,
                     )
@@ -533,7 +571,9 @@ class RewriteGmodApiCallsPass:
 
                         if ctor_decl.method:
                             CompilerExit.user_error_node(
-                                "Конструктор gmod_api не может быть объявлен с method=True.",
+                                "Конструктор gmod_api (`__init__`) не может быть объявлен как "
+                                "метод (`method=True`).\n"
+                                "Для конструктора используй `method=False`.",
                                 ir.path,
                                 node,
                             )
@@ -563,31 +603,73 @@ class RewriteGmodApiCallsPass:
                             )
                             if first.method:
                                 CompilerExit.user_error_node(
-                                    f"'{mname}' помечен gmod_api как метод (method=True), "
-                                    "но вызывается как Class.method(...).",
+                                    f"'{mname}' объявлен в gmod_api как метод (`method=True`), "
+                                    "но вызывается как `Class.method(...)`.\n"
+                                    f"Используй вызов у объекта: `obj.{mname}(...)` "
+                                    "(компилятор сам превратит его в `obj:{mname}(...)`).",
                                     ir.path,
                                     node,
                                 )
                             return _make_emit_call(node, first.lua_name, node.args_p)
 
                     if not isinstance(base, PyIRSymLink):
-                        return node
+                        fallback_decl = pick_fallback_object_method_decl(
+                            mname=mname,
+                            node=node,
+                        )
+                        if fallback_decl is None:
+                            return node
+
+                        lua_method_name = fallback_decl.lua_name.rsplit(".", 1)[-1]
+                        return _make_emit_method_call(
+                            node,
+                            lua_method_name,
+                            base,
+                            node.args_p,
+                        )
 
                     tset = types_at_call(node, base.symbol_id)
                     if tset is None:
-                        return node
+                        fallback_decl = pick_fallback_object_method_decl(
+                            mname=mname,
+                            node=node,
+                        )
+                        if fallback_decl is None:
+                            return node
+
+                        lua_method_name = fallback_decl.lua_name.rsplit(".", 1)[-1]
+                        return _make_emit_method_call(
+                            node,
+                            lua_method_name,
+                            base,
+                            node.args_p,
+                        )
                     cls_ids, had_nullish = candidate_class_ids(tset)
 
                     if had_nullish:
                         _warn_once(
                             ctx,
                             f"nullish_call_{ir.path}_{node.line}_{node.offset}",
-                            f"WARN: Вызов '{mname}' может выполняться на None|Nil\n"
+                            f"WARN: Вызов '{mname}' может выполняться на `None` или `nil`.\n"
+                            "Проверь, что перед вызовом есть защита от nil/None.\n"
                             f"Файл: {ir.path}\nLINE|OFFSET: {node.line}|{node.offset}",
                         )
 
                     if not cls_ids:
-                        return node
+                        fallback_decl = pick_fallback_object_method_decl(
+                            mname=mname,
+                            node=node,
+                        )
+                        if fallback_decl is None:
+                            return node
+
+                        lua_method_name = fallback_decl.lua_name.rsplit(".", 1)[-1]
+                        return _make_emit_method_call(
+                            node,
+                            lua_method_name,
+                            base,
+                            node.args_p,
+                        )
 
                     object_decls: list[GmodApiDecl] = []
                     for cid in cls_ids:
@@ -596,7 +678,8 @@ class RewriteGmodApiCallsPass:
                             info = classes.get(cid)
                             cname = info.name if info is not None else f"<sym {cid}>"
                             CompilerExit.user_error_node(
-                                f"Метод '{mname}' не найден в gmod_api для типа '{cname}'.",
+                                f"Метод '{mname}' не найден в gmod_api для типа '{cname}'.\n"
+                                "Проверь имя метода и тип объекта.",
                                 ir.path,
                                 node,
                             )
@@ -607,7 +690,9 @@ class RewriteGmodApiCallsPass:
 
                     if not first.method:
                         CompilerExit.user_error_node(
-                            f"'{mname}' помечен gmod_api как функция (method=False), но вызывается как obj.{mname}(...).",
+                            f"'{mname}' объявлен в gmod_api как обычная функция "
+                            "(`method=False`), но вызывается как метод объекта.\n"
+                            f"Используй вызов функции, а не `obj.{mname}(...)`.",
                             ir.path,
                             node,
                         )
