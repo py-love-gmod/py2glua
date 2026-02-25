@@ -564,6 +564,25 @@ class PyIRFor(PyIRNode):
 
 
 @dataclass
+class PyIRNumericFor(PyIRNode):
+    target: PyIRNode
+    start: PyIRNode
+    stop: PyIRNode
+    step: PyIRNode | None = None
+    body: list[PyIRNode] = field(default_factory=list)
+
+    def walk(self):
+        yield self
+        yield from self.target.walk()
+        yield from self.start.walk()
+        yield from self.stop.walk()
+        if self.step is not None:
+            yield from self.step.walk()
+        for n in self.body:
+            yield from n.walk()
+
+
+@dataclass
 class PyIRReturn(PyIRNode):
     value: PyIRNode | None = None
 

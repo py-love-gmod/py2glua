@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import fields, is_dataclass
 from typing import Callable, TypeVar, cast
 
-from ..compiler_ir import PyIRFunctionExpr
 from ...py.ir_dataclass import (
     PyIRAssign,
     PyIRAttribute,
@@ -17,11 +16,13 @@ from ...py.ir_dataclass import (
     PyIRFunctionDef,
     PyIRIf,
     PyIRNode,
+    PyIRNumericFor,
     PyIRReturn,
     PyIRWhile,
     PyIRWith,
     PyIRWithItem,
 )
+from ..compiler_ir import PyIRFunctionExpr
 
 _TNode = TypeVar("_TNode", bound=PyIRNode)
 
@@ -162,6 +163,15 @@ def rewrite_expr_with_store_default(
     if isinstance(node, PyIRFor):
         node.target = rw_expr(node.target, True)
         node.iter = rw_expr(node.iter, False)
+        node.body = rw_block(node.body)
+        return node
+
+    if isinstance(node, PyIRNumericFor):
+        node.target = rw_expr(node.target, True)
+        node.start = rw_expr(node.start, False)
+        node.stop = rw_expr(node.stop, False)
+        if node.step is not None:
+            node.step = rw_expr(node.step, False)
         node.body = rw_block(node.body)
         return node
 

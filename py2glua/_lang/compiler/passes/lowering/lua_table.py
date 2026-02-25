@@ -4,12 +4,8 @@ from typing import Final
 
 from ....._cli import CompilerExit
 from ....py.ir_dataclass import (
-    PyAugAssignType,
-    PyBinOPType,
     PyIRAssign,
     PyIRAttribute,
-    PyIRAugAssign,
-    PyIRBinOP,
     PyIRCall,
     PyIRConstant,
     PyIRDict,
@@ -20,10 +16,10 @@ from ....py.ir_dataclass import (
     PyIRFor,
     PyIRList,
     PyIRNode,
+    PyIRNumericFor,
     PyIRSubscript,
     PyIRTuple,
     PyIRVarUse,
-    PyIRWhile,
 )
 from ..analysis.symlinks import PyIRSymLink, SymLinkContext
 from ..common import (
@@ -514,27 +510,6 @@ class RewriteForIteratorStrategyPass:
             targets=[mk_var(tbl_name, node)],
             value=source,
         )
-        init_idx = PyIRAssign(
-            line=node.line,
-            offset=node.offset,
-            targets=[mk_var(idx_name, node)],
-            value=PyIRConstant(line=node.line, offset=node.offset, value=1),
-        )
-
-        cond = PyIRBinOP(
-            line=node.line,
-            offset=node.offset,
-            op=PyBinOPType.LE,
-            left=mk_var(idx_name, node),
-            right=PyIREmitExpr(
-                line=node.line,
-                offset=node.offset,
-                kind=PyIREmitKind.RAW,
-                name=f"#{tbl_name}",
-                args_p=[],
-                args_kw={},
-            ),
-        )
 
         cur_value = PyIRSubscript(
             line=node.line,
@@ -564,23 +539,23 @@ class RewriteForIteratorStrategyPass:
                 value=cur_value,
             )
 
-        step_stmt = PyIRAugAssign(
+        numeric_for = PyIRNumericFor(
             line=node.line,
             offset=node.offset,
             target=mk_var(idx_name, node),
-            op=PyAugAssignType.ADD,
-            value=PyIRConstant(line=node.line, offset=node.offset, value=1),
+            start=PyIRConstant(line=node.line, offset=node.offset, value=1),
+            stop=PyIREmitExpr(
+                line=node.line,
+                offset=node.offset,
+                kind=PyIREmitKind.RAW,
+                name=f"#{tbl_name}",
+                args_p=[],
+                args_kw={},
+            ),
+            body=[bind_stmt, *node.body],
         )
 
-        while_body = [bind_stmt, *node.body, step_stmt]
-        while_node = PyIRWhile(
-            line=node.line,
-            offset=node.offset,
-            test=cond,
-            body=while_body,
-        )
-
-        return [init_tbl, init_idx, while_node]
+        return [init_tbl, numeric_for]
 
     @classmethod
     def _rewrite_for_header(

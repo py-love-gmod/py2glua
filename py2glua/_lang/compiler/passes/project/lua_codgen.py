@@ -34,6 +34,7 @@ from ....py.ir_dataclass import (
     PyIRImport,
     PyIRList,
     PyIRNode,
+    PyIRNumericFor,
     PyIRPass,
     PyIRReturn,
     PyIRSubscript,
@@ -347,6 +348,12 @@ class LuaEmitter:
             self._emit_for(node)
             return
 
+        if isinstance(node, PyIRNumericFor):
+            self._flush_pending_locals(top_level=top_level)
+            self._maybe_blankline_before("ctrl", top_level=top_level)
+            self._emit_numeric_for(node)
+            return
+
         if isinstance(node, PyIRReturn):
             self._flush_pending_locals(top_level=top_level)
             self._maybe_blankline_before("stmt", top_level=top_level)
@@ -537,6 +544,23 @@ class LuaEmitter:
 
     def _emit_for(self, node: PyIRFor) -> None:
         self._wl(f"for {self._expr(node.target)} in {self._expr(node.iter)} do")
+        self._indent_push()
+        self._scope_push()
+        for st in node.body:
+            self._stmt(st, top_level=False)
+        self._flush_pending_locals(top_level=False)
+        self._scope_pop()
+        self._indent_pop()
+        self._wl("end")
+
+    def _emit_numeric_for(self, node: PyIRNumericFor) -> None:
+        head = (
+            f"for {self._expr(node.target)} = "
+            f"{self._expr(node.start)}, {self._expr(node.stop)}"
+        )
+        if node.step is not None:
+            head += f", {self._expr(node.step)}"
+        self._wl(f"{head} do")
         self._indent_push()
         self._scope_push()
         for st in node.body:
