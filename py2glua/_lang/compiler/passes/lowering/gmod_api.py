@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Dict, cast
 
@@ -11,10 +12,13 @@ from ....py.ir_dataclass import (
     PyIRClassDef,
     PyIRConstant,
     PyIRDecorator,
+    PyIRDict,
+    PyIRDictItem,
     PyIREmitExpr,
     PyIREmitKind,
     PyIRFile,
     PyIRFunctionDef,
+    PyIRList,
     PyIRNode,
     PyIRVarUse,
 )
@@ -34,6 +38,10 @@ class GmodApiDecl:
     method: bool
     decl_file: object
     decl_line: int | None
+    py_params: tuple[str, ...] = ()
+    py_defaults: Dict[str, PyIRNode] = field(default_factory=dict)
+    py_vararg: str | None = None
+    py_kwarg: str | None = None
 
 
 @dataclass
@@ -176,11 +184,29 @@ def _parse_gmod_api(
 
         method_val = bool(method_node.value)
 
+    py_params: tuple[str, ...] = ()
+    py_defaults: Dict[str, PyIRNode] = {}
+    py_vararg: str | None = None
+    py_kwarg: str | None = None
+    if isinstance(ref, PyIRFunctionDef):
+        py_params = tuple(ref.signature.keys())
+        py_defaults = {
+            pname: default
+            for pname, (_ann, default) in ref.signature.items()
+            if default is not None
+        }
+        py_vararg = ref.vararg
+        py_kwarg = ref.kwarg
+
     return GmodApiDecl(
         lua_name=lua_name,
         method=method_val,
         decl_file=ir.path,
         decl_line=ref.line,
+        py_params=py_params,
+        py_defaults=py_defaults,
+        py_vararg=py_vararg,
+        py_kwarg=py_kwarg,
     )
 
 
@@ -502,6 +528,118 @@ class RewriteGmodApiCallsPass:
             )
             return decl
 
+        def normalize_call_args_for_decl(
+            call: PyIRCall,
+            decl: GmodApiDecl,
+            *,
+            implicit_first_param: bool,
+            display_name: str,
+        ) -> PyIRCall:
+            params = list(decl.py_params)
+            if implicit_first_param:
+                if not params:
+                    CompilerExit.internal_error(
+                        "gmod_api: метод объявлен с method=True, но сигнатура пуста.\n"
+                        f"Вызов: {display_name}\n"
+                        f"Файл объявления: {decl.decl_file}:{decl.decl_line}"
+                    )
+                params = params[1:]
+
+            defaults = decl.py_defaults
+            provided: Dict[str, PyIRNode] = {}
+            extra_pos: list[PyIRNode] = []
+
+            for i, arg in enumerate(call.args_p):
+                if i < len(params):
+                    provided[params[i]] = arg
+                else:
+                    extra_pos.append(arg)
+
+            extra_kw: Dict[str, PyIRNode] = {}
+            for key, value in call.args_kw.items():
+                if key in params:
+                    if key in provided:
+                        CompilerExit.user_error_node(
+                            f"Аргумент '{key}' передан дважды при вызове '{display_name}' "
+                            "(позиционно и по имени).",
+                            ir.path,
+                            call,
+                        )
+                    provided[key] = value
+                else:
+                    extra_kw[key] = value
+
+            if extra_pos and decl.py_vararg is None:
+                CompilerExit.user_error_node(
+                    f"Слишком много позиционных аргументов при вызове '{display_name}'.",
+                    ir.path,
+                    call,
+                )
+
+            if extra_kw and decl.py_kwarg is None:
+                bad_names = ", ".join(sorted(extra_kw.keys()))
+                CompilerExit.user_error_node(
+                    f"Неизвестные keyword-аргументы при вызове '{display_name}': {bad_names}.",
+                    ir.path,
+                    call,
+                )
+
+            new_args_p: list[PyIRNode] = []
+            for param_name in params:
+                if param_name in provided:
+                    new_args_p.append(provided[param_name])
+                    continue
+
+                default_value = defaults.get(param_name)
+                if default_value is None:
+                    CompilerExit.user_error_node(
+                        f"Не хватает обязательного аргумента '{param_name}' "
+                        f"при вызове '{display_name}'.",
+                        ir.path,
+                        call,
+                    )
+
+                new_args_p.append(deepcopy(default_value))
+
+            if decl.py_vararg is not None:
+                new_args_p.append(
+                    PyIRList(
+                        line=call.line,
+                        offset=call.offset,
+                        elements=extra_pos,
+                    )
+                )
+
+            if decl.py_kwarg is not None:
+                kw_items: list[PyIRDictItem] = [
+                    PyIRDictItem(
+                        line=value.line,
+                        offset=value.offset,
+                        key=PyIRConstant(
+                            line=value.line,
+                            offset=value.offset,
+                            value=key,
+                        ),
+                        value=value,
+                    )
+                    for key, value in extra_kw.items()
+                ]
+                new_args_p.append(
+                    PyIRDict(
+                        line=call.line,
+                        offset=call.offset,
+                        items=kw_items,
+                    )
+                )
+
+            return PyIRCall(
+                line=call.line,
+                offset=call.offset,
+                func=call.func,
+                args_p=new_args_p,
+                args_kw={},
+            )
+
         def rw_block(stmts: list[PyIRNode]) -> list[PyIRNode]:
             return rewrite_stmt_block(stmts, rw_stmt)
 
@@ -514,18 +652,15 @@ class RewriteGmodApiCallsPass:
                 node.args_p = [rw_expr(a, False) for a in node.args_p]
                 node.args_kw = {k: rw_expr(v, False) for k, v in node.args_kw.items()}
 
-                if node.args_kw:
-                    CompilerExit.user_error_node(
-                        "Ключевые аргументы в gmod_api-вызове не были нормализованы.\n"
-                        "Это внутренняя ошибка пайплайна: NormalizeCallArgumentsPass должен "
-                        "сработать раньше.",
-                        ir.path,
-                        node,
-                    )
-
                 if isinstance(node.func, PyIRSymLink):
                     decl = funcs.get(node.func.symbol_id)
                     if decl is not None:
+                        node = normalize_call_args_for_decl(
+                            node,
+                            decl,
+                            implicit_first_param=False,
+                            display_name=decl.lua_name,
+                        )
                         return _make_emit_call(node, decl.lua_name, node.args_p)
                 else:
                     fn_symids = resolve_symbol_ids_by_attr_chain(ctx, node.func)
@@ -535,6 +670,12 @@ class RewriteGmodApiCallsPass:
                             fn_decls,
                             mname=getattr(node.func, "attr", "<call>"),
                             node=node,
+                        )
+                        node = normalize_call_args_for_decl(
+                            node,
+                            decl,
+                            implicit_first_param=False,
+                            display_name=decl.lua_name,
                         )
                         return _make_emit_call(node, decl.lua_name, node.args_p)
 
@@ -578,6 +719,12 @@ class RewriteGmodApiCallsPass:
                                 node,
                             )
 
+                        node = normalize_call_args_for_decl(
+                            node,
+                            ctor_decl,
+                            implicit_first_param=False,
+                            display_name=ctor_decl.lua_name,
+                        )
                         return _make_emit_call(node, ctor_decl.lua_name, node.args_p)
 
                 if isinstance(node.func, PyIRAttribute):
@@ -610,6 +757,12 @@ class RewriteGmodApiCallsPass:
                                     ir.path,
                                     node,
                                 )
+                            node = normalize_call_args_for_decl(
+                                node,
+                                first,
+                                implicit_first_param=False,
+                                display_name=first.lua_name,
+                            )
                             return _make_emit_call(node, first.lua_name, node.args_p)
 
                     if not isinstance(base, PyIRSymLink):
@@ -620,6 +773,12 @@ class RewriteGmodApiCallsPass:
                         if fallback_decl is None:
                             return node
 
+                        node = normalize_call_args_for_decl(
+                            node,
+                            fallback_decl,
+                            implicit_first_param=True,
+                            display_name=fallback_decl.lua_name,
+                        )
                         lua_method_name = fallback_decl.lua_name.rsplit(".", 1)[-1]
                         return _make_emit_method_call(
                             node,
@@ -637,6 +796,12 @@ class RewriteGmodApiCallsPass:
                         if fallback_decl is None:
                             return node
 
+                        node = normalize_call_args_for_decl(
+                            node,
+                            fallback_decl,
+                            implicit_first_param=True,
+                            display_name=fallback_decl.lua_name,
+                        )
                         lua_method_name = fallback_decl.lua_name.rsplit(".", 1)[-1]
                         return _make_emit_method_call(
                             node,
@@ -663,6 +828,12 @@ class RewriteGmodApiCallsPass:
                         if fallback_decl is None:
                             return node
 
+                        node = normalize_call_args_for_decl(
+                            node,
+                            fallback_decl,
+                            implicit_first_param=True,
+                            display_name=fallback_decl.lua_name,
+                        )
                         lua_method_name = fallback_decl.lua_name.rsplit(".", 1)[-1]
                         return _make_emit_method_call(
                             node,
@@ -697,6 +868,12 @@ class RewriteGmodApiCallsPass:
                             node,
                         )
 
+                    node = normalize_call_args_for_decl(
+                        node,
+                        first,
+                        implicit_first_param=True,
+                        display_name=first.lua_name,
+                    )
                     lua_method_name = first.lua_name.rsplit(".", 1)[-1]
                     return _make_emit_method_call(
                         node,

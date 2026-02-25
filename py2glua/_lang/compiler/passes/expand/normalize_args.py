@@ -7,9 +7,11 @@ from typing import Dict, List, Tuple
 from ....._cli import CompilerExit
 from ....py.ir_dataclass import (
     PyIRAssign,
+    PyIRAttribute,
     PyIRCall,
     PyIRClassDef,
     PyIRConstant,
+    PyIRDecorator,
     PyIRDict,
     PyIRDictItem,
     PyIRFile,
@@ -155,12 +157,32 @@ class NormalizeCallArgumentsPass:
             return pro_with + [st]
 
         if isinstance(st, PyIRFunctionDef):
+            pro_dec, decorators = NormalizeCallArgumentsPass._norm_decorators(
+                ir, st.decorators, ctx, sigs
+            )
+            st.decorators = decorators
             st.body = NormalizeCallArgumentsPass._norm_stmt_list(ir, st.body, ctx, sigs)
-            return [st]
+            return pro_dec + [st]
 
         if isinstance(st, PyIRClassDef):
+            pro_cls: List[PyIRNode] = []
+
+            new_bases: List[PyIRNode] = []
+            for base in st.bases:
+                p, nb = NormalizeCallArgumentsPass._norm_expr(
+                    ir, base, ctx, sigs, in_call_arg=False
+                )
+                pro_cls.extend(p)
+                new_bases.append(nb)
+            st.bases = new_bases
+
+            p_dec, decorators = NormalizeCallArgumentsPass._norm_decorators(
+                ir, st.decorators, ctx, sigs
+            )
+            pro_cls.extend(p_dec)
+            st.decorators = decorators
             st.body = NormalizeCallArgumentsPass._norm_stmt_list(ir, st.body, ctx, sigs)
-            return [st]
+            return pro_cls + [st]
 
         if isinstance(st, PyIRAssign):
             pro, v = NormalizeCallArgumentsPass._norm_expr(
@@ -186,6 +208,113 @@ class NormalizeCallArgumentsPass:
             return pro + [c]
 
         return [st]
+
+    @staticmethod
+    def _norm_decorators(
+        ir: PyIRFile,
+        decorators: List[PyIRDecorator],
+        ctx: ExpandContext,
+        sigs: Dict[str, FnSig],
+    ) -> Tuple[List[PyIRNode], List[PyIRDecorator]]:
+        pro: List[PyIRNode] = []
+        out: List[PyIRDecorator] = []
+
+        for dec in decorators:
+            p, nd = NormalizeCallArgumentsPass._norm_decorator(ir, dec, ctx, sigs)
+            pro.extend(p)
+            out.append(nd)
+
+        return pro, out
+
+    @staticmethod
+    def _norm_decorator(
+        ir: PyIRFile,
+        dec: PyIRDecorator,
+        ctx: ExpandContext,
+        sigs: Dict[str, FnSig],
+    ) -> Tuple[List[PyIRNode], PyIRDecorator]:
+        pro: List[PyIRNode] = []
+
+        p_expr, new_exper = NormalizeCallArgumentsPass._norm_expr(
+            ir, dec.exper, ctx, sigs, in_call_arg=False
+        )
+        pro.extend(p_expr)
+
+        new_args_p: List[PyIRNode] = []
+        for a in dec.args_p:
+            p, na = NormalizeCallArgumentsPass._norm_expr(
+                ir, a, ctx, sigs, in_call_arg=True
+            )
+            pro.extend(p)
+            new_args_p.append(na)
+
+        new_args_kw: Dict[str, PyIRNode] = {}
+        for k, a in dec.args_kw.items():
+            p, na = NormalizeCallArgumentsPass._norm_expr(
+                ir, a, ctx, sigs, in_call_arg=True
+            )
+            pro.extend(p)
+            new_args_kw[k] = na
+
+        new_dec = PyIRDecorator(
+            line=dec.line,
+            offset=dec.offset,
+            exper=new_exper,
+            args_p=new_args_p,
+            args_kw=new_args_kw,
+        )
+
+        NormalizeCallArgumentsPass._normalize_known_decorator_kwargs(new_dec)
+        return pro, new_dec
+
+    @staticmethod
+    def _normalize_known_decorator_kwargs(dec: PyIRDecorator) -> None:
+        exper = dec.exper
+        if not isinstance(exper, PyIRAttribute):
+            return
+
+        if exper.attr == "gmod_api":
+            NormalizeCallArgumentsPass._reorder_decorator_kwargs_contiguous(
+                dec, ("name", "realm", "method")
+            )
+            return
+
+        if exper.attr == "override":
+            NormalizeCallArgumentsPass._reorder_decorator_kwargs_contiguous(
+                dec, ("realm", "target")
+            )
+            return
+
+        if exper.attr == "add_method":
+            NormalizeCallArgumentsPass._reorder_decorator_kwargs_contiguous(
+                dec, ("realm",)
+            )
+            return
+
+    @staticmethod
+    def _reorder_decorator_kwargs_contiguous(
+        dec: PyIRDecorator,
+        param_order: Tuple[str, ...],
+    ) -> None:
+        if not dec.args_kw:
+            return
+
+        if len(dec.args_p) > len(param_order):
+            return
+
+        remaining = dict(dec.args_kw)
+        new_args_p = list(dec.args_p)
+        idx = len(new_args_p)
+
+        while idx < len(param_order):
+            pname = param_order[idx]
+            if pname not in remaining:
+                break
+            new_args_p.append(remaining.pop(pname))
+            idx += 1
+
+        dec.args_p = new_args_p
+        dec.args_kw = remaining
 
     @staticmethod
     def _norm_expr(
