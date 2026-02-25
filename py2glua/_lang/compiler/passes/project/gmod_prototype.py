@@ -914,11 +914,14 @@ class BuildGmodPrototypesProjectPass:
     def _emit_method(
         cls, g: str, method_name: str, src: PyIRFunctionDef
     ) -> PyIRFunctionDef:
+        sig_items = list(src.signature.items())
+        emit_signature = dict(sig_items[1:]) if sig_items else {}
+
         return PyIRFunctionDef(
             line=src.line,
             offset=src.offset,
-            name=f"{g}.{method_name}",
-            signature=dict(src.signature),
+            name=f"{g}:{method_name}",
+            signature=emit_signature,
             returns=src.returns,
             vararg=src.vararg,
             kwarg=src.kwarg,
