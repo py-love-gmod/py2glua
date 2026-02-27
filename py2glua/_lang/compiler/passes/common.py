@@ -112,7 +112,7 @@ def collect_decl_symid_cache(
     cache_field: str,
 ) -> dict[tuple[Path, int, str], int]:
     cached = getattr(ctx, cache_field, None)
-    if isinstance(cached, dict):
+    if isinstance(cached, dict) and cached:
         return cached
 
     out: dict[tuple[Path, int, str], int] = {}

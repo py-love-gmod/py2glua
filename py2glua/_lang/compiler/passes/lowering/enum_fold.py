@@ -19,7 +19,9 @@ from ....py.ir_dataclass import (
     PyIREmitKind,
     PyIRFile,
     PyIRImport,
+    PyIRList,
     PyIRNode,
+    PyIRTuple,
     PyIRVarUse,
 )
 from ..common import (
@@ -29,6 +31,7 @@ from ..common import (
     decorator_call_parts,
     is_expr_on_symbol_ids,
     iter_imported_names,
+    resolve_symbol_ids_by_attr_chain,
 )
 from ..rewrite_utils import rewrite_expr_with_store_default, rewrite_stmt_block
 
@@ -102,6 +105,32 @@ def _const_to_spec(node: PyIRNode) -> _EnumFieldSpec | None:
     if isinstance(node, PyIREmitExpr) and node.kind == PyIREmitKind.GLOBAL:
         if isinstance(node.name, str) and node.name:
             return _EnumFieldSpec("global", node.name)
+
+    if isinstance(node, (PyIRTuple, PyIRList)) and len(node.elements) == 2:
+        kind_node, value_node = node.elements
+        if not (
+            isinstance(kind_node, PyIRConstant) and isinstance(kind_node.value, str)
+        ):
+            return None
+
+        kind = kind_node.value
+        if kind == "global":
+            if isinstance(value_node, PyIRConstant) and isinstance(value_node.value, str):
+                return _EnumFieldSpec("global", value_node.value)
+            return None
+
+        if not isinstance(value_node, PyIRConstant):
+            return None
+
+        v = value_node.value
+        if kind == "str" and isinstance(v, str):
+            return _EnumFieldSpec("str", v)
+        if kind == "bool" and isinstance(v, bool):
+            return _EnumFieldSpec("bool", v)
+        if kind == "int" and isinstance(v, int) and not isinstance(v, bool):
+            return _EnumFieldSpec("int", v)
+        if kind == "float" and isinstance(v, float):
+            return _EnumFieldSpec("float", v)
 
     return None
 
@@ -305,6 +334,9 @@ def _resolve_any_class_id(
         sym = ctx.get_exported_symbol(".".join(parts[:-1]), parts[-1])
 
     if sym is None:
+        resolved_ids = resolve_symbol_ids_by_attr_chain(ctx, expr)
+        for sid in resolved_ids:
+            return int(sid)
         return None
 
     return _sid(sym.id)

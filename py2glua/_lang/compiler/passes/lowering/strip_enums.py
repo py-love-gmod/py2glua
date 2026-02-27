@@ -21,6 +21,8 @@ from ....py.ir_dataclass import (
 from ..rewrite_utils import rewrite_stmt_block
 from ..analysis.symlinks import PyIRSymLink, SymLinkContext
 from ..common import (
+    canon_path,
+    collect_decl_symid_cache,
     collect_core_compiler_directive_local_symbol_ids,
     collect_core_compiler_directive_symbol_ids,
     collect_exported_symbol_ids,
@@ -62,6 +64,14 @@ class StripEnumsAndGmodSpecialEnumDefsPass:
         enum_symbol_ids: set[int] = set()
         for n in StripEnumsAndGmodSpecialEnumDefsPass._ENUM_BASE_NAMES:
             enum_symbol_ids |= collect_exported_symbol_ids(ctx, n)
+        gmod_special_enum_ids = {
+            int(sid) for sid in getattr(ctx, "_gmod_special_enum_store", {}).keys()
+        }
+        fp = canon_path(ir.path)
+        symid_by_decl = collect_decl_symid_cache(
+            ctx,
+            cache_field="_gmod_special_enum_symid_by_decl_cache",
+        )
 
         def is_target_decorator(d: PyIRDecorator) -> bool:
             func_expr, _args_p, _args_kw = decorator_call_parts(d)
@@ -135,6 +145,11 @@ class StripEnumsAndGmodSpecialEnumDefsPass:
             return False
 
         def should_drop_class(node: PyIRClassDef) -> bool:
+            if fp is not None and node.line is not None:
+                sid = symid_by_decl.get((fp, node.line, node.name))
+                if sid is not None and int(sid) in gmod_special_enum_ids:
+                    return True
+
             for d in node.decorators:
                 if is_target_decorator(d):
                     return True

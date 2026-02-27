@@ -20,6 +20,7 @@ from ....py.ir_dataclass import (
     PyIRFunctionDef,
     PyIRList,
     PyIRNode,
+    PyIRTuple,
     PyIRVarUse,
 )
 from ..common import (
@@ -42,6 +43,7 @@ class GmodApiDecl:
     py_defaults: Dict[str, PyIRNode] = field(default_factory=dict)
     py_vararg: str | None = None
     py_kwarg: str | None = None
+    base_args: tuple[PyIRNode, ...] = ()
 
 
 @dataclass
@@ -117,7 +119,7 @@ def _parse_gmod_api(
         return None
 
     # Signature: gmod_api(name, realm, method=False)
-    allowed_kw = {"name", "realm", "method"}
+    allowed_kw = {"name", "realm", "method", "base_args"}
     for k in args_kw.keys():
         if k not in allowed_kw:
             CompilerExit.user_error_node(
@@ -147,6 +149,7 @@ def _parse_gmod_api(
     name_node = pick_arg(0, "name")
     realm_node = pick_arg(1, "realm")
     method_node = pick_arg(2, "method")
+    base_args_node = args_kw.get("base_args")
 
     if name_node is None:
         CompilerExit.user_error_node(
@@ -188,6 +191,7 @@ def _parse_gmod_api(
     py_defaults: Dict[str, PyIRNode] = {}
     py_vararg: str | None = None
     py_kwarg: str | None = None
+    base_args: tuple[PyIRNode, ...] = ()
     if isinstance(ref, PyIRFunctionDef):
         py_params = tuple(ref.signature.keys())
         py_defaults = {
@@ -198,6 +202,16 @@ def _parse_gmod_api(
         py_vararg = ref.vararg
         py_kwarg = ref.kwarg
 
+    if base_args_node is not None:
+        if isinstance(base_args_node, (PyIRList, PyIRTuple)):
+            base_args = tuple(base_args_node.elements)
+        else:
+            CompilerExit.user_error_node(
+                "Параметр base_args в gmod_api должен быть list/tuple литералом.",
+                ir.path,
+                ref,
+            )
+
     return GmodApiDecl(
         lua_name=lua_name,
         method=method_val,
@@ -207,6 +221,7 @@ def _parse_gmod_api(
         py_defaults=py_defaults,
         py_vararg=py_vararg,
         py_kwarg=py_kwarg,
+        base_args=base_args,
     )
 
 
@@ -482,7 +497,15 @@ class RewriteGmodApiCallsPass:
         ) -> GmodApiDecl:
             first = decls[0]
             for d in decls[1:]:
-                if d.lua_name != first.lua_name or d.method != first.method:
+                if (
+                    d.lua_name != first.lua_name
+                    or d.method != first.method
+                    or d.py_params != first.py_params
+                    or d.py_vararg != first.py_vararg
+                    or d.py_kwarg != first.py_kwarg
+                    or tuple(d.py_defaults.keys()) != tuple(first.py_defaults.keys())
+                    or len(d.base_args) != len(first.base_args)
+                ):
                     CompilerExit.user_error_node(
                         "Не удалось однозначно определить, какой gmod_api-вызов использовать.\n"
                         f"Имя метода: {mname}\n"
@@ -585,6 +608,9 @@ class RewriteGmodApiCallsPass:
                 )
 
             new_args_p: list[PyIRNode] = []
+            if decl.base_args:
+                new_args_p.extend(deepcopy(arg) for arg in decl.base_args)
+
             for param_name in params:
                 if param_name in provided:
                     new_args_p.append(provided[param_name])

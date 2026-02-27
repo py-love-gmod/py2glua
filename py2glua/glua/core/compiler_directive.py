@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Literal
 
 
@@ -82,14 +82,23 @@ class CompilerDirective:
     # endregion
 
     @staticmethod
-    def gmod_api(name: str, realm: list[RealmMarker], method: bool = False) -> Callable:
+    def gmod_api(
+        name: str,
+        realm: list[RealmMarker],
+        method: bool = False,
+        *,
+        base_args: Sequence[object] | None = None,
+    ) -> Callable:
         """Помечает функцию или класс как элемент GMod API
 
         Делает две вещи:
         - присваивает указанное имя в таблице API
         - исключает Python-реализацию из компиляции (аналогично no_compile)
 
-        Внутренний инструмент для генерации API-обёрток
+        Внутренний инструмент для генерации API-обёрток.
+
+        Дополнительно можно задать:
+        - base_args: базовые позиционные аргументы для автоподстановки
         """
 
         def decorator(fn):

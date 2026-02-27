@@ -51,7 +51,24 @@ def _parse_number(text: str):
 
 
 def _parse_string(token: str) -> str:
-    return bytes(token[1:-1], "utf-8").decode("utf-8")
+    s = token
+    i = 0
+    while i < len(s) and s[i] in "rRuUbB":
+        i += 1
+    literal = s[i:]
+    if not literal:
+        raise SyntaxError("Пустой строковый литерал")
+
+    if literal.startswith(("'''", '"""')):
+        quote = literal[:3]
+        if len(literal) < 6 or not literal.endswith(quote):
+            raise SyntaxError("Некорректный тройной строковый литерал")
+        return literal[3:-3]
+
+    quote = literal[0]
+    if quote not in ("'", '"') or len(literal) < 2 or not literal.endswith(quote):
+        raise SyntaxError("Некорректный строковый литерал")
+    return literal[1:-1]
 
 
 _LITERAL_NAMES = {

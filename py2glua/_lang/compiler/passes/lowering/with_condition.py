@@ -26,6 +26,7 @@ from ..common import (
     collect_decl_symid_cache,
     collect_core_compiler_directive_local_symbol_ids,
     is_attr_on_symbol_ids,
+    resolve_symbol_ids_by_attr_chain,
 )
 
 
@@ -198,7 +199,13 @@ class RewriteWithConditionBlocksPass:
 
                 rebuilt: list[PyIRNode] = inner
                 for it in reversed(st.items):
-                    rebuilt = cls._wrap_with_item(it, rebuilt, st, s)
+                    rebuilt = cls._wrap_with_item(
+                        it,
+                        rebuilt,
+                        st,
+                        ctx=ctx,
+                        with_condition_class_symids=s,
+                    )
 
                 return rebuilt
 
@@ -239,16 +246,19 @@ class RewriteWithConditionBlocksPass:
     @staticmethod
     def _is_with_condition_item(
         it: PyIRWithItem,
+        *,
+        ctx: SymLinkContext,
         with_condition_class_symids: set[int],
     ) -> bool:
         ce = it.context_expr
         if not isinstance(ce, PyIRAttribute):
             return False
 
-        if not isinstance(ce.value, PyIRSymLink):
-            return False
+        if isinstance(ce.value, PyIRSymLink):
+            return int(ce.value.symbol_id) in with_condition_class_symids
 
-        return int(ce.value.symbol_id) in with_condition_class_symids
+        resolved = resolve_symbol_ids_by_attr_chain(ctx, ce.value)
+        return any(int(sid) in with_condition_class_symids for sid in resolved)
 
     @classmethod
     def _wrap_with_item(
@@ -256,6 +266,8 @@ class RewriteWithConditionBlocksPass:
         it: PyIRWithItem,
         inner: list[PyIRNode],
         src_with: PyIRWith,
+        *,
+        ctx: SymLinkContext,
         with_condition_class_symids: set[int],
     ) -> list[PyIRNode]:
         if it.optional_vars is not None:
@@ -267,7 +279,11 @@ class RewriteWithConditionBlocksPass:
             )
             return [w]
 
-        if cls._is_with_condition_item(it, with_condition_class_symids):
+        if cls._is_with_condition_item(
+            it,
+            ctx=ctx,
+            with_condition_class_symids=with_condition_class_symids,
+        ):
             test = it.context_expr
             out_if = PyIRIf(
                 line=src_with.line,
