@@ -1,2 +1,4 @@
 pytest
 colorama
+requests
+beautifulsoup4
