@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -11,15 +12,16 @@ from bs4 import BeautifulSoup, Tag
 BASE = "https://wiki.facepunch.com"
 ROOT_PAGE = "/gmod/"
 OUT_PATH = Path("full_gmod_api.json")
-DEBUG = True
 HEADERS = {"User-Agent": "py2glua-scraper/0.1"}
+session = requests.Session()
+session.headers.update(HEADERS)
 
 
 # Utility
 def fetch_soup(url: str) -> BeautifulSoup:
-    r = requests.get(url, timeout=20, headers=HEADERS)
+    r = session.get(url, timeout=20)
     r.raise_for_status()
-    return BeautifulSoup(r.text, "html.parser")
+    return BeautifulSoup(r.text, "lxml")
 
 
 def text_clean(tag: Tag | None) -> str | None:
@@ -239,48 +241,15 @@ def parse_function_page(url: str) -> dict:
 
 
 # Main
-if DEBUG:
+def main():
+    dev_ref = parse_developer_reference()
 
-    def main():
-        dev_ref = parse_developer_reference()
+    full_output: dict = {}
 
-        full_output: dict = {}
+    tasks = []
+    task_map = {}
 
-        for category, kinds in dev_ref.items():
-            full_output[category] = {}
-
-            for kind, items in kinds.items():
-                if not items:
-                    continue
-
-                item = items[0]
-
-                print(f"[LIMIT 1] Parsing {category} / {kind} / {item['title']}")
-
-                details = parse_function_page(item["url"])
-
-                full_output[category][kind] = [
-                    {
-                        "title": item["title"],
-                        "realms": item["realms"],
-                        "details": details,
-                    }
-                ]
-
-        OUT_PATH.write_text(
-            json.dumps(full_output, indent=4, ensure_ascii=False),
-            encoding="utf-8",
-        )
-
-        print(f"Saved to {OUT_PATH}")
-
-else:
-
-    def main():
-        dev_ref = parse_developer_reference()
-
-        full_output: dict = {}
-
+    with ThreadPoolExecutor(max_workers=4) as executor:
         for category, kinds in dev_ref.items():
             full_output[category] = {}
 
@@ -288,23 +257,35 @@ else:
                 full_output[category][kind] = []
 
                 for item in items:
-                    print(f"Parsing {item['title']}...")
-                    details = parse_function_page(item["url"])
+                    future = executor.submit(parse_function_page, item["url"])
+                    tasks.append(future)
+                    task_map[future] = (category, kind, item)
 
-                    full_output[category][kind].append(
-                        {
-                            "title": item["title"],
-                            "realms": item["realms"],
-                            "details": details,
-                        }
-                    )
+        for future in as_completed(tasks):
+            category, kind, item = task_map[future]
 
-        OUT_PATH.write_text(
-            json.dumps(full_output, indent=4, ensure_ascii=False),
-            encoding="utf-8",
-        )
+            try:
+                details = future.result()
+            except Exception as e:
+                print(f"Failed: {item['title']} -> {e}")
+                details = {}
 
-        print(f"Saved to {OUT_PATH}")
+            full_output[category][kind].append(
+                {
+                    "title": item["title"],
+                    "realms": item["realms"],
+                    "details": details,
+                }
+            )
+
+            print(f"Done: {item['title']}")
+
+    OUT_PATH.write_text(
+        json.dumps(full_output, indent=4, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    print(f"Saved to {OUT_PATH}")
 
 
 if __name__ == "__main__":

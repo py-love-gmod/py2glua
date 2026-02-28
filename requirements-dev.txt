@@ -2,3 +2,4 @@ pytest
 colorama
 requests
 beautifulsoup4
+lxml
