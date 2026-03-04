@@ -1,5 +1,5 @@
 pytest
 colorama
-requests
+aiohttp
 beautifulsoup4
 lxml
