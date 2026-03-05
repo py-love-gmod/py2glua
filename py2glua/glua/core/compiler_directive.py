@@ -3,11 +3,14 @@ from typing import Literal
 
 
 class CompilerDirective:
-    """Класс отвечающий за дерективы компилятору"""
+    """
+    Класс отвечающий за дерективы компилятору
+    """
 
     # region debug
     DEBUG: bool
-    """Переменная отвечающая за дебаг сборку
+    """
+    Переменная отвечающая за дебаг сборку
     
     - True - debug
     - False - release
@@ -15,7 +18,9 @@ class CompilerDirective:
 
     @staticmethod
     def debug_compile_only() -> Callable:
-        """Декоратор отвечающий за использование данной функции только в debug режиме"""
+        """
+        Декоратор отвечающий за использование данной функции только в debug режиме сборки компилятора
+        """
 
         def decorator(fn):
             return fn
@@ -25,7 +30,11 @@ class CompilerDirective:
     # endregion
 
     class RealmMarker:
-        """Маркер обозначающий что данная переменная отвечает за реалм"""
+        """
+        Маркер обозначающий что данная переменная отвечает за реалм
+
+        Фактически ничего не делает и используется онли для типизации
+        """
 
         def __enter__(self):
             pass
@@ -36,7 +45,8 @@ class CompilerDirective:
     # region compile func type
     @staticmethod
     def lazy_compile() -> Callable:
-        """Помечает метод или класс как "ленивый" для компилятора
+        """
+        Помечает метод или класс как "ленивый" для компилятора
 
         Код, помеченный как lazy, будет включён в итоговый glua только если
         его использование может быть обнаружено статическим анализом IR
@@ -49,7 +59,9 @@ class CompilerDirective:
 
     @staticmethod
     def inline() -> Callable:
-        """Просьба компилятору вставлять тело функции на место вызова (inline)"""
+        """
+        Просьба компилятору вставлять тело функции на место вызова
+        """
 
         def decorator(fn):
             return fn
@@ -58,11 +70,12 @@ class CompilerDirective:
 
     @staticmethod
     def no_compile() -> Callable:
-        """Помечает метод или класс как некомпилируемый
+        """
+        Помечает метод или класс как некомпилируемый
 
         Данный декоратор исключает питон реализацию из вывода glua
 
-        Внутренний декоратор. Используется py2glua для исключения кода из вывода
+        Внутренний декоратор. Используется для исключения кода из вывода
         """
 
         def decorator(fn):
@@ -72,7 +85,12 @@ class CompilerDirective:
 
     @staticmethod
     def anonymous() -> Callable:
-        """Указывает что функция является анонимной, и её тело необходимо поставить ака function(args) body end"""
+        """
+        Указывает что функция является анонимной, и её тело необходимо поставить
+
+        Пример анонимной функции:
+            function(args) body end
+        """
 
         def decorator(fn):
             return fn
@@ -89,7 +107,8 @@ class CompilerDirective:
         *,
         base_args: Sequence[object] | None = None,
     ) -> Callable:
-        """Помечает функцию или класс как элемент GMod API
+        """
+        Помечает функцию или класс как элемент GMod API
 
         Делает две вещи:
         - присваивает указанное имя в таблице API
@@ -132,8 +151,18 @@ class CompilerDirective:
         return decorator
 
     @staticmethod
-    def register_arg(index: int = 0) -> Callable:
-        """Регистрирует переменную в особое хранилище для последующего создания util.AddNetworkString"""
+    def register_arg(
+        index: int = 0,
+        reg_type: Literal["net", "material", "model"] = "net",
+    ) -> Callable:
+        """
+        Регистрирует переменную в особое хранилище для последующего использования компилятором
+        
+        reg_type:
+            net = util.AddNetworkString
+            material = Для билда материалов/текстур - WIP
+            model = Для билда моделей - WIP
+        """
 
         def decorator(fn):
             return fn
@@ -150,9 +179,11 @@ class CompilerDirective:
             ],
         ],
     ) -> Callable:
-        """Делает магию с енумами нестандартными.
-        Путь указания маппинга
-        "Поле": ["тип поля", значение]
+        """
+        Делает магию с енумами нестандартными.
+        
+        Путь указания маппинга:
+            "Поле": ["тип поля", значение]
 
         Для примера использования смотрите glua.realm
         """
@@ -166,15 +197,8 @@ class CompilerDirective:
     def with_condition() -> Callable:
         """
         Помечает класс как источник условных with-блоков.
-
-        Конструкция:
-            with Class.attr:
-                body
-
-        Интерпретируется компилятором как:
-            if Class.attr:
-                body
-
+        
+        То есть with конструкция будет переделана в if конструкцию (без else или elif)
         """
 
         def decorator(fn):
@@ -185,7 +209,9 @@ class CompilerDirective:
     # region contextmanager
     @staticmethod
     def contextmanager() -> Callable:
-        """Указывает что данная функция обязана реализовывать конструкцию with"""
+        """
+        Указывает что данная функция обязана реализовывать конструкцию with
+        """
 
         def decorator(fn):
             return fn
@@ -193,10 +219,18 @@ class CompilerDirective:
         return decorator
 
     contextmanager_body = object()
-    """Указание компилятору что в данном месте для конструкции with необходимо подставить само тело блока"""
+    """
+    Указание компилятору что в данном месте для конструкции with необходимо подставить само тело блока.
+    
+    Разрешено не более 1 метки contextmanager_body на функцию.
+    """
     # endregion
 
     @staticmethod
     def raw(lua_code: str) -> None:
-        """Позволяет сказать компилятору "вставь голый луа сюдa". Что либо возвращать из этого блока нельзя"""
+        """
+        Позволяет сказать компилятору "вставь голый луа сюдa".
+
+        Что либо возвращать из этого блока нельзя
+        """
         pass

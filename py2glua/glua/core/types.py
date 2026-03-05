@@ -63,46 +63,36 @@ class lua_table:
     @CompilerDirective.gmod_api("pairs", realm=[Realm.SHARED], method=False)
     def pairs(table_value: Mapping[_K, _V]) -> Iterable[tuple[_K, _V]]:
         """
-        TODO: NORMAL DOCS
-        Явный выбор итерации через `pairs`.
-        """
-        ...
+        Итерация по всем элементам таблицы.
 
-    @staticmethod
-    @CompilerDirective.gmod_api("ipairs", realm=[Realm.SHARED], method=False)
-    def ipairs(table_value: Sequence[_T]) -> Iterable[tuple[int, _T]]:
-        """
-        TODO: NORMAL DOCS
-        Явный выбор итерации через `ipairs`.
-        """
-        ...
+        Эквивалент Lua-функции `pairs`.
 
-    @staticmethod
-    def by_len(table_value: Sequence[_T]) -> Iterable[_T]:
-        """
-        TODO: NORMAL DOCS
-        WARN: MAGIC METHOD
-        Явная стратегия итерации через индекс `1..#table`.
+        Порядок обхода элементов не гарантируется и зависит
+        от внутреннего состояния таблицы.
 
-        Используется компилятором в `for ... in lua_table.by_len(table)`.
-        """
-        ...
-
-    @staticmethod
-    @CompilerDirective.gmod_api("RandomPairs", realm=[Realm.SHARED], method=False)
-    def random_pairs(table_value: Mapping[_K, _V]) -> Iterable[tuple[_K, _V]]:
-        """
-        TODO: NORMAL DOCS
-        Явный выбор итерации через `RandomPairs`.
+        Returns:
+            Iterable[(key, value)]
         """
         ...
 
     @staticmethod
     @CompilerDirective.gmod_api("SortedPairs", realm=[Realm.SHARED], method=False)
-    def sorted_pairs(table_value: Mapping[_K, _V]) -> Iterable[tuple[_K, _V]]:
+    def SortedPairs(
+        table_value: Mapping[_K, _V],
+        descending: bool = False,
+    ) -> Iterable[tuple[_K, _V]]:
         """
-        TODO: NORMAL DOCS
-        Явный выбор итерации через `SortedPairs`.
+        Итерация по таблице с сортировкой по ключам.
+
+        Аналог `pairs`, однако элементы возвращаются в
+        детерминированном порядке, отсортированном по ключам.
+
+        Args:
+            table_value: таблица для обхода
+            descending: если True - сортировка выполняется в обратном порядке
+
+        Returns:
+            Iterable[(key, value)]
         """
         ...
 
@@ -112,9 +102,69 @@ class lua_table:
         realm=[Realm.SHARED],
         method=False,
     )
-    def sorted_pairs_by_value(table_value: Mapping[_K, _V]) -> Iterable[tuple[_K, _V]]:
+    def SortedPairsByValue(
+        table_value: Mapping[_K, _V],
+        descending: bool = False,
+    ) -> Iterable[tuple[_K, _V]]:
         """
-        TODO: NORMAL DOCS
-        Явный выбор итерации через `SortedPairsByValue`.
+        Итерация по таблице с сортировкой по значениям.
+
+        Работает аналогично `pairs`, но элементы предварительно
+        сортируются по значению.
+
+        Args:
+            table_value: таблица для обхода
+            descending: если True - сортировка выполняется в обратном порядке
+
+        Returns:
+            Iterable[(key, value)]
+        """
+        ...
+
+    @staticmethod
+    @CompilerDirective.gmod_api("RandomPairs", realm=[Realm.SHARED], method=False)
+    def RandomPairs(table_value: Mapping[_K, _V]) -> Iterable[tuple[_K, _V]]:
+        """
+        Итерация по таблице в случайном порядке.
+
+        Эквивалент Lua-функции `RandomPairs`.
+
+        Используется, когда требуется намеренно недетерминированный
+        порядок обхода элементов.
+
+        Returns:
+            Iterable[(key, value)]
+        """
+        ...
+
+    @staticmethod
+    @CompilerDirective.gmod_api("ipairs", realm=[Realm.SHARED], method=False)
+    def ipairs(table_value: Sequence[_T]) -> Iterable[tuple[int, _T]]:
+        """
+        Итерация по последовательной части таблицы.
+
+        Эквивалент Lua-функции `ipairs`. Обход выполняется
+        по индексам `1..N` до первого отсутствующего значения.
+
+        Returns:
+            Iterable[(index, value)]
+        """
+        ...
+
+    @staticmethod
+    def by_len(table_value: Sequence[_T]) -> Iterable[_T]:
+        """
+        Итерация по индексам `1..#table`.
+
+        В отличие от `ipairs`, использует длину таблицы (`#table`)
+        как верхнюю границу диапазона.
+
+        Этот метод используется компилятором как явная стратегия
+        итерации при конструкции:
+
+            for x in lua_table.by_len(table)
+
+        Notes:
+            Специальный метод компилятора.
         """
         ...
