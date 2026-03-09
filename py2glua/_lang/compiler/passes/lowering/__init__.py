@@ -1,3 +1,7 @@
+from .arg_registration import (
+    CollectRegisterArgDeclsPass,
+    CollectRegisterArgNetStringsPass,
+)
 from .comp_const import FoldCompileTimeBoolConstsPass
 from .const_folding import ConstFoldingPass
 from .dce import DcePass
@@ -20,7 +24,6 @@ from .lua_table import (
     RewriteForIteratorStrategyPass,
     RewriteLuaTableCtorPass,
 )
-from .net_string import CollectRegisterArgDeclsPass, CollectRegisterArgNetStringsPass
 from .nil_fold import NilFoldPass
 from .raw import RewriteRawCallsPass
 from .strip_cd import StripCompilerDirectiveDefPass

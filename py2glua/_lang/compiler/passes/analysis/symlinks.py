@@ -337,11 +337,11 @@ class SymLinkContext:
         default_factory=dict
     )
 
-    _register_arg_targets: dict[int, int] = field(default_factory=dict)
+    _register_arg_targets: dict[int, tuple[int, str]] = field(default_factory=dict)
     _register_arg_symid_by_decl_cache: dict[tuple[Path, int, str], int] = field(
         default_factory=dict
     )
-    _net_string_literals: set[str] = field(default_factory=set)
+    _register_arg_values_by_type: dict[str, list[str]] = field(default_factory=dict)
 
     _gmod_special_enum_store: dict[int, dict[str, object]] = field(default_factory=dict)
     _gmod_special_enum_nested_ids: dict[tuple[int, str], int] = field(

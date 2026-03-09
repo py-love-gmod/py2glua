@@ -186,7 +186,7 @@ class BuildAutorunInitProjectPass:
 
     @classmethod
     def _get_sorted_net_strings(cls, ctx: SymLinkContext) -> list[str]:
-        raw = ctx._net_string_literals
+        raw = ctx._register_arg_values_by_type.get("net")
         if not raw:
             return []
 

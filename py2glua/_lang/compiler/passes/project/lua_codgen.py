@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass, fields
 from pathlib import Path
@@ -851,6 +852,8 @@ class EmitLuaProjectPass:
             code = emitter.emit_file(ir).code
             out_path.write_text(code, encoding="utf-8")
 
+        cls._write_extracted_registry(out_dir, ctx)
+
         return files
 
     @classmethod
@@ -950,3 +953,30 @@ class EmitLuaProjectPass:
             return None
 
         return ctx.module_name_by_path.get(pr)
+
+    @classmethod
+    def _write_extracted_registry(cls, out_dir: Path, ctx: SymLinkContext) -> None:
+        by_type = ctx._register_arg_values_by_type
+        material = cls._sorted_registry_values(by_type.get("material"))
+        model = cls._sorted_registry_values(by_type.get("model"))
+
+        if not material and not model:
+            return
+
+        payload = {
+            "material": material,
+            "model": model,
+        }
+
+        extracted_path = out_dir.parent / "extracted.json"
+        extracted_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _sorted_registry_values(raw: list[str] | None) -> list[str]:
+        if not raw:
+            return []
+
+        return sorted(str(x) for x in raw if isinstance(x, str) and x)
