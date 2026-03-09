@@ -21,6 +21,20 @@ homepage = "https://github.com/py-love-gmod/py2glua"
 [tool.setuptools.packages.find]
 where = ["."]
 
+[tool.setuptools.package-data]
+"py2glua.data" = [
+  "*.yml",
+  "*.yaml",
+  "api/*.yml",
+  "api/*.yaml",
+  "api/**/*.yml",
+  "api/**/*.yaml",
+  "loc/*.yml",
+  "loc/*.yaml",
+  "loc/**/*.yml",
+  "loc/**/*.yaml",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

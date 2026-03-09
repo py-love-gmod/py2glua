@@ -1,0 +1,29 @@
+functions:
+  is_valid:
+    summary: Checks object validity.
+    description: Returns true if object is valid.
+    arg1: Object to validate.
+
+  include:
+    summary: Includes Lua file.
+    arg1: Path to Lua file.
+
+classes:
+  ExampleEntity:
+    summary: Example entity for class generation checks.
+    description: Includes inheritance, fields, methods and a nested class.
+  ExampleEntity.Meta:
+    summary: Nested class with metadata.
+  TypeShowcase:
+    summary: Class used to verify complex custom type annotations.
+
+fields:
+  ExampleEntity.health:
+    summary: Current health amount.
+  ExampleEntity.model_path:
+    summary: Path to the entity model.
+  ExampleEntity.Meta.version:
+    summary: Metadata schema version.
+  TypeShowcase.payload:
+    summary: Arbitrary payload with a custom type.
+    description: Validates that a complex annotation is preserved in generated code.

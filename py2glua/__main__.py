@@ -7,6 +7,7 @@ from pathlib import Path
 from ._cli import CompilerExit, logger, setup_logging
 from ._config import Py2GluaConfig
 from ._lang.compiler import Compiler
+from ._project_init import init_project
 
 _LUA_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -48,27 +49,26 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="py2glua",
         description="Python -> GLua компилятор",
     )
-
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     # region Build cmd
-    b = sub.add_parser("build", help="Собирает python код в glua код")
+    build_cmd = sub.add_parser("build", help="Собирает python код в glua код")
 
-    b.add_argument(
+    build_cmd.add_argument(
         "-v",
         "--verbose",
         action="store_true",
         help="Подробное логирование",
     )
 
-    b.add_argument(
+    build_cmd.add_argument(
         "-d",
         "--debug",
         action="store_true",
         help="Debug режим сборки",
     )
 
-    b.add_argument(
+    build_cmd.add_argument(
         "src",
         type=Path,
         nargs="?",
@@ -76,7 +76,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Исходная папка для исходного кода (по умолчанию: ./source)",
     )
 
-    b.add_argument(
+    build_cmd.add_argument(
         "-o",
         "--out",
         type=Path,
@@ -84,11 +84,49 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Папка для результата (по умолчанию: ./build)",
     )
 
-    b.add_argument(
+    build_cmd.add_argument(
         "-n",
         "--namespace",
         type=str,
         help="Неймспейс проекта (Lua identifier)",
+    )
+    # endregion
+
+    # region Init cmd
+    init_cmd = sub.add_parser(
+        "init",
+        help="Создаёт дефолтные папки и собирает API из data/api/**/*.yml",
+    )
+
+    init_cmd.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Подробное логирование",
+    )
+
+    init_cmd.add_argument(
+        "src",
+        type=Path,
+        nargs="?",
+        default=Path("./source"),
+        help="Исходная папка для исходного кода (по умолчанию: ./source)",
+    )
+
+    init_cmd.add_argument(
+        "-o",
+        "--out",
+        type=Path,
+        default=Path("./build"),
+        help="Папка для результата (по умолчанию: ./build)",
+    )
+
+    init_cmd.add_argument(
+        "-l",
+        "--lang",
+        type=str,
+        default="ru",
+        help="Язык докстрингов API при init (по умолчанию: ru)",
     )
     # endregion
 
@@ -123,11 +161,11 @@ def main() -> None:
                 Py2GluaConfig.namespace = args.namespace
 
             else:
-                ns = _gen_namespace()
-                Py2GluaConfig.namespace = ns
+                namespace = _gen_namespace()
+                Py2GluaConfig.namespace = namespace
                 logger.warning(
                     "Namespace не задан\n"
-                    f"Namespace задан автоматически: {ns}\n"
+                    f"Namespace задан автоматически: {namespace}\n"
                     "Установить свой можно через параметр -n | --namespace"
                 )
 
@@ -143,6 +181,14 @@ def main() -> None:
                 )
             )
             _build()
+            CompilerExit.generic(0)
+
+        case "init":
+            init_project(
+                source=args.src.resolve(),
+                output=args.out.resolve(),
+                lang=args.lang.strip() or "ru",
+            )
             CompilerExit.generic(0)
 
         case "version":

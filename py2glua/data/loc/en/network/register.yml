@@ -1,0 +1,6 @@
+functions:
+  add_network_string:
+    summary: Registers a net string.
+    deprecated: Use the new API endpoint after migration to the new registry.
+    arg1: Network string name.
+

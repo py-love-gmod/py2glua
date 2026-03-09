@@ -1,0 +1,29 @@
+functions:
+  is_valid:
+    summary: Проверяет валидность объекта.
+    description: Возвращает true, если объект валиден.
+    arg1: Объект для проверки.
+
+  include:
+    summary: Подключает Lua-файл.
+    arg1: Путь до Lua-файла.
+
+classes:
+  ExampleEntity:
+    summary: Пример сущности для проверки генерации классов.
+    description: Включает наследование, поля, методы и вложенный класс.
+  ExampleEntity.Meta:
+    summary: Вложенный класс с метаданными.
+  TypeShowcase:
+    summary: Класс для проверки сложных пользовательских типов.
+
+fields:
+  ExampleEntity.health:
+    summary: Текущее количество здоровья.
+  ExampleEntity.model_path:
+    summary: Путь до модели сущности.
+  ExampleEntity.Meta.version:
+    summary: Версия структуры метаданных.
+  TypeShowcase.payload:
+    summary: Произвольный payload с кастомным типом.
+    description: Используется для проверки, что сложная аннотация не ломается в генерации.

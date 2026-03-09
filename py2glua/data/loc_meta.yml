@@ -1,0 +1,12 @@
+languages:
+  ru:
+    name: "Русский"
+    edge_cases:
+      defaults_to: "По умолчанию: {value}."
+      deprecated: "Deprecated: {value}"
+
+  en:
+    name: "English"
+    edge_cases:
+      defaults_to: "Defaults to {value}."
+      deprecated: "Deprecated: {value}"

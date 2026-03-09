@@ -1,0 +1,6 @@
+functions:
+  add_network_string:
+    summary: Регистрирует net-строку.
+    deprecated: Используй новую API-точку после перехода на новый реестр.
+    arg1: Имя сетевой строки.
+
