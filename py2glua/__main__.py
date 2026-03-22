@@ -7,7 +7,6 @@ from pathlib import Path
 from ._cli import CompilerExit, logger, setup_logging
 from ._config import Py2GluaConfig
 from ._lang.compiler import Compiler
-from ._project_init import init_project
 
 _LUA_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -92,44 +91,6 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     # endregion
 
-    # region Init cmd
-    init_cmd = sub.add_parser(
-        "init",
-        help="Создаёт дефолтные папки и собирает API из data/api/**/*.yml",
-    )
-
-    init_cmd.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Подробное логирование",
-    )
-
-    init_cmd.add_argument(
-        "src",
-        type=Path,
-        nargs="?",
-        default=Path("./source"),
-        help="Исходная папка для исходного кода (по умолчанию: ./source)",
-    )
-
-    init_cmd.add_argument(
-        "-o",
-        "--out",
-        type=Path,
-        default=Path("./build"),
-        help="Папка для результата (по умолчанию: ./build)",
-    )
-
-    init_cmd.add_argument(
-        "-l",
-        "--lang",
-        type=str,
-        default="ru",
-        help="Язык докстрингов API при init (по умолчанию: ru)",
-    )
-    # endregion
-
     # region Version cmd
     sub.add_parser("version", help="Показывает версию py2glua")
     # endregion
@@ -181,14 +142,6 @@ def main() -> None:
                 )
             )
             _build()
-            CompilerExit.generic(0)
-
-        case "init":
-            init_project(
-                source=args.src.resolve(),
-                output=args.out.resolve(),
-                lang=args.lang.strip() or "ru",
-            )
             CompilerExit.generic(0)
 
         case "version":
