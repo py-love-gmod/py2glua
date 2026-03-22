@@ -3,7 +3,7 @@ languages:
     name: "Русский"
     edge_cases:
       defaults_to: "По умолчанию: {value}."
-      deprecated: "Deprecated: {value}"
+      deprecated: "Устарело: {value}"
 
   en:
     name: "English"
