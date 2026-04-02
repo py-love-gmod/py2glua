@@ -1,4 +1,8 @@
-import tokenize
+import tokenize  # TODO: Заменить его на самописный аналог.
+
+# Сам по себе токиназер не плох, однако то что он ломает комментарии не есть хорошо
+# Возможно тогда даже получится упростить всю эту поеботу с парсером и сделать сразу импорт логических нод,
+# но пока что я не вижу смысла в том чтобы слишком сильно заморачиваться.
 from enum import Enum, auto
 from io import BytesIO
 
@@ -92,6 +96,7 @@ class PyParser:
             source = source[1:]
 
         try:
+            # По факту проверяем что питон код не полное говно которое не является корректным питоном.
             compile(source, "<py2glua-validate>", "exec")
 
         except SyntaxError as e:
@@ -103,6 +108,7 @@ class PyParser:
         for token in tokenize.tokenize(BytesIO(source.encode("utf-8")).readline):
             if token.type == tokenize.ENCODING:
                 continue
+
             token_list.append(token)
 
         return TokenStream(token_list)
@@ -114,7 +120,7 @@ class PyParser:
     def _peek_next_significant(
         cls, token_stream: TokenStream
     ) -> tokenize.TokenInfo | None:
-        """
+        """СМ TODO: для токинизатора
         Peek ahead skipping NL/NEWLINE/DEDENT.
         Does NOT skip INDENT: INDENT is significant for us.
         """
@@ -123,9 +129,11 @@ class PyParser:
             t = token_stream.peek(j)
             if t is None:
                 return None
+
             if t.type in (tokenize.NL, tokenize.NEWLINE, tokenize.DEDENT):
                 j += 1
                 continue
+
             return t
 
     @classmethod
@@ -165,6 +173,7 @@ class PyParser:
                     and nxt.string in cls._CHAIN_CONTINUATIONS
                 ):
                     chain_gap_comments.append(comment)
+
                 else:
                     nodes.append(comment)
 
@@ -573,6 +582,7 @@ class PyParser:
 
             if tok.type == tokenize.INDENT:
                 depth += 1
+
             elif tok.type == tokenize.DEDENT:
                 depth -= 1
                 if depth == 0:
@@ -638,6 +648,7 @@ class PyParser:
                         new_tokens.extend(cls._expand_blocks([t]))
                     else:
                         new_tokens.append(t)
+
                 n.tokens = new_tokens
 
             out.append(n)
