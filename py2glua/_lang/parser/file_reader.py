@@ -41,6 +41,18 @@ class TokenType(IntEnum):
 class FileReader:
     """Самая базовая санитизация файла который пришёл на разбор"""
 
+    KEY_WORD_SET = {
+        "def",
+        "class",
+        "return",
+        "from",
+        "import",
+        # Запретные закуски
+        "lambda",
+        "async",
+        "await",
+    }
+
     @classmethod
     def read(cls, path: Path) -> list[Any]:
         source = path.read_text(encoding="utf-8-sig")
