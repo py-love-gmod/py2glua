@@ -1,7 +1,7 @@
 import tokenize
 from typing import Sequence
 
-from ...parse import PyLogicKind, PyLogicNode
+from ...parser import PyLogicKind, PyLogicNode
 from ..build_context import build_block, build_expr
 from ..ir_dataclass import PyIRClassDef, PyIRNode
 

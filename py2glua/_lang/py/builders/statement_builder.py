@@ -6,7 +6,7 @@ from io import StringIO
 from typing import List, NoReturn, Sequence
 
 from ...etc import TokenStream
-from ...parse import PyLogicNode
+from ...parser import PyLogicNode
 from ..ir_dataclass import (
     PyAugAssignType,
     PyBinOPType,

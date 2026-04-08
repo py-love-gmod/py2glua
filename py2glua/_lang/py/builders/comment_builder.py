@@ -1,8 +1,8 @@
 import tokenize
 from typing import Sequence
 
-from ...parse import PyLogicNode
-from ...parse.py_parser import RawSyntaxNodeKind
+from ...parser import PyLogicNode
+from ...parser.py_parser import RawSyntaxNodeKind
 from ..ir_dataclass import PyIRComment, PyIRNode
 
 

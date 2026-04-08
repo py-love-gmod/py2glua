@@ -1,7 +1,7 @@
 import tokenize
 from typing import Sequence
 
-from ...parse import PyLogicNode
+from ...parser import PyLogicNode
 from ..ir_dataclass import PyIRNode, PyIRPass
 
 

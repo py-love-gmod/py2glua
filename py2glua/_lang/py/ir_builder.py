@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from ..etc import TokenStream
-from ..parse import PyLogicBlockBuilder, PyLogicKind, PyLogicNode
+from ..parser import PyLogicBlockBuilder, PyLogicKind, PyLogicNode
 from .build_context import set_build_block, set_build_expr
 from .builders import (
     BranchBuilder,

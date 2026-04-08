@@ -2,7 +2,7 @@ import tokenize
 from collections.abc import Sequence
 
 from ...etc import TokenStream
-from ...parse import PyLogicKind, PyLogicNode
+from ...parser import PyLogicKind, PyLogicNode
 from ..build_context import build_block
 from ..ir_dataclass import PyIRIf, PyIRNode
 from .statement_builder import StatementBuilder

@@ -4,7 +4,7 @@ import tokenize
 from typing import List, Sequence
 
 from ...etc import TokenStream
-from ...parse import PyLogicNode
+from ...parser import PyLogicNode
 from ..build_context import build_block
 from ..ir_dataclass import PyIRNode, PyIRWith, PyIRWithItem
 from .statement_builder import StatementBuilder
