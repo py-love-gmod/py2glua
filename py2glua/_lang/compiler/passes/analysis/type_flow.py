@@ -112,6 +112,7 @@ class TypeFlowPass:
     def run(ir: PyIRFile, ctx: SymLinkContext) -> None:
         type_sets, snapshots, warn_once = TypeFlowPass._ensure_storage(ctx)
         nil_ids, types_alias_ids = TypeFlowPass._collect_nil_ids(ir, ctx)
+        method_owner_by_uid = TypeFlowPass._collect_method_owner_by_uid(ir, ctx)
 
         (
             fn_ret_by_sym,
@@ -141,6 +142,7 @@ class TypeFlowPass:
                     class_bases_by_name,
                     fn_tg_nil_by_sym,
                     method_tg_nil_by_class,
+                    method_owner_by_uid,
                 )
 
     @staticmethod
@@ -374,6 +376,36 @@ class TypeFlowPass:
         )
 
     @staticmethod
+    def _collect_method_owner_by_uid(
+        ir: PyIRFile,
+        ctx: SymLinkContext,
+    ) -> dict[int, str]:
+        owners: dict[int, str] = {}
+
+        def walk_class_body(body: list[PyIRNode], owner_class_name: str) -> None:
+            for item in body:
+                if isinstance(item, PyIRFunctionDef):
+                    owners[ctx.uid(item)] = owner_class_name
+                    continue
+
+                if isinstance(item, PyIRIf):
+                    walk_class_body(item.body, owner_class_name)
+                    walk_class_body(item.orelse, owner_class_name)
+                    continue
+
+                if isinstance(item, PyIRClassDef):
+                    walk_class(item)
+
+        def walk_class(cls: PyIRClassDef) -> None:
+            walk_class_body(cls.body, cls.name)
+
+        for st in ir.body:
+            if isinstance(st, PyIRClassDef):
+                walk_class(st)
+
+        return owners
+
+    @staticmethod
     def _strip_ws(s: str) -> str:
         return "".join(ch for ch in s if ch not in (" ", "\t", "\n", "\r"))
 
@@ -492,6 +524,7 @@ class TypeFlowPass:
         class_bases_by_name: dict[str, tuple[str, ...]],
         fn_tg_nil_by_sym: set[int],
         method_tg_nil_by_class: set[tuple[str, str]],
+        method_owner_by_uid: dict[int, str],
     ) -> None:
         fn_uid = ctx.uid(fn)
         body_scope = ctx.fn_body_scope.get(fn_uid)
@@ -499,14 +532,24 @@ class TypeFlowPass:
             return
 
         env: Dict[int, Set[str]] = {}
+        owner_class_name = method_owner_by_uid.get(fn_uid)
 
-        for param, (ann, _default) in fn.signature.items():
+        for idx, (param, (ann, _default)) in enumerate(fn.signature.items()):
             link = ctx.resolve(scope=body_scope, name=param)
             if link is None:
                 continue
 
             sid = link.target.value
-            atoms = TypeFlowPass._parse_annotation_atoms(ann)
+            if (
+                ann is None
+                and idx == 0
+                and owner_class_name is not None
+                and param == "self"
+            ):
+                atoms = {owner_class_name}
+            else:
+                atoms = TypeFlowPass._parse_annotation_atoms(ann)
+
             env[sid] = set(atoms)
             type_sets[sid] = frozenset(atoms)
 
