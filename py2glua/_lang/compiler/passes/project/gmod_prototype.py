@@ -739,6 +739,12 @@ class BuildGmodPrototypesProjectPass:
         if r is not None and r in cls._REALMS:
             return r
 
+        # Базово из-за кривых моих рук поддерживаем алис для SHARED в виде True.
+        # Это бы не было проблемой если бы я не пытался схлопнуть SHARED в true. 
+        # Как есть так есть. Похуй потом перепишу.
+        if isinstance(expr, PyIRConstant) and expr.value is True:
+            return "SHARED"
+
         CompilerExit.user_error_node(
             "realm должен быть одним из SERVER|CLIENT|SHARED|MENU",
             path=path,
