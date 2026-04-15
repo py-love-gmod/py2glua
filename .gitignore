@@ -209,3 +209,4 @@ __marimo__/
 # py2glua local generated API prototype source
 py2glua/build_api/
 py2glua/build_source/
+bindings/
