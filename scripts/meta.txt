@@ -1,0 +1,1 @@
+Taken from https://github.com/luttje/glua-api-snippets/releases/tag/2026-03-31_16-30-01
