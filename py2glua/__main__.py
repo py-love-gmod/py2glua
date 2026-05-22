@@ -29,16 +29,16 @@ def init(
 
         output_path: Дерриктория с lua выходом
     """
+    setup_logging(cli.args.debug)
     init_cmd(input_path, output_path, Path(".plg"))
 
 
 @cli.cmd
 def build() -> None:
     """Начать компиляцию проекта"""
+    setup_logging(cli.args.debug)
     build_cmd()
 
 
 if __name__ == "__main__":
     cli.run()
-    Config.cli_args = cli.args
-    setup_logging(cli.args.debug)
