@@ -1,3 +1,4 @@
 pytest
 pylovegmod-reader
 colorama
+clii
