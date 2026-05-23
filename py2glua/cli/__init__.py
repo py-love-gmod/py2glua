@@ -1,8 +1,7 @@
+from .clii import App
 from .cmd_build import build_cmd
-from .cmd_init import init_cmd
 
 __all__ = [
+    "App",
     "build_cmd",
-    "init_cmd",
-
 ]

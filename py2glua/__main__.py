@@ -1,8 +1,7 @@
 from pathlib import Path
 
-from cli import build_cmd, init_cmd
-from clii.clii import App
-from utils import Config, setup_logging
+from cli import App, build_cmd
+from utils import Config
 
 cli = App(description=__doc__)
 cli.add_arg("--verbose", "-v", action="store_true", default=False)
@@ -11,32 +10,37 @@ cli.add_arg("--debug", "-d", action="store_true", default=False)
 
 @cli.cmd
 def version() -> None:
-    """Версия утилиты"""
+    """Напечатать версию утилиты"""
     print(Config.version(), end="")
 
 
 @cli.cmd
 @cli.arg("input_path", "-i")
 @cli.arg("output_path", "-o")
-def init(
-    input_path: Path = Path("./source"),
-    output_path: Path = Path("./output"),
+@cli.arg("plg_path", "-p")
+@cli.arg("namespace", "-n")
+def build(
+    input_path: Path = Path("./source/"),
+    output_path: Path = Path("./output/"),
+    plg_path: Path = Path("./.plg/"),
+    namespace: str | None = None,
 ) -> None:
-    """Инициализация папок компилятора
+    """Начать компиляцию проекта
 
     Args:
         input_path: Дерриктория с py кодом
 
         output_path: Дерриктория с lua выходом
+
+        plg_path: Дерриктория plg
+
+        namespace: Неймспейс аддона
     """
-    setup_logging(cli.args.debug)
-    init_cmd(input_path, output_path, Path(".plg"))
+    Config.path_setup(input_path, output_path, plg_path)
+    Config.namespace_setup(namespace)
 
+    print(Config._data)
 
-@cli.cmd
-def build() -> None:
-    """Начать компиляцию проекта"""
-    setup_logging(cli.args.debug)
     build_cmd()
 
 
