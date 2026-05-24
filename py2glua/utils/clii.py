@@ -32,7 +32,7 @@ import types
 import typing as t
 from textwrap import dedent
 
-from utils import setup_logging
+from .logger_init import setup_logging
 
 __VERSION__ = "1.0.3"
 

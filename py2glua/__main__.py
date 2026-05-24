@@ -1,11 +1,23 @@
 from pathlib import Path
 
-from cli import App, build_cmd
-from utils import Config
+from cli import build_cmd
+from utils import App, Config
 
 cli = App(description=__doc__)
-cli.add_arg("--verbose", "-v", action="store_true", default=False)
-cli.add_arg("--debug", "-d", action="store_true", default=False)
+cli.add_arg(
+    "--verbose",
+    "-v",
+    help="Более болтливый компилятор",
+    action="store_true",
+    default=False,
+)
+cli.add_arg(
+    "--debug",
+    "-d",
+    help="Отладочный вывод",
+    action="store_true",
+    default=False,
+)
 
 
 @cli.cmd
@@ -38,8 +50,6 @@ def build(
     """
     Config.path_setup(input_path, output_path, plg_path)
     Config.namespace_setup(namespace)
-
-    print(Config._data)
 
     build_cmd()
 
