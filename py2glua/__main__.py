@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from cli import build_cmd
-from utils import App, Config
+from utils import App, Config, Shutdown
 
 cli = App(description=__doc__)
 cli.add_arg(
@@ -41,11 +41,8 @@ def build(
 
     Args:
         input_path: Дерриктория с py кодом
-
         output_path: Дерриктория с lua выходом
-
         plg_path: Дерриктория plg
-
         namespace: Неймспейс аддона
     """
     Config.path_setup(input_path, output_path, plg_path)
@@ -55,4 +52,11 @@ def build(
 
 
 if __name__ == "__main__":
-    cli.run()
+    try:
+        cli.run()
+
+    except KeyboardInterrupt:
+        Shutdown.normal("Прервано пользователем")
+
+    except Exception as e:
+        Shutdown.softwear_error(f"Произошла ошибка компилятора: {e}")

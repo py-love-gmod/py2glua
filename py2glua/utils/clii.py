@@ -32,6 +32,7 @@ import types
 import typing as t
 from textwrap import dedent
 
+from .config import Config
 from .logger_init import setup_logging
 
 __VERSION__ = "1.0.3"
@@ -170,20 +171,19 @@ def _get_func_params(func) -> t.List[inspect.Parameter]:
     return list(inspect.signature(func).parameters.values())
 
 
-def _get_helps_from_func(func, param_names) -> t.Dict[str, str]:
+def _get_helps_from_func(func, param_names):
     if not func.__doc__:
         return {}
 
-    helps_from_doc = {}
-
+    helps = {}
     for line in dedent(func.__doc__).splitlines():
+        stripped = line.lstrip()
         for p in param_names:
-            patt = f"  {p}:"
+            if stripped.startswith(f"{p}:"):
+                helps[p] = stripped[len(p) + 1 :].strip()
+                break
 
-            if patt in line:
-                helps_from_doc[p] = line.split(patt)[-1].strip()
-
-    return helps_from_doc
+    return helps
 
 
 def _get_callable_type(annotation):
@@ -307,5 +307,6 @@ class App:
         (fnc, (func_args, func_kwargs)) = self.parse_for_run()
 
         setup_logging(self.args.debug)
+        Config.cli_setup(self.args.debug, self.args.verbose)
 
         return fnc(*func_args, **func_kwargs)

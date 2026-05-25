@@ -1,11 +1,9 @@
-from argparse import Namespace
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
 
 class Config:
-    cli_args: Namespace = Namespace()
     _data: dict[str, Any] = {}
 
     @staticmethod
@@ -15,6 +13,11 @@ class Config:
 
         except PackageNotFoundError:
             return "0.0.0dev"
+
+    @classmethod
+    def cli_setup(cls, is_debug: bool, is_verbose: bool) -> None:
+        cls._data["cd"] = is_debug
+        cls._data["verbose"] = is_verbose
 
     @classmethod
     def path_setup(cls, input_path: Path, output_path: Path, plg_path: Path) -> None:
@@ -43,5 +46,13 @@ class Config:
     @classmethod
     def get_namespace(cls) -> str:
         return cls._data["ns"]
+
+    @classmethod
+    def is_debug_compiler(cls) -> bool:
+        return cls._data["cd"]
+
+    @classmethod
+    def is_verbose(cls) -> bool:
+        return cls._data["verbose"]
 
     # endregion
