@@ -16,7 +16,7 @@ class Config:
 
     @classmethod
     def cli_setup(cls, is_debug: bool, is_verbose: bool) -> None:
-        cls._data["cd"] = is_debug
+        cls._data["compiler_debug"] = is_debug
         cls._data["verbose"] = is_verbose
 
     @classmethod
@@ -49,7 +49,7 @@ class Config:
 
     @classmethod
     def is_debug_compiler(cls) -> bool:
-        return cls._data["cd"]
+        return cls._data["compiler_debug"]
 
     @classmethod
     def is_verbose(cls) -> bool:

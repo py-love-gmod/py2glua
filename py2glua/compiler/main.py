@@ -4,10 +4,13 @@ from plg_reader import IRFile
 from utils import Config
 
 from .dependency_graph import DependencyGraph
+from .simplification import AliasResolver
 
 
 class Compiler:
-    _simplification_pass: list[Callable[[IRFile], IRFile]] = []
+    _simplification_pass: list[Callable[[IRFile], IRFile]] = [
+        AliasResolver.resolve,
+    ]
     _graph: DependencyGraph
 
     @classmethod
@@ -33,3 +36,8 @@ class Compiler:
         cls._check_cycles(irs)
 
         cls._apply_to_irs(irs, cls._apply_simplification)
+
+        for path, ir in irs.items():
+            print(f"{path=}")
+            print(ir.pretty())
+            print("-" * 20)
