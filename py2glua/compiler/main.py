@@ -19,8 +19,6 @@ class Compiler:
         AliasResolver.resolve,
     ]
 
-    _analyze_pass: list[Callable[[IRFile], IRFile]] = []
-
     _graph: DependencyGraph
 
     @classmethod
@@ -49,7 +47,6 @@ class Compiler:
         cls._apply_simple_irs_transforms(
             irs,
             cls._simplification_pass,
-            cls._analyze_pass,
         )
 
         _dump_irs(irs)
