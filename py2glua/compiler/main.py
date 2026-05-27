@@ -7,6 +7,13 @@ from .dependency_graph import DependencyGraph
 from .simplification import AliasResolver
 
 
+def _dump_irs(irs: dict[str, IRFile]) -> None:
+    for path, ir in irs.items():
+        print(f"{path=}")
+        print(ir.pretty())
+        print("-" * 20)
+
+
 class Compiler:
     _simplification_pass: list[Callable[[IRFile], IRFile]] = [
         AliasResolver.resolve,
@@ -37,7 +44,4 @@ class Compiler:
 
         cls._apply_to_irs(irs, cls._apply_simplification)
 
-        for path, ir in irs.items():
-            print(f"{path=}")
-            print(ir.pretty())
-            print("-" * 20)
+        _dump_irs(irs)
