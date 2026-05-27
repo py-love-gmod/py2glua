@@ -18,14 +18,23 @@ class Compiler:
     _simplification_pass: list[Callable[[IRFile], IRFile]] = [
         AliasResolver.resolve,
     ]
+
+    _analyze_pass: list[Callable[[IRFile], IRFile]] = []
+
     _graph: DependencyGraph
 
     @classmethod
-    def _apply_simplification(cls, ir: IRFile) -> IRFile:
-        for passs in cls._simplification_pass:
-            ir = passs(ir)
+    def _apply_simple_irs_transforms(
+        cls,
+        irs: dict[str, IRFile],
+        *list_passes: list[Callable[[IRFile], IRFile]],
+    ) -> None:
+        for path, ir in irs.items():
+            for pass_type in list_passes:
+                for pass_ in pass_type:
+                    ir = pass_(ir)
 
-        return ir
+            irs[path] = ir
 
     @classmethod
     def _check_cycles(cls, irs: dict[str, IRFile]) -> None:
@@ -34,14 +43,13 @@ class Compiler:
         cls._graph = graph  # Базово это сделано для будущей инкрементальной сбокри. Пока что пихуй
 
     @classmethod
-    def _apply_to_irs(cls, irs: dict[str, IRFile], func: Callable[[IRFile], IRFile]):
-        for path, ir in irs.items():
-            irs[path] = func(ir)
-
-    @classmethod
     def build(cls, irs: dict[str, IRFile]) -> None:
         cls._check_cycles(irs)
 
-        cls._apply_to_irs(irs, cls._apply_simplification)
+        cls._apply_simple_irs_transforms(
+            irs,
+            cls._simplification_pass,
+            cls._analyze_pass,
+        )
 
         _dump_irs(irs)
