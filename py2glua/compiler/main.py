@@ -3,8 +3,7 @@ from collections.abc import Callable
 from plg_reader import IRFile
 from utils import Config
 
-from .analysis import LocalSymbolResolver, Scope, SymbolTable
-from .dependency_graph import DependencyGraph
+from .analysis import DependencyGraph, LocalSymbolResolver, Scope, SymbolTable
 from .lua_dumper import dump_to_lua
 from .simplification import AliasResolver
 
@@ -101,6 +100,9 @@ class Compiler:
     @classmethod
     def build(cls, irs: dict[str, IRFile]) -> None:
         cls._check_cycles(irs)
+
         cls._apply_simple_irs_transforms(irs)
+
         cls._symbol_tables = cls._build_symbol_tables(irs)
+
         dump_irs_to_folder(irs, cls._symbol_tables)
