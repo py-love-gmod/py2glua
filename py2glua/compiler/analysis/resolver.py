@@ -1,4 +1,3 @@
-# FIXME
 from __future__ import annotations
 
 from typing import Any, cast
@@ -63,12 +62,14 @@ class LocalSymbolResolver:
                 for name_item in imp.names:
                     alias = name_item[1] if isinstance(name_item, tuple) else name_item
                     self._add_symbol(alias, "import", scope)
+
             else:
                 for mod_path, name_item in zip(imp.modules, imp.names):
                     alias = name_item[1] if isinstance(name_item, tuple) else name_item
                     parts = mod_path.split(".")
                     for i in range(1, len(parts) + 1):
                         self._add_symbol(".".join(parts[:i]), "module", scope)
+
                     if alias != mod_path:
                         self._add_symbol(alias, "module", scope)
 
@@ -84,52 +85,70 @@ class LocalSymbolResolver:
             for p in node.params:
                 if p.name:
                     self._add_symbol(p.name, "param", func_scope, p)
+
             self._collect_definitions(node.body, func_scope)
+
         elif isinstance(node, IRClassDef):
             self._add_symbol(node.name, "class", scope, node)
             class_scope = Scope(parent=scope)
             self._scope_map[id(node)] = class_scope
             self._collect_definitions(node.body, class_scope)
+
         elif isinstance(node, IRAssign):
             for t in node.targets:
                 self._collect_target_names(t, scope)
+
         elif isinstance(node, IRAnnotatedAssign):
             if isinstance(node.target, IRName):
                 self._add_symbol(node.target.name, "variable", scope, node.target)
+
         elif isinstance(node, IRFor):
             self._collect_target_names(node.target, scope)
             self._collect_definitions(node.body, scope)
+
         elif isinstance(node, IRWith):
             for item in node.items:
                 if item.optional_vars:
                     self._collect_target_names(item.optional_vars, scope)
+
             self._collect_definitions(node.body, scope)
+
         elif isinstance(node, IRTry):
             self._collect_definitions(node.body, scope)
             for h in node.handlers:
                 if h.name:
                     self._add_symbol(h.name, "variable", scope, h)
+
                 self._collect_definitions(h.body, scope)
+
             self._collect_definitions(node.orelse, scope)
             self._collect_definitions(node.finalbody, scope)
+
         elif isinstance(node, IRIf):
             self._collect_definitions(node.body, scope)
             if node.orelse:
                 self._collect_definitions(node.orelse, scope)
+
         elif isinstance(node, IRWhile):
             self._collect_definitions(node.body, scope)
+
         else:
             self._walk_node_fields(node, scope)
 
     def _collect_target_names(self, target: IRNode, scope: Scope):
         if isinstance(target, IRName):
             self._add_symbol(target.name, "variable", scope, target)
+
         elif isinstance(target, (IRTuple, IRList)):
             for el in target.elements:
                 self._collect_target_names(el, scope)
 
     def _add_symbol(
-        self, name: str, kind: str, scope: Scope, definition: IRNode | None = None
+        self,
+        name: str,
+        kind: str,
+        scope: Scope,
+        definition: IRNode | None = None,
     ):
         if name not in scope.symbols:
             sym = self.symbol_table.create(name, kind, definition)
@@ -139,13 +158,16 @@ class LocalSymbolResolver:
         for fld in node.__dataclass_fields__:
             if fld == "pos":
                 continue
+
             val = getattr(node, fld)
             if isinstance(val, IRNode):
                 self._collect_node(val, scope)
+
             elif isinstance(val, list):
                 for item in val:
                     if isinstance(item, IRNode):
                         self._collect_node(item, scope)
+
             elif isinstance(val, dict):
                 for v in val.values():
                     if isinstance(v, IRNode):
@@ -158,6 +180,16 @@ class LocalSymbolResolver:
         if isinstance(node, IRName):
             return self._resolve_name_to_ref(node.name, node.pos, scope, is_write=False)
 
+        if isinstance(node, IRAttribute):
+            full = self._collect_attr_chain(node)
+            if full and self._lookup(full[0], scope) is not None:
+                full_name = ".".join(full)
+                sym_id, kind = self._get_or_create_attr_symbol(full_name)
+                return self._make_ref(full_name, node.pos, sym_id, kind, is_write=False)
+
+            new_val = self._transform_node(node.value, scope)
+            return IRAttribute(pos=node.pos, value=new_val, attr=node.attr)
+
         if isinstance(node, IRFunctionDef):
             func_scope = self._scope_map[id(node)]
             new_params = [self._transform_param(p, scope) for p in node.params]
@@ -166,7 +198,7 @@ class LocalSymbolResolver:
                 self._transform_expr(node.returns, scope) if node.returns else None
             )
             new_decors = [
-                IRDecorator(pos=d.pos, expr=self._transform_expr(d.expr, scope))
+                IRDecorator(pos=d.pos, expr=self._transform_expr(d.expr, scope))  # pyright: ignore[reportArgumentType]
                 for d in node.decorators
             ]
             return IRFunctionDef(
@@ -183,13 +215,13 @@ class LocalSymbolResolver:
             new_bases = [self._transform_expr(b, scope) for b in node.bases]
             new_body = self._transform_statements(node.body, class_scope)
             new_decors = [
-                IRDecorator(pos=d.pos, expr=self._transform_expr(d.expr, scope))
+                IRDecorator(pos=d.pos, expr=self._transform_expr(d.expr, scope))  # pyright: ignore[reportArgumentType]
                 for d in node.decorators
             ]
             return IRClassDef(
                 pos=node.pos,
                 name=node.name,
-                bases=new_bases,
+                bases=new_bases,  # pyright: ignore[reportArgumentType]
                 body=new_body,
                 decorators=new_decors,
             )
@@ -200,7 +232,7 @@ class LocalSymbolResolver:
             return IRAssign(
                 pos=node.pos,
                 targets=new_targets,
-                value=new_value,
+                value=new_value,  # pyright: ignore[reportArgumentType]
                 is_aug=node.is_aug,
                 aug_op=node.aug_op,
             )
@@ -221,13 +253,13 @@ class LocalSymbolResolver:
             new_target = self._transform_target(node.target, scope)
             new_iter = self._transform_expr(node.iter, scope)
             new_body = self._transform_statements(node.body, scope)
-            return IRFor(pos=node.pos, target=new_target, iter=new_iter, body=new_body)
+            return IRFor(pos=node.pos, target=new_target, iter=new_iter, body=new_body)  # pyright: ignore[reportArgumentType]
 
         elif isinstance(node, IRWith):
             new_items = [
                 IRWithItem(
                     pos=item.pos,
-                    context_expr=self._transform_expr(item.context_expr, scope),
+                    context_expr=self._transform_expr(item.context_expr, scope),  # pyright: ignore[reportArgumentType]
                     optional_vars=self._transform_target(item.optional_vars, scope)
                     if item.optional_vars
                     else None,
@@ -241,16 +273,17 @@ class LocalSymbolResolver:
             new_test = self._transform_expr(node.test, scope)
             new_body = self._transform_statements(node.body, scope)
             new_orelse = self._transform_statements(node.orelse, scope)
-            return IRIf(pos=node.pos, test=new_test, body=new_body, orelse=new_orelse)
+            return IRIf(pos=node.pos, test=new_test, body=new_body, orelse=new_orelse)  # pyright: ignore[reportArgumentType]
 
         elif isinstance(node, IRWhile):
             new_test = self._transform_expr(node.test, scope)
             new_body = self._transform_statements(node.body, scope)
-            return IRWhile(pos=node.pos, test=new_test, body=new_body)
+            return IRWhile(pos=node.pos, test=new_test, body=new_body)  # pyright: ignore[reportArgumentType]
 
         elif isinstance(node, IRExprStatement):
             return IRExprStatement(
-                pos=node.pos, expr=self._transform_expr(node.expr, scope)
+                pos=node.pos,
+                expr=self._transform_expr(node.expr, scope),  # pyright: ignore[reportArgumentType]
             )
 
         elif isinstance(node, IRReturn):
@@ -259,7 +292,7 @@ class LocalSymbolResolver:
 
         elif isinstance(node, IRDelete):
             new_targets = [self._transform_expr(t, scope) for t in node.targets]
-            return IRDelete(pos=node.pos, targets=new_targets)
+            return IRDelete(pos=node.pos, targets=new_targets)  # pyright: ignore[reportArgumentType]
 
         elif isinstance(node, IRRaise):
             new_exc = self._transform_expr(node.exc, scope)
@@ -292,9 +325,11 @@ class LocalSymbolResolver:
             for fld in node.__dataclass_fields__:
                 if fld == "pos":
                     continue
+
                 val = getattr(node, fld)
                 if isinstance(val, IRNode):
                     kwargs[fld] = self._transform_node(val, scope)
+
                 elif isinstance(val, list):
                     kwargs[fld] = [
                         self._transform_node(cast(IRNode, v), scope)
@@ -302,6 +337,7 @@ class LocalSymbolResolver:
                         else v
                         for v in val
                     ]
+
                 elif isinstance(val, dict):
                     kwargs[fld] = {
                         k: self._transform_node(cast(IRNode, v), scope)
@@ -309,8 +345,10 @@ class LocalSymbolResolver:
                         else v
                         for k, v in val.items()
                     }
+
                 else:
                     kwargs[fld] = val
+
             return type(node)(**kwargs)
 
     def _transform_param(self, param: IRParam, scope: Scope) -> IRParam:
@@ -331,36 +369,31 @@ class LocalSymbolResolver:
     def _transform_target(self, node: IRNode, scope: Scope) -> IRNode:
         if isinstance(node, IRName):
             return self._resolve_name_to_ref(node.name, node.pos, scope, is_write=True)
+
         elif isinstance(node, IRAttribute):
-            new_val = self._transform_expr(node.value, scope)
+            new_val = self._transform_node(node.value, scope)
             return IRAttribute(pos=node.pos, value=new_val, attr=node.attr)
+
         elif isinstance(node, IRSubscript):
             return IRSubscript(
                 pos=node.pos,
-                value=self._transform_expr(node.value, scope),
-                index=self._transform_expr(node.index, scope),
+                value=self._transform_node(node.value, scope),
+                index=self._transform_node(node.index, scope),
             )
+
         elif isinstance(node, (IRTuple, IRList)):
             return type(node)(
                 pos=node.pos,
                 elements=[self._transform_target(e, scope) for e in node.elements],
             )
+
         return self._transform_node(node, scope)
 
     def _transform_expr(self, node: IRNode | None, scope: Scope) -> IRNode | None:
+        """Обработка выражений: теперь просто делегирует _transform_node."""
         if node is None:
             return None
-        if isinstance(node, IRName):
-            return self._resolve_name_to_ref(node.name, node.pos, scope, is_write=False)
-        if isinstance(node, IRAttribute):
-            full = self._collect_attr_chain(node)
-            if full and self._lookup(full[0], scope) is not None:
-                full_name = ".".join(full)
-                sym_id, kind = self._get_or_create_attr_symbol(full_name)
-                return self._make_ref(full_name, node.pos, sym_id, kind, is_write=False)
 
-            new_val = self._transform_expr(node.value, scope)
-            return IRAttribute(pos=node.pos, value=new_val, attr=node.attr)
         return self._transform_node(node, scope)
 
     def _resolve_name_to_ref(
@@ -370,6 +403,7 @@ class LocalSymbolResolver:
         if r:
             sym_id, kind = r
             return self._make_ref(name, pos, sym_id, kind, is_write)
+
         return IRName(pos=pos, name=name)
 
     def _collect_attr_chain(self, node: IRAttribute) -> list[str] | None:
@@ -378,10 +412,12 @@ class LocalSymbolResolver:
         while isinstance(cur, IRAttribute):
             parts.append(cur.attr)
             cur = cur.value
+
         if isinstance(cur, IRName):
             parts.append(cur.name)
             parts.reverse()
             return parts
+
         return None
 
     def _lookup(self, name: str, scope: Scope) -> tuple[int, str] | None:
@@ -389,14 +425,16 @@ class LocalSymbolResolver:
         while s:
             if name in s.symbols:
                 return s.symbols[name]
+
             s = s.parent
+
         for ext in self.external_scopes.values():
             if name in ext.symbols:
                 return ext.symbols[name]
+
         return None
 
     def _get_or_create_attr_symbol(self, full_name: str) -> tuple[int, str]:
-
         for sym in self.symbol_table.all():
             if sym.name == full_name:
                 return sym.id, sym.kind
@@ -409,7 +447,12 @@ class LocalSymbolResolver:
         return sym.id, sym.kind
 
     def _make_ref(
-        self, name: str, pos: tuple[int, int], sym_id: int, kind: str, is_write: bool
+        self,
+        name: str,
+        pos: tuple[int, int],
+        sym_id: int,
+        kind: str,
+        is_write: bool,
     ) -> IRSymbolRef:
         sym = self.symbol_table.get(sym_id)
         ref = IRSymbolRef(pos=pos, name=name, symbol_id=sym_id, kind=kind)
@@ -417,6 +460,8 @@ class LocalSymbolResolver:
             sym.uses.append(ref)
             if is_write:
                 sym.write_count += 1
+
             else:
                 sym.read_count += 1
+
         return ref
