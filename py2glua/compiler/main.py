@@ -1,9 +1,15 @@
 from collections.abc import Callable
 
 from plg_reader import IRFile
-from utils import Config
+from utils import Config, Shutdown, logger
 
-from .analysis import DependencyGraph, LocalSymbolResolver, Scope, SymbolTable
+from .analysis import (
+    DependencyGraph,
+    LocalSymbolResolver,
+    Scope,
+    SymbolTable,
+    infer_types,
+)
 from .lua_dumper import dump_to_lua
 from .simplification import AliasResolver
 
@@ -98,11 +104,36 @@ class Compiler:
         return global_tables
 
     @classmethod
+    def _check_types(cls, irs: dict[str, IRFile]) -> None:
+        errors = []
+        warnings = []
+        for path, ir in irs.items():
+            sym_table = cls._symbol_tables[path]
+            result = infer_types(ir, sym_table, external_tables=cls._symbol_tables)
+            for err in result.errors:
+                errors.append(f"{path}: {err}")
+
+            for warn in result.warnings:
+                warnings.append(f"{path}: {warn}")
+
+        if warnings:
+            logger.warning(
+                "Найдены предупреждения несоответствия типов:\n" + "\n".join(warnings)
+            )
+
+        if errors:
+            Shutdown.user_error(
+                "Найдены ошибки несоответствия типов:\n" + "\n".join(errors)
+            )
+
+    @classmethod
     def build(cls, irs: dict[str, IRFile]) -> None:
         cls._check_cycles(irs)
 
         cls._apply_simple_irs_transforms(irs)
 
         cls._symbol_tables = cls._build_symbol_tables(irs)
+
+        # cls._check_types(irs) # FIXME
 
         dump_irs_to_folder(irs, cls._symbol_tables)
