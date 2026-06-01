@@ -1,11 +1,11 @@
 import sys
 from pathlib import Path
 
-from codegen import generate_all
+from dispatch import generate_all
 from reader import load_objects_from_zip
 from schema_builder import build_full_schema
 
-SELECTED_CATEGORIES = {"achievements", "game"}
+SELECTED_CATEGORIES = {}
 
 
 def find_zip(directory: Path) -> Path:
@@ -32,21 +32,18 @@ def main():
     entries = load_objects_from_zip(zip_path)
     print(f"Загружено файлов: {len(entries)}")
 
-    print("Построение полной схемы...")
     schema = build_full_schema(entries)
 
-    print(f"{SELECTED_CATEGORIES=}")
     if SELECTED_CATEGORIES:
-        filtered_schema = {k: v for k, v in schema.items() if k in SELECTED_CATEGORIES}
-        print(f"Оставлены категории: {list(filtered_schema.keys())}")
-
+        filtered = {k: v for k, v in schema.items() if k in SELECTED_CATEGORIES}
+        print(f"Оставлены категории: {list(filtered.keys())}")
     else:
-        filtered_schema = schema
+        filtered = schema
 
     output = Path("generated")
     output.mkdir(exist_ok=True)
-    generate_all(filtered_schema, output)
-    print("Готово. Сгенерированные файлы в папке generated/")
+    generate_all(filtered, output)
+    print("Готово.")
 
 
 if __name__ == "__main__":

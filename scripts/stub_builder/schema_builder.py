@@ -12,9 +12,16 @@ def extract_obj(data):
 
 
 def build_full_schema(entries: List[Tuple[str, Any]]) -> Dict[str, dict]:
-    # schema: имя_сущности -> { kind, description, parent, methods, ... }
     schema = defaultdict(
-        lambda: {"kind": None, "description": "", "parent": None, "methods": []}
+        lambda: {
+            "kind": None,
+            "description": "",
+            "parent": None,
+            "url": "",
+            "methods": [],
+            "fields": [],
+            "items": [],
+        }
     )
 
     for path, data in entries:
@@ -22,52 +29,35 @@ def build_full_schema(entries: List[Tuple[str, Any]]) -> Dict[str, dict]:
         if not obj:
             continue
         t = obj.get("type")
-        if t == "library":
+
+        if t in ("library", "class", "panel", "struct", "enum"):
             name = obj["name"]
-            schema[name]["kind"] = "library"
+            schema[name]["kind"] = t
             schema[name]["description"] = obj.get("description", "")
             schema[name]["url"] = obj.get("url", "")
-        elif t == "libraryfunc":
-            parent = obj["parent"]
-            # гарантируем, что родитель существует в schema
-            if schema[parent]["kind"] is None:
-                schema[parent]["kind"] = "library"
-            schema[parent]["methods"].append(obj)
-        elif t == "classfunc":
-            parent = obj["parent"]
-            if schema[parent]["kind"] is None:
-                schema[parent]["kind"] = "class"
-            schema[parent]["methods"].append(obj)
-        elif t == "class":
-            name = obj["name"]
-            schema[name]["kind"] = "class"
-            schema[name]["description"] = obj.get("description", "")
-            schema[name]["parent"] = obj.get("parent")
-        elif t == "panel":
-            name = obj["name"]
-            schema[name]["kind"] = "panel"
-            schema[name]["description"] = obj.get("description", "")
-            schema[name]["parent"] = obj.get("parent")
-        elif t == "panelfunc":
-            parent = obj["parent"]
-            if schema[parent]["kind"] is None:
-                schema[parent]["kind"] = "panel"
-            schema[parent]["methods"].append(obj)
-        elif t == "struct":
-            name = obj["name"]
-            schema[name]["kind"] = "struct"
-            schema[name]["description"] = obj.get("description", "")
-            schema[name]["fields"] = obj.get("fields", [])
+            if t in ("class", "panel"):
+                schema[name]["parent"] = obj.get("parent")
+
+            elif t == "struct":
+                schema[name]["fields"] = obj.get("fields", [])
+
+            elif t == "enum":
+                schema[name]["items"] = obj.get("items", [])
+
         elif t == "hook":
             name = obj["name"]
             schema[name]["kind"] = "hook"
             schema[name]["description"] = obj.get("description", "")
+            schema[name]["parent"] = obj.get("parent")
             schema[name]["arguments"] = obj.get("arguments", [])
             schema[name]["returns"] = obj.get("returns", [])
-        elif t == "enum":
-            name = obj["name"]
-            schema[name]["kind"] = "enum"
-            schema[name]["description"] = obj.get("description", "")
-            schema[name]["items"] = obj.get("items", [])
+
+        elif t in ("libraryfunc", "classfunc", "panelfunc"):
+            parent = obj["parent"]
+            if schema[parent]["kind"] is None:
+                guessed = t.replace("func", "")
+                schema[parent]["kind"] = guessed
+
+            schema[parent]["methods"].append(obj)
 
     return dict(schema)
