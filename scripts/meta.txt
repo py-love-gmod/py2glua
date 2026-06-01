@@ -1,1 +1,12 @@
 Taken from https://github.com/luttje/glua-api-snippets/releases
+
+Найденные типы верхнего уровня:
+    class
+    classfunc
+    enum
+    hook
+    library
+    libraryfunc
+    panel
+    panelfunc
+    struct
