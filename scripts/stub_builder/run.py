@@ -7,7 +7,7 @@ from schema_builder import build_full_schema
 
 
 def find_zip() -> Path:
-    script_dir = Path(__file__).parents[1]
+    script_dir = Path(__file__).parents[1] / "data"
     zip_files = list(script_dir.glob("*.zip"))
     if not zip_files:
         print(f"В папке {script_dir} нет .zip файлов.")
