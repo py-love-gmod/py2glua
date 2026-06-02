@@ -2,12 +2,14 @@ from .function_generator import generate_function
 from .utils import format_docstring
 
 
-def generate_class(name: str, data: dict, is_static: bool = False) -> str:
-    lines = [
-        "from __future__ import annotations",
-        "",
-        "",
-    ]
+def generate_class(
+    name: str,
+    data: dict,
+    is_static: bool = False,
+) -> tuple[str, set[str]]:
+    all_types = set()
+
+    lines = []
     parent = data.get("parent")
     if parent:
         lines.append(f"class {name}({parent}):")
@@ -15,17 +17,16 @@ def generate_class(name: str, data: dict, is_static: bool = False) -> str:
     else:
         lines.append(f"class {name}:")
 
-    desc = data.get("description", "")
-    if desc:
-        lines.append(format_docstring(desc, 4))
-
-    else:
-        lines.append('    """..."""')
-
+    lines.append(format_docstring(data.get("description", "..."), 4))
     lines.append("")
 
     for method in data.get("methods", []):
-        lines.append(generate_function(method, is_static=is_static, class_name=name))
-        lines.append("")
+        func_code, used_types = generate_function(
+            method, is_static=is_static, class_name=name
+        )
+        if func_code:
+            lines.append(func_code)
+            lines.append("")
+            all_types.update(used_types)
 
-    return "\n".join(lines)
+    return "\n".join(lines), all_types

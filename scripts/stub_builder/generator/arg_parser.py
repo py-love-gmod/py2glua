@@ -1,12 +1,59 @@
 from .type_override import TypeOverride
 from .utils import format_docstring
 
+PYTHON_KEYWORDS = {
+    "and",
+    "as",
+    "assert",
+    "async",
+    "await",
+    "break",
+    "class",
+    "continue",
+    "def",
+    "del",
+    "elif",
+    "else",
+    "except",
+    "finally",
+    "for",
+    "from",
+    "global",
+    "if",
+    "import",
+    "in",
+    "is",
+    "lambda",
+    "nonlocal",
+    "not",
+    "or",
+    "pass",
+    "raise",
+    "return",
+    "try",
+    "while",
+    "with",
+    "yield",
+    "True",
+    "False",
+    "None",
+    "type",
+}
+
+
+def escape_keyword(name: str) -> str:
+    if name in PYTHON_KEYWORDS:
+        return f"{name}_"
+
+    return name
+
 
 def parse_arguments(args_block: list) -> list:
     result = []
     for group in args_block:
         for arg in group.get("args", []):
             if arg.get("name"):
+                arg["name"] = escape_keyword(arg["name"])
                 result.append(arg)
 
     return result
@@ -36,6 +83,7 @@ def format_args_doc(
     for arg in args:
         name = arg["name"]
         arg_type = TypeOverride.get(arg.get("type", "Any"), context)
+
         if arg.get("type") == "vararg":
             display_name = "*args"
             display_type = "Any"

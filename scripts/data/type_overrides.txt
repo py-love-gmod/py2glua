@@ -1,8 +1,14 @@
+# Файл переписывает типизацию на более адекватную
+
 # Глобальные
 string -> str
 number -> int | float
 boolean -> bool
 any -> Any
+function -> Callable
+vararg -> Any
+# Это несовсем правда, но похуй
+table -> list | dict
 
 # Enums
 number{CHAN} -> CHAN
@@ -10,6 +16,20 @@ number{SNDLVL} -> SNDLVL
 number{SND} -> SND
 number{FORCE} -> FORCE
 number{FCVAR} -> FCVAR
+number{RT_SIZE} -> RT_SIZE
+number{MATERIAL_RT_DEPTH} -> MATERIAL_RT_DEPTH
+number{TEXTUREFLAGS} -> TEXTUREFLAGS
+number{CREATERENDERTARGETFLAGS} -> CREATERENDERTARGETFLAGS
+number{MAT} -> MAT
+
+# Struct
+table{Problem} -> Problem
+table{HTTPRequest} -> HTTPRequest
+table{BalloonData} -> BalloonData
+
+# Some fun
+table<PhysCollide> -> list[PhysCollide]
+table<string> -> list[str] | dict[str, Any]
 
 # Костыли =)
 number{FCVAR}|table<number> -> FCVAR | list[int | float]

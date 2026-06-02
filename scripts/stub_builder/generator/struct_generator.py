@@ -2,22 +2,13 @@ from .type_override import TypeOverride
 from .utils import format_docstring
 
 
-def generate_struct(name: str, data: dict) -> str:
-    lines = [
-        "from __future__ import annotations",
-        "",
-        "from dataclasses import dataclass",
-        "",
-        "",
-    ]
+def generate_struct(name: str, data: dict) -> tuple[str, set[str]]:
+    used_types = {"dataclass"}
+
+    lines = []
     lines.append("@dataclass")
     lines.append(f"class {name}:")
-
-    desc = data.get("description", "")
-    if not desc:
-        desc = "..."
-
-    lines.append(format_docstring(desc, 4))
+    lines.append(format_docstring(data.get("description", "..."), 4))
     lines.append("")
 
     for field in data.get("fields", []):
@@ -28,6 +19,9 @@ def generate_struct(name: str, data: dict) -> str:
 
         context = f"{name}.{fname}"
         ftype = TypeOverride.get(ftype, context)
+
+        if ftype not in ["vararg", "*args"]:
+            used_types.add(ftype)
 
         default = field.get("default")
         if default is not None:
@@ -42,4 +36,4 @@ def generate_struct(name: str, data: dict) -> str:
         lines.append("")
 
     lines.append("")
-    return "\n".join(lines)
+    return "\n".join(lines), used_types

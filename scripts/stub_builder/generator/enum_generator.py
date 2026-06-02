@@ -1,19 +1,12 @@
 from .utils import format_docstring
 
 
-def generate_enum(name: str, data: dict) -> str:
-    lines = [
-        "from enum import Enum",
-        "",
-        "",
-    ]
+def generate_enum(name: str, data: dict) -> tuple[str, set[str]]:
+    used_types = {"Enum"}
+
+    lines = []
     lines.append(f"class {name}(Enum):")
-
-    desc = data.get("description", "")
-    if not desc:
-        desc = "..."
-
-    lines.append(format_docstring(desc, 4))
+    lines.append(format_docstring(data.get("description", "..."), 4))
     lines.append("")
 
     for item in data.get("items", []):
@@ -27,4 +20,4 @@ def generate_enum(name: str, data: dict) -> str:
         lines.append("")
 
     lines.append("")
-    return "\n".join(lines)
+    return "\n".join(lines), used_types

@@ -2,12 +2,14 @@ import sys
 from pathlib import Path
 
 from dispatch import generate_all
+from generator.filter import FunctionFilter
 from generator.type_override import TypeOverride
 from reader import load_objects_from_zip
 from schema_builder import build_full_schema
 
 DATA_DIR = Path(__file__).parents[1] / "data"
 TypeOverride.init(DATA_DIR)
+FunctionFilter.init(DATA_DIR)
 
 
 def find_zip() -> Path:
