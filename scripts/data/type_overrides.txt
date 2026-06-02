@@ -1,0 +1,15 @@
+# Глобальные
+string -> str
+number -> int | float
+boolean -> bool
+any -> Any
+
+# Enums
+number{CHAN} -> CHAN
+number{SNDLVL} -> SNDLVL
+number{SND} -> SND
+number{FORCE} -> FORCE
+number{FCVAR} -> FCVAR
+
+# Костыли =)
+number{FCVAR}|table<number> -> FCVAR | list[int | float]

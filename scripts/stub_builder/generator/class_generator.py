@@ -25,7 +25,7 @@ def generate_class(name: str, data: dict, is_static: bool = False) -> str:
     lines.append("")
 
     for method in data.get("methods", []):
-        lines.append(generate_function(method, is_static=is_static))
+        lines.append(generate_function(method, is_static=is_static, class_name=name))
         lines.append("")
 
     return "\n".join(lines)

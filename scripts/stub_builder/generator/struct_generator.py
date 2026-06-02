@@ -1,3 +1,4 @@
+from .type_override import TypeOverride
 from .utils import format_docstring
 
 
@@ -24,6 +25,10 @@ def generate_struct(name: str, data: dict) -> str:
 
         fname = field.get("name", "")
         ftype = field.get("type", "Any")
+
+        context = f"{name}.{fname}"
+        ftype = TypeOverride.get(ftype, context)
+
         default = field.get("default")
         if default is not None:
             lines.append(f"    {fname}: {ftype} = {default}")
