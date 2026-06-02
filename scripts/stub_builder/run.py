@@ -5,44 +5,31 @@ from dispatch import generate_all
 from reader import load_objects_from_zip
 from schema_builder import build_full_schema
 
-SELECTED_CATEGORIES = {}
 
-
-def find_zip(directory: Path) -> Path:
-    zip_files = list(directory.glob("*.zip"))
+def find_zip() -> Path:
+    script_dir = Path(__file__).parents[1]
+    zip_files = list(script_dir.glob("*.zip"))
     if not zip_files:
-        print(f"В папке {directory} нет .zip файлов.")
+        print(f"В папке {script_dir} нет .zip файлов.")
+        sys.exit(1)
+
+    if len(zip_files) > 1:
+        print(f"В папке {script_dir} больше 1 .zip файла")
         sys.exit(1)
 
     return zip_files[0]
 
 
 def main():
-    script_dir = Path(__file__).parents[1]
-    if len(sys.argv) > 1:
-        zip_path = Path(sys.argv[1])
-        if not zip_path.exists():
-            print(f"Архив не найден: {zip_path}")
-            sys.exit(1)
-
-    else:
-        zip_path = find_zip(script_dir)
+    zip_path = find_zip()
 
     print(f"Чтение {zip_path}...")
     entries = load_objects_from_zip(zip_path)
     print(f"Загружено файлов: {len(entries)}")
 
-    schema = build_full_schema(entries)
-
-    if SELECTED_CATEGORIES:
-        filtered = {k: v for k, v in schema.items() if k in SELECTED_CATEGORIES}
-        print(f"Оставлены категории: {list(filtered.keys())}")
-    else:
-        filtered = schema
-
     output = Path("generated")
     output.mkdir(exist_ok=True)
-    generate_all(filtered, output)
+    generate_all(build_full_schema(entries), output)
     print("Готово.")
 
 
