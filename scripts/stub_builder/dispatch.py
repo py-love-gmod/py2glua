@@ -1,38 +1,37 @@
 from pathlib import Path
-from textwrap import dedent, indent
 
-from generator import gen_class, gen_enum, gen_hook, gen_library, gen_panel, gen_struct
+from generator import generate_class, generate_enum, generate_struct
 
 KIND_GENERATORS = {
-    "library": gen_library,
-    "class": gen_class,
-    "panel": gen_panel,
-    "struct": gen_struct,
-    "enum": gen_enum,
-    "hook": gen_hook,
+    "library": lambda name, data: generate_class(name, data, is_static=True),
+    "libraryfunc": lambda name, data: generate_class(name, data, is_static=True),
+    "class": lambda name, data: generate_class(name, data, is_static=False),
+    "classfunc": lambda name, data: generate_class(name, data, is_static=False),
+    "struct": generate_struct,
+    "enum": generate_enum,
+    # "panel": ...,
+    # "panelfunc": ...,
+    # "hook": ...,
 }
 
 
-def format_docstring(text: str, base_indent: int = 4) -> str:
-    if not text:
-        return ""
-    clean = dedent(text).strip().replace('"""', '\\"\\"\\"')
-    body = indent(clean, " " * base_indent)
-    return f'"""{body}\n{" " * base_indent}"""'
-
-
-def generate_category(name: str, data: dict) -> str:
+def generate_category(name: str, data: dict) -> tuple[str, bool]:
     kind = str(data.get("kind"))
-    gen_func = KIND_GENERATORS.get(kind, None)
+    gen_func = KIND_GENERATORS.get(kind)
     if gen_func:
-        return gen_func(name, data)
+        return gen_func(name, data), True
 
-    return f"# Unsupported kind: {kind} for {name}\n"
+    return f"Unsupported kind: {kind} for {name}", False
 
 
 def generate_all(schema: dict, output_dir: Path):
     for name, entry in schema.items():
-        code = generate_category(name, entry)
-        fname = name.lower() + ".py"
-        (output_dir / fname).write_text(code, encoding="utf-8")
-        print(f"Сгенерирован {fname}")
+        code, has_code = generate_category(name, entry)
+        if has_code:
+            kind = entry.get("kind", "unknown")
+            fname = Path(f"{name.lower()}_{kind}.py")
+            (output_dir / fname).write_text(code, encoding="utf-8")
+            print(f"Сгенерирован {fname}")
+
+        else:
+            print(code)

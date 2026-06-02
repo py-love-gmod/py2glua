@@ -7,7 +7,9 @@ def extract_obj(data):
         for item in data:
             if isinstance(item, dict):
                 return item
+
         return None
+
     return data if isinstance(data, dict) else None
 
 
