@@ -21,6 +21,9 @@ number{MATERIAL_RT_DEPTH} -> MATERIAL_RT_DEPTH
 number{TEXTUREFLAGS} -> TEXTUREFLAGS
 number{CREATERENDERTARGETFLAGS} -> CREATERENDERTARGETFLAGS
 number{MAT} -> MAT
+number{DMG} -> DMG
+number{TRACER} -> TRACER
+number{AMMO} -> AMMO
 
 # Struct
 table{Problem} -> Problem
@@ -29,4 +32,12 @@ table{BalloonData} -> BalloonData
 
 # Some fun
 table<PhysCollide> -> list[PhysCollide]
-table<string> -> list[str] | dict[str, Any]
+
+# General -///-
+table<number> -> list[int | float]
+table<string,function> -> dict[str, Callable]
+
+# CNavArea
+CNavArea.GetIncomingConnections.return -> Self
+CNavArea.GetLadders.return -> Self
+

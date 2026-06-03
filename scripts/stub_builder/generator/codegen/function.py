@@ -34,7 +34,7 @@ def build_args_doc(
             display_name = name
             display_type = arg_type
 
-        desc = arg.description.strip()
+        desc = " ".join(arg.description.split())
         if desc:
             lines.append(f"{ind}    {display_name} ({display_type}): {desc}")
 
@@ -60,7 +60,7 @@ def build_returns_doc(
         if type_override:
             ret_type = type_override.get(ret_type, context)
 
-        desc = ret.description.strip()
+        desc = " ".join(ret.description.split())
         if desc:
             lines.append(f"{ind}    {ret_type}: {desc}")
 
@@ -83,7 +83,7 @@ def build_docstring(
 
     else:
         ind = " " * base_indent
-        main_doc = f'{ind}"""..."""'
+        main_doc = f'{ind}"""\n{ind}    ...\n{ind}"""'
 
     if not args and not returns:
         return main_doc
@@ -134,12 +134,24 @@ def generate_function(
     if function_filter.is_excluded(method.name, class_name):
         return None
 
+    params: list[str] = []
+    lines = []
+    prefix = "    "
+    used_types = set()
     valid_args = [arg for arg in method.arguments if arg.name.strip()]
     func_name = sanitize_name(method.name)
-
     context = f"{class_name}.{func_name}" if class_name else None
-    used_types: set[str] = set()
-    params: list[str] = []
+
+    if method.deprecated:
+        if isinstance(method.deprecated, str):
+            lines.append(
+                f'{prefix}@deprecated("{method.deprecated.replace('"', r"\"")}")'
+            )
+
+        else:
+            lines.append(f"{prefix}@deprecated")
+
+        used_types.add("deprecated")
 
     for arg in valid_args:
         arg_type = type_override.get(arg.type, context)
@@ -164,15 +176,22 @@ def generate_function(
         if rt != "None":
             used_types.add(rt)
 
-    prefix = "    "
     if method.is_static:
-        lines = [
-            f"{prefix}@staticmethod",
-            f"{prefix}def {func_name}({', '.join(params)}) -> {ret_ann}:",
-        ]
+        lines.extend(
+            [
+                f"{prefix}@staticmethod",
+                f"{prefix}def {func_name}({', '.join(params)}) -> {ret_ann}:",
+            ]
+        )
 
     else:
-        lines = [f"{prefix}def {func_name}(self, {', '.join(params)}) -> {ret_ann}:"]
+        if params:
+            lines.append(
+                f"{prefix}def {func_name}(self, {', '.join(params)}) -> {ret_ann}:"
+            )
+
+        else:
+            lines.append(f"{prefix}def {func_name}(self) -> {ret_ann}:")
 
     doc = build_docstring(
         method.description,

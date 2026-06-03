@@ -10,7 +10,9 @@ def generate_enum(enum_def: EnumDef) -> GeneratedCode:
         "",
     ]
     for item in enum_def.items:
-        lines.append(f"    {item.key} = {item.value}")
+        lines.append(
+            f"    {item.key.replace('.', '_')} = {item.value}"
+        )  # FIXME: ЭТО ВЫЗОВЕТ ТРАБЛЫ, ПОЧИНИТЬ ЭТО!
         if item.description:
             lines.append(format_docstring(item.description, 4))
 

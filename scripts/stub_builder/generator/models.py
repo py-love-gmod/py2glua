@@ -24,6 +24,7 @@ class FunctionDef:
     arguments: list[Argument] = field(default_factory=list)
     returns: list[Return] = field(default_factory=list)
     is_static: bool = False
+    deprecated: Union[str, bool] | None = None
 
 
 @dataclass
@@ -33,6 +34,7 @@ class ClassDef:
     parent: str | None = None
     methods: list[FunctionDef] = field(default_factory=list)
     is_static: bool = False
+    deprecated: Union[str, bool] | None = None
 
 
 @dataclass
@@ -47,6 +49,7 @@ class EnumDef:
     name: str
     description: str = ""
     items: list[EnumItem] = field(default_factory=list)
+    deprecated: Union[str, bool] | None = None
 
 
 @dataclass
@@ -54,6 +57,7 @@ class StructDef:
     name: str
     description: str = ""
     fields: list[Argument] = field(default_factory=list)
+    deprecated: Union[str, bool] | None = None
 
 
 SchemaEntry = Union[ClassDef, FunctionDef, EnumDef, StructDef]

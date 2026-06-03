@@ -5,6 +5,7 @@ IMPORT_MAP: dict[str, str] = {
     "Callable": "from collections.abc import Callable",
     "Enum": "from enum import Enum",
     "Any": "from typing import Any",
+    "deprecated": "from warnings import deprecated",
 }
 
 BUILTINS: FrozenSet[str] = frozenset(

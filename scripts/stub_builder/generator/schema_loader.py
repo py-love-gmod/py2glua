@@ -58,6 +58,7 @@ def _parse_function(raw: dict, is_static: bool = False) -> FunctionDef:
         arguments=args,
         returns=rets,
         is_static=is_static,
+        deprecated=raw.get("deprecated"),
     )
 
 
@@ -66,10 +67,11 @@ def _parse_class(raw: dict, is_static: bool) -> ClassDef:
     methods = [_parse_function(m, is_static) for m in methods_raw]
     return ClassDef(
         name=raw.get("name", ""),
-        description=raw.get("description", ""),
+        description=raw.get("description", "..."),
         parent=raw.get("parent"),
         methods=methods,
         is_static=is_static,
+        deprecated=raw.get("deprecated"),
     )
 
 
@@ -88,6 +90,7 @@ def _parse_enum(raw: dict) -> EnumDef:
         name=raw.get("name", ""),
         description=raw.get("description", ""),
         items=items,
+        deprecated=raw.get("deprecated"),
     )
 
 
@@ -98,6 +101,7 @@ def _parse_struct(raw: dict) -> StructDef:
         name=raw.get("name", ""),
         description=raw.get("description", ""),
         fields=fields,
+        deprecated=raw.get("deprecated"),
     )
 
 
