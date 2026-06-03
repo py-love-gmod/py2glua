@@ -24,6 +24,7 @@ number{MAT} -> MAT
 number{DMG} -> DMG
 number{TRACER} -> TRACER
 number{AMMO} -> AMMO
+number{VIEW} -> VIEW
 
 # Struct
 table{Problem} -> Problem
