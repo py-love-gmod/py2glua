@@ -1,116 +1,53 @@
 from pathlib import Path
-from typing import Dict
+from typing import Optional
 
 
 class TypeOverride:
-    _global_rules: Dict[str, str] = {}
-    _local_rules: Dict[str, str] = {}
-    _initialized: bool = False
-    _rules_file_path: Path | None = None
+    def __init__(self, rules_path: Optional[Path] = None):
+        self.global_rules: dict[str, str] = {}
+        self.local_rules: dict[str, str] = {}
+        if rules_path:
+            self.load(rules_path)
 
-    @classmethod
-    def init(cls, lookup_paths: Path) -> None:
-        if cls._initialized:
+    def load(self, path: Path) -> None:
+        if not path.exists():
             return
 
-        cls._rules_file_path = cls._find_rules_file(lookup_paths)
+        with open(path, "r", encoding="utf-8") as f:
+            for line_no, line in enumerate(f, 1):
+                line = line.strip()
+                if not line or line.startswith("#") or "->" not in line:
+                    continue
 
-        if cls._rules_file_path:
-            cls._load_from_file()
+                try:
+                    left, right = line.split("->", 1)
 
-        cls._initialized = True
+                except ValueError:
+                    print(f"[TypeOverride] line {line_no}: no '->', skipping")
+                    continue
 
-    @classmethod
-    def reload(cls) -> None:
-        if cls._rules_file_path and cls._rules_file_path.exists():
-            cls._global_rules.clear()
-            cls._local_rules.clear()
-            cls._load_from_file()
+                left = left.strip()
+                right = right.strip()
+                if not left or not right:
+                    print(f"[TypeOverride] line {line_no}: empty side, skipping")
+                    continue
 
-    @classmethod
-    def get(cls, original_type: str, context: str | None = None) -> str:
-        normalized_type = original_type.lower()
+                if "." in left:
+                    self.local_rules[left] = right
 
-        if context:
-            local_key = cls._normalize_local_key(context)
-            if local_key in cls._local_rules:
-                return cls._local_rules[local_key]
+                else:
+                    self.global_rules[left.lower()] = right
 
-        if normalized_type in cls._global_rules:
-            return cls._global_rules[normalized_type]
+    def get(self, original_type: str, context: str | None = None) -> str:
+        if "|" in original_type:
+            parts = [p.strip() for p in original_type.split("|")]
+            resolved = [self.get(part, context) for part in parts]
+            return " | ".join(resolved)
+
+        if context and context in self.local_rules:
+            return self.local_rules[context]
+
+        if original_type.lower() in self.global_rules:
+            return self.global_rules[original_type.lower()]
 
         return original_type
-
-    @classmethod
-    def _find_rules_file(cls, lookup_path: Path) -> Path | None:
-        normal_file = lookup_path / "type_overrides.txt"
-        if normal_file.exists() and normal_file.is_file():
-            return normal_file
-
-        return None
-
-    @classmethod
-    def _load_from_file(cls) -> None:
-        if not cls._rules_file_path:
-            return
-
-        try:
-            with open(cls._rules_file_path, "r", encoding="utf-8") as f:
-                for line_num, line in enumerate(f, 1):
-                    line = line.strip()
-
-                    if not line or line.startswith("#"):
-                        continue
-
-                    if "->" not in line:
-                        print(
-                            f"[TypeOverride] Warning: line {line_num}: no '->' separator, skipping"
-                        )
-                        continue
-
-                    left, right = line.split("->", 1)
-                    left = left.strip()
-                    right = right.strip()
-
-                    if not left or not right:
-                        print(
-                            f"[TypeOverride] Warning: line {line_num}: empty left or right side, skipping"
-                        )
-                        continue
-
-                    if (
-                        "." in left
-                        or left.endswith(".return")
-                        or "return" in left.split(".")
-                    ):
-                        cls._local_rules[left] = right
-
-                    else:
-                        cls._global_rules[left.lower()] = right
-
-        except Exception as e:
-            print(f"[TypeOverride] Error loading rules: {e}")
-
-    @classmethod
-    def _normalize_local_key(cls, context: str) -> str:
-        if "." in context and ":" not in context:
-            parts = context.split(".", 1)
-            if len(parts) == 2:
-                return f"{parts[0]}:{parts[1]}"
-
-        return context
-
-    @classmethod
-    def reset(cls) -> None:
-        cls._global_rules.clear()
-        cls._local_rules.clear()
-        cls._initialized = False
-        cls._rules_file_path = None
-
-    @classmethod
-    def is_initialized(cls) -> bool:
-        return cls._initialized
-
-
-def override_type(original_type: str, context: str | None = None) -> str:
-    return TypeOverride.get(original_type, context)

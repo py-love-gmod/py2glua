@@ -30,6 +30,3 @@ table{BalloonData} -> BalloonData
 # Some fun
 table<PhysCollide> -> list[PhysCollide]
 table<string> -> list[str] | dict[str, Any]
-
-# Костыли =)
-number{FCVAR}|table<number> -> FCVAR | list[int | float]
