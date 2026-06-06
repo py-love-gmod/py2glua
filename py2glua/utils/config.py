@@ -1,3 +1,4 @@
+from copy import deepcopy
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,10 @@ class Config:
         cls._data["ns"] = namescape
 
     # region getters
+    @classmethod
+    def get_all_data(cls) -> dict[str, Any]:
+        return deepcopy(cls._data)
+
     @classmethod
     def get_path_input(cls) -> Path:
         return cls._data["path_in"]

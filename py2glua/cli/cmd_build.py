@@ -7,7 +7,7 @@ def build_cmd() -> None:
     # По факту метод занимается онли санити проверками.
     # Можно было бы сделать это более адекватно? Да.
     # Мне похуй? Абсолютно
-    logger.debug(Config._data)
+    logger.debug(Config.get_all_data())
 
     in_p = Config.get_path_input()
     if not in_p.exists():
@@ -19,9 +19,7 @@ def build_cmd() -> None:
         )
 
     try:
-        irs = build_python_files_dir(Config.get_path_input())
-
-
+        irs = build_python_files_dir(in_p)
 
     except Exception as e:
         Shutdown.user_error(str(e))
