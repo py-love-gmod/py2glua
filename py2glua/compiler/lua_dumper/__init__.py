@@ -1,4 +1,5 @@
-from . import emitters  # noqa: F401
-from ._core import dump_to_lua
+from ._core import LuaDumper
 
-__all__ = ["dump_to_lua"]
+__all__ = [
+    "LuaDumper",
+]

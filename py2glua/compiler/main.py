@@ -1,139 +1,33 @@
-from collections.abc import Callable
+from pathlib import Path
 
-from plg_reader import IRFile
-from utils import Config, Shutdown, logger
+from plg_reader import IRFile, build_python_files_dir
+from utils import Config, Shutdown
 
-from .analysis import (
-    DependencyGraph,
-    LocalSymbolResolver,
-    Scope,
-    SymbolTable,
-    infer_types,
-)
-from .lua_dumper import dump_to_lua
-from .simplification import AliasResolver
-
-
-def dump_irs_to_folder(
-    irs: dict[str, IRFile],
-    symbol_tables: dict[str, SymbolTable] | None = None,
-) -> None:
-    out = Config.get_path_output()
-    out.mkdir(parents=True, exist_ok=True)
-    for rel_path, ir_file in irs.items():
-        target = out / rel_path
-        target = target.with_suffix(".lua")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        sym = symbol_tables.get(rel_path) if symbol_tables else None
-        lua_code = dump_to_lua(ir_file, sym)
-        target.write_text(lua_code, encoding="utf-8")
+from ._dgc import DependencyGraphConstructor
+from ._import_resolver import ImportResolver
+from .lua_dumper import LuaDumper
 
 
 class Compiler:
-    _simplification_pass: list[Callable[[IRFile], IRFile]] = [
-        AliasResolver.resolve,
-    ]
+    @classmethod
+    def _build_irs(cls, input_path: Path) -> dict[str, IRFile]:
+        try:
+            return build_python_files_dir(input_path)
 
-    _graph: DependencyGraph
-    _symbol_tables: dict[str, SymbolTable] = {}
+        except Exception as e:
+            Shutdown.user_error(str(e))
 
     @classmethod
-    def _apply_simple_irs_transforms(cls, irs: dict[str, IRFile]) -> None:
-        for path, ir in irs.items():
-            for pass_ in cls._simplification_pass:
-                ir = pass_(ir)
-            irs[path] = ir
+    def compile(cls) -> None:
+        input_path = Config.get_path_input()
+        output_path = Config.get_path_output()
 
-    @classmethod
-    def _check_cycles(cls, irs: dict[str, IRFile]) -> None:
-        graph = DependencyGraph.build(irs, Config.get_path_input())
-        graph.check_cycles()
-        cls._graph = graph
+        #
+        irs = cls._build_irs(input_path)
 
-    @classmethod
-    def _topological_sort(cls) -> list[str]:
-        """Возвращает список файлов в порядке возрастания зависимостей (листья первыми)."""
-        in_degree = {
-            node: len(cls._graph.reverse.get(node, [])) for node in cls._graph.nodes
-        }
-        queue = [node for node, deg in in_degree.items() if deg == 0]
-        result = []
-        while queue:
-            node = queue.pop(0)
-            result.append(node)
-            for neighbor in cls._graph.forward.get(node, []):
-                in_degree[neighbor] -= 1
-                if in_degree[neighbor] == 0:
-                    queue.append(neighbor)
+        #
+        irs = ImportResolver.resolve_imports(irs)
+        graph = DependencyGraphConstructor.build(irs)  # noqa: F841
 
-        return result
-
-    @classmethod
-    def _build_symbol_tables(cls, irs: dict[str, IRFile]) -> dict[str, SymbolTable]:
-        """
-        Строит символьные таблицы для всех файлов в правильном порядке
-        с учётом внешних зависимостей (external_scopes).
-        Заменяет IR каждого файла на трансформированное (с IRSymbolRef).
-        Возвращает словарь путь -> SymbolTable.
-        """
-        ordered_files = cls._topological_sort()
-        global_tables: dict[str, SymbolTable] = {}
-
-        for path in ordered_files:
-            ir = irs[path]
-            external_scopes = {}
-            for dep in cls._graph.forward.get(path, []):
-                if dep in global_tables:
-                    scope = Scope()
-                    for sym in global_tables[dep].all():
-                        if sym.kind in (
-                            "function",
-                            "class",
-                            "variable",
-                            "module",
-                            "import",
-                        ):
-                            scope.symbols[sym.name] = (sym.id, sym.kind)
-
-                    external_scopes[dep] = scope
-
-            new_ir, local_table = LocalSymbolResolver.resolve(ir, external_scopes)
-            irs[path] = new_ir
-            global_tables[path] = local_table
-
-        return global_tables
-
-    @classmethod
-    def _check_types(cls, irs: dict[str, IRFile]) -> None:
-        errors = []
-        warnings = []
-        for path, ir in irs.items():
-            sym_table = cls._symbol_tables[path]
-            result = infer_types(ir, sym_table, external_tables=cls._symbol_tables)
-            for err in result.errors:
-                errors.append(f"{path}: {err}")
-
-            for warn in result.warnings:
-                warnings.append(f"{path}: {warn}")
-
-        if warnings:
-            logger.warning(
-                "Найдены предупреждения несоответствия типов:\n" + "\n".join(warnings)
-            )
-
-        if errors:
-            Shutdown.user_error(
-                "Найдены ошибки несоответствия типов:\n" + "\n".join(errors)
-            )
-
-    @classmethod
-    def build(cls, irs: dict[str, IRFile]) -> None:
-        cls._check_cycles(irs)
-
-        cls._apply_simple_irs_transforms(irs)
-
-        cls._symbol_tables = cls._build_symbol_tables(irs)
-
-        # cls._check_types(irs) # FIXME
-
-        dump_irs_to_folder(irs, cls._symbol_tables)
+        #
+        LuaDumper.dump(irs, output_path)

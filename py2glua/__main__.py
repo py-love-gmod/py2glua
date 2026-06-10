@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from cli import build_cmd
+from compiler import Compiler
 from utils import App, Config, Shutdown
 
 cli = App(description=__doc__)
@@ -45,10 +45,17 @@ def build(
         plg_path: Дерриктория plg
         namespace: Неймспейс аддона
     """
+    if not input_path.exists():
+        Shutdown.user_error(f"Указанного пути не существует: {input_path.absolute()}")
+
+    if not input_path.is_dir():
+        Shutdown.user_error(
+            f"Указанный путь к дерриктории с кодом не является папкой: {input_path.absolute()}"
+        )
+
     Config.path_setup(input_path, output_path, plg_path)
     Config.namespace_setup(namespace)
-
-    build_cmd()
+    Compiler.compile()
 
 
 if __name__ == "__main__":
