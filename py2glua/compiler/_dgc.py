@@ -3,15 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 
 from plg_reader import IRFile, IRImport
-from utils import Shutdown
+
+from ..utils import Shutdown
 
 
 class DependencyGraphConstructor:
     @staticmethod
     def _get_module_name(file_path: Path) -> str:
         parts = list(file_path.parts)
-        if parts[-1].endswith(".py"):
-            parts[-1] = parts[-1][:-3]
+        suffix = parts[-1].split(".")[-1]
+        if suffix in ("py", "pyi"):
+            parts[-1] = parts[-1][: -len(suffix) - 1]
 
         if parts and parts[-1] == "__init__":
             parts.pop()
@@ -26,7 +28,6 @@ class DependencyGraphConstructor:
         dict[str, list[str]],
         list[list[str]],
     ]:
-        # Сопоставления
         module_to_path: dict[str, str] = {}
         real_path_of: dict[str, str] = {}
 

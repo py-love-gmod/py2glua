@@ -1,23 +1,10 @@
 from pathlib import Path
 
 from compiler import Compiler
-from utils import App, Config, Shutdown
+from plg_reader import clii
+from utils import Config, Shutdown, setup
 
-cli = App(description=__doc__)
-cli.add_arg(
-    "--verbose",
-    "-v",
-    help="Более болтливый компилятор",
-    action="store_true",
-    default=False,
-)
-cli.add_arg(
-    "--debug",
-    "-d",
-    help="Отладочный вывод",
-    action="store_true",
-    default=False,
-)
+cli = clii.App(description=__doc__)
 
 
 @cli.cmd
@@ -60,7 +47,7 @@ def build(
 
 if __name__ == "__main__":
     try:
-        cli.run()
+        cli.run(setup)
 
     except KeyboardInterrupt:
         Shutdown.normal("Прервано пользователем")

@@ -60,4 +60,8 @@ class Config:
     def is_verbose(cls) -> bool:
         return cls._data["verbose"]
 
+    @classmethod
+    def get_module_cur_path(cls) -> Path:
+        return Path(__file__).parents[1]
+
     # endregion

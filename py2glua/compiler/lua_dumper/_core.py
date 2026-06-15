@@ -1,7 +1,8 @@
 from pathlib import Path
 
 from plg_reader import IRFile
-from utils import logger
+
+from ...utils import logger
 
 
 class LuaDumper:

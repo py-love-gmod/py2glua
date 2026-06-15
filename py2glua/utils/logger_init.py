@@ -40,19 +40,6 @@ class AlignedColorFormatter(logging.Formatter):
         return super().format(record)
 
 
-def setup_logging(debug: bool) -> logging.Logger:
-    logger.setLevel(logging.DEBUG if debug else logging.INFO)
-    logger.propagate = False
-
-    logger.handlers.clear()
-
-    ch = logging.StreamHandler()
-    ch.setFormatter(AlignedColorFormatter("[%(levelname)s] %(message)s"))
-    logger.addHandler(ch)
-
-    return logger
-
-
 @contextmanager
 def log_step(title: str, *, show_if_less_than: float = 0.002) -> Iterator[None]:
     logger.info(title)
