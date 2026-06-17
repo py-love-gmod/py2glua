@@ -5,7 +5,7 @@ from .logger_init import AlignedColorFormatter, log_step, logger
 from .shut import Shutdown
 
 
-def setup(debug: bool, verbouse: bool) -> None:
+def init_log_config(debug: bool, verbouse: bool) -> None:
     logger.setLevel(logging.DEBUG if debug else logging.INFO)
     logger.propagate = False
 

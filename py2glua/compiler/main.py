@@ -1,17 +1,13 @@
 from pathlib import Path
 
 from plg_reader import IRFile, build_python_files_dir
+from utils import Config, Shutdown
 
-from ..utils import Config, Shutdown
 from ._dgc import DependencyGraphConstructor
 from .import_work import ImportCollector, ImportResolver
 from .lua_dumper import LuaDumper
 
-SUPPORTED_BUILTINS = frozenset(
-    {
-        "math",
-    }
-)
+SUPPORTED_BUILTINS = frozenset({})
 
 
 class Compiler:

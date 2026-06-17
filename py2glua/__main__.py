@@ -2,7 +2,7 @@ from pathlib import Path
 
 from compiler import Compiler
 from plg_reader import clii
-from utils import Config, Shutdown, setup
+from utils import Config, Shutdown, init_log_config
 
 cli = clii.App(description=__doc__)
 
@@ -47,7 +47,7 @@ def build(
 
 if __name__ == "__main__":
     try:
-        cli.run(setup)
+        cli.run(init_log_config)
 
     except KeyboardInterrupt:
         Shutdown.normal("Прервано пользователем")

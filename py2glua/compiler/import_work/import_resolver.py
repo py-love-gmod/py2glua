@@ -10,8 +10,9 @@ from plg_reader import (
     IRNode,
     IRTransformer,
 )
+from utils import Shutdown
 
-from .utils import (
+from .shared import (
     build_attr_chain,
     module_name_from_relative_path,
     parse_name_entry,
@@ -116,7 +117,7 @@ class ImportResolver:
                     )
 
                 else:
-                    raise SyntaxError(
+                    Shutdown.user_error(
                         f"Импорт внешнего модуля '{target}' запрещён "
                         f"в файле {rel_key} (строка {imp.pos[0]})"
                     )
