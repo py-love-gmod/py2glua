@@ -1,7 +1,9 @@
+from collections.abc import Callable
 from pathlib import Path
+from time import perf_counter
 
 from plg_reader import build_python_files_dir
-from utils import Config, Shutdown
+from utils import Config, Shutdown, logger
 
 from .dgc import DependencyGraphConstructor
 from .dt import CompilationUnit
@@ -20,6 +22,11 @@ SUPPORTED_IMPORTS = frozenset(
 
 
 class Compiler:
+    _TRANSFORMS: list[Callable[[CompilationUnit], CompilationUnit]] = [
+        ConstructorResolver.resolve,  # Class() -> Class.__init__()
+        CallNormalizer.normalize,  # kwargs -> args
+    ]
+
     @classmethod
     def _preparation(cls, input_path: Path, py2glua_root: Path) -> CompilationUnit:
         try:
@@ -39,15 +46,27 @@ class Compiler:
         irs, module_scopes, node_to_scope = SymlinkResolver.resolve(irs)
         unit = CompilationUnit(irs, module_scopes, node_to_scope, graph)
 
-        unit = ConstructorResolver.resolve(unit)  # Class() -> Class.__init__()
-        unit = CallNormalizer.normalize(unit)  # kwargs -> args
+        return unit
+
+    @classmethod
+    def _apply_transforms(cls, unit: CompilationUnit) -> CompilationUnit:
+        for transformer in cls._TRANSFORMS:
+            unit = transformer(unit)
 
         return unit
 
     @classmethod
     def compile(cls) -> None:
-        input_path = Config.get_path_input()
-        output_path = Config.get_path_output()
-        py2glua_root = Config.get_path_plg()
+        input_path, output_path, py2glua_root = (  # noqa: F841
+            Config.get_path_input(),
+            Config.get_path_output(),
+            Config.get_path_plg(),
+        )
+        logger.info("Компиляция запущена, ожидайте...")
+        t0 = perf_counter()
 
         unit = cls._preparation(input_path, py2glua_root)
+        unit = cls._apply_transforms(unit)
+
+        dt = perf_counter() - t0
+        logger.info("Компиляция выполнена за %.3fs", dt)
