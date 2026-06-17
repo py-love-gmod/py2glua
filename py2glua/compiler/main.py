@@ -70,3 +70,6 @@ class Compiler:
 
         dt = perf_counter() - t0
         logger.info("Компиляция выполнена за %.3fs", dt)
+        logger.info(
+            "Но файлы аутпута спиздили гомогномики. https://www.youtube.com/watch?v=j3hOd7u35no"
+        )
