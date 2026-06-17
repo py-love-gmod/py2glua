@@ -61,7 +61,7 @@ class CompileUtils:
         ...
 
     @staticmethod
-    def gmod_api(name: str, realms: list[Realm], *args: Any) -> Callable:
+    def gmod_api(name: str, realms: list[RealmType], *args: Any) -> Callable:
         """Деректива компилятору ПОМЕНЯТЬ имя привязанной функции
 
         Примеры использования:
@@ -98,7 +98,9 @@ class CompileUtils:
         ...
 
     @staticmethod
-    def complex_enum(mapping: list[tuple[str, Any, bool]]) -> Callable:
+    def complex_enum(
+        mapping: list[tuple[str, Any, bool] | tuple[str, Any]],
+    ) -> Callable:
         """Используется для создания более комлпекстных типов ENUM из классов
 
         Пример использования:
@@ -107,7 +109,7 @@ class CompileUtils:
                 ("a", 1, False),
                 ("b", "boo", False),
                 ("c", "_G", True),
-                ("d", [1,2,3], False)
+                ("d", [1,2,3])
             ])
             class CustomEnum:
                 a: str
@@ -129,12 +131,77 @@ class CompileUtils:
         ```
 
         Args:
-            mapping list[tuple[str, Any, bool]]: Соотношение поля и значения, где:
+            mapping list[tuple[str, Any, bool] | tuple[str, Any]]: Соотношение поля и значения, где:
                 [0] - Имя поля
                 [1] - Значение
-                [2] - Является ли глобальным (работает только со строками)
+                [2] - Является ли глобальным (опционально, работает только со строками, по умолчанию `False`)
         """
         ...
+
+    @staticmethod
+    def anonymous(func: Callable) -> Callable:
+        """Превращает фунцию в анонимную
+
+        Пример использования:
+        ```
+            @CompileUtils.anonymous
+            def foo(): ...
+
+            foo()
+        ```
+            ->
+        ```
+            function() ... end
+        ```
+
+        """
+        ...
+
+    @staticmethod
+    def with_as_if(func: Callable) -> Callable:
+        """Позволяет использовать функцию или класс как if через with
+
+        Пример использования:
+        ```
+            @CompileUtils.with_as_if
+            def foo(): ...
+
+            with foo(): ...
+        ```
+            ->
+        ```
+            if foo() ... end
+        ```
+        """
+
+        ...
+
+    @staticmethod
+    def with_macro(func: Callable) -> Callable:
+        """Позволяет пометить функцию как макрос развёртки
+
+        Пример использования:
+        ```
+            @CompileUtils.with_macro
+            def foo():
+                pre
+                CompileUtils.WITH_MACRO_BODY
+                post
+
+            with foo():
+                body
+        ```
+            ->
+        ```
+            pre
+            body
+            pos
+        ```
+        """
+        ...
+
+    WITH_MACRO_BODY: object
+    """Маркер использующийся в :meth:`with_macro`"""
 
     DEBUG_BUILD: bool
     """Флаг сборки для `debug` режима.
