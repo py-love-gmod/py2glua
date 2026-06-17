@@ -3,9 +3,10 @@ from pathlib import Path
 from plg_reader import IRFile, build_python_files_dir
 from utils import Config, Shutdown
 
-from ._dgc import DependencyGraphConstructor
+from .dgc import DependencyGraphConstructor
 from .import_work import ImportCollector, ImportResolver
 from .lua_dumper import LuaDumper
+from .symbol_table import SymlinkResolver
 
 SUPPORTED_BUILTINS = frozenset({})
 
@@ -32,5 +33,7 @@ class Compiler:
         irs = ImportResolver.resolve_imports(irs, builtin_modules=SUPPORTED_BUILTINS)
 
         graph = DependencyGraphConstructor.build(irs)  # noqa: F841
+
+        irs, module_scopes, node_to_scope = SymlinkResolver.resolve(irs)  # noqa: F841
 
         LuaDumper.dump(irs, output_path)

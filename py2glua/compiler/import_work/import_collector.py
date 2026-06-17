@@ -6,7 +6,7 @@ from typing import Deque
 
 from plg_reader import IRFile, build_python_file
 
-from .shared import module_name_from_relative_path, resolve_target_module
+from ..shared import module_name_from_relative_path, resolve_target_module
 
 
 def _find_module_file(
