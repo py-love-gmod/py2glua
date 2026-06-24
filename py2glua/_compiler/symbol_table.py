@@ -14,7 +14,7 @@ from plg_reader import (
     IRTuple,
     IRWithItem,
 )
-from utils import Shutdown
+from _utils import Shutdown
 
 from .dt import Scope, Symbol, SymbolRefIR
 from .shared import module_name_from_relative_path

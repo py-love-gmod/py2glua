@@ -8,7 +8,7 @@ from plg_reader import (
     IRParam,
     IRTransformer,
 )
-from utils import Shutdown
+from _utils import Shutdown
 
 from ..dt import CompilationUnit
 from ..symbol_table import Scope, SymbolRefIR

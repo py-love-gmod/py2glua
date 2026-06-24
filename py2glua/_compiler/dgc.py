@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from plg_reader import IRFile, IRImport
-from utils import Shutdown
+from _utils import Shutdown
 
 
 class DependencyGraphConstructor:

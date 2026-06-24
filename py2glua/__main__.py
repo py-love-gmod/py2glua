@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from compiler import Compiler
+from _compiler import Compiler
 from plg_reader import clii
-from utils import Config, Shutdown, init_log_config
+from _utils import Config, Shutdown, init_log_config
 
 cli = clii.App(description=__doc__)
 
@@ -50,7 +50,7 @@ if __name__ == "__main__":
         cli.run(init_log_config)
 
     except KeyboardInterrupt:
-        Shutdown.normal("Прервано пользователем")
+        Shutdown.normal("Работа программы прервано пользователем")
 
     except Exception as e:
         Shutdown.softwear_error(f"Произошла ошибка компилятора: {e}")

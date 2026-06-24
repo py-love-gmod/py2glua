@@ -10,7 +10,7 @@ from plg_reader import (
     IRNode,
     IRTransformer,
 )
-from utils import Shutdown
+from _utils import Shutdown
 
 from ..shared import (
     build_attr_chain,

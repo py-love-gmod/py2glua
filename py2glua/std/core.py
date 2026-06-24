@@ -21,7 +21,11 @@ nil = NilType()
 class LuaTable:
     """TODO: Docs"""
 
-    def __init__(self, array_part: list[Any], dict_part: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        array_part: list[Any],
+        dict_part: dict[str, Any],
+    ) -> None:
         """TODO: Docs"""
         ...
 

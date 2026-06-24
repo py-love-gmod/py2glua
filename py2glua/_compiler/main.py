@@ -3,7 +3,7 @@ from pathlib import Path
 from time import perf_counter
 
 from plg_reader import build_python_files_dir
-from utils import Config, Shutdown, logger
+from _utils import Config, Shutdown, logger
 
 from .dgc import DependencyGraphConstructor
 from .dt import CompilationUnit
