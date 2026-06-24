@@ -56,7 +56,7 @@ class Compiler:
 
     @classmethod
     def compile(cls) -> None:
-        input_path, output_path, p2g_root_dir = (  # noqa: F841
+        input_path, output_path, p2g_root_dir = (
             Config.get_path_input(),
             Config.get_path_output(),
             Config.get_plg_root_path(),
@@ -70,5 +70,5 @@ class Compiler:
         dt = perf_counter() - t0
         logger.info("Компиляция выполнена за %.3fs", dt)
         logger.info(
-            "Но файлы аутпута спиздили гомогномики. https://www.youtube.com/watch?v=j3hOd7u35no"
+            f"Но файлы из {output_path} спиздили гомогномики. https://www.youtube.com/watch?v=j3hOd7u35no"
         )
