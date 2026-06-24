@@ -61,7 +61,7 @@ class Config:
         return cls._data["verbose"]
 
     @classmethod
-    def get_module_cur_path(cls) -> Path:
+    def get_plg_root_path(cls) -> Path:
         return Path(__file__).parents[1]
 
     # endregion

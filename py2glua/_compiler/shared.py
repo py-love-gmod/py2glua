@@ -39,8 +39,9 @@ def module_name_from_relative_path(rel_path: str) -> str:
     return ".".join(parts)
 
 
-def resolve_target_module(imp: IRImport, current_module: str) -> str:
-    """Возвращает абсолютное имя модуля, на которое ссылается импорт."""
+def resolve_target_module(
+    imp: IRImport, current_module: str, is_package: bool = False
+) -> str:
     module_parts = current_module.split(".") if current_module else []
 
     if imp.level == 0:
@@ -52,7 +53,13 @@ def resolve_target_module(imp: IRImport, current_module: str) -> str:
             f"в модуле {current_module}"
         )
 
-    base = ".".join(module_parts[: -imp.level]) if imp.level < len(module_parts) else ""
+    if is_package and imp.level == 1:
+        base = current_module
+
+    else:
+        base_parts = module_parts[: -imp.level] if imp.level < len(module_parts) else []
+        base = ".".join(base_parts) if base_parts else ""
+
     if imp.modules:
         return f"{base}.{'.'.join(imp.modules)}" if base else ".".join(imp.modules)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from _utils import Shutdown
 from plg_reader import (
     IRAnnotatedAssign,
     IRAssign,
@@ -10,7 +11,6 @@ from plg_reader import (
     IRNode,
     IRTransformer,
 )
-from _utils import Shutdown
 
 from ..shared import (
     build_attr_chain,
@@ -18,6 +18,10 @@ from ..shared import (
     parse_name_entry,
     resolve_target_module,
 )
+
+
+def _is_builtin(target: str, builtin_modules: frozenset[str]) -> bool:
+    return any(target == b or target.startswith(b + ".") for b in builtin_modules)
 
 
 class _ResolveNamesTransformer(IRTransformer):
@@ -33,13 +37,11 @@ class _ResolveNamesTransformer(IRTransformer):
         self._is_target = old
         if result is None:
             raise RuntimeError(f"visit вернул None для {type(node).__name__}")
-
         return result
 
     def visit_IRName(self, node: IRName) -> IRNode:
         if self._is_target or node.name not in self._mapping:
             return node
-
         new_node = self._mapping[node.name]
         new_node.pos = node.pos
         return new_node
@@ -53,10 +55,8 @@ class _ResolveNamesTransformer(IRTransformer):
         node.target = self._with_target_flag(node.target, True)
         if node.annotation is not None:
             node.annotation = self._with_target_flag(node.annotation, False)
-
         if node.value is not None:
             node.value = self._with_target_flag(node.value, False)
-
         return node
 
     def visit_IRFor(self, node: IRFor) -> IRNode:
@@ -67,8 +67,6 @@ class _ResolveNamesTransformer(IRTransformer):
 
 
 class ImportResolver:
-    """Проверяет допустимость импортов и заменяет имена на атрибутные цепочки."""
-
     @classmethod
     def resolve_imports(
         cls,
@@ -81,18 +79,20 @@ class ImportResolver:
         allowed = frozenset(module_name_from_relative_path(k) for k in irs)
         for rel_key, ir_file in irs.items():
             current_module = module_name_from_relative_path(rel_key)
+            is_pkg = rel_key.endswith("__init__.py")
 
             mapping: dict[str, IRNode] = {}
             new_allowed: list[IRImport] = []
             new_builtin: list[IRImport] = []
 
             for imp in ir_file.imports:
-                target = resolve_target_module(imp, current_module)
+                target = resolve_target_module(imp, current_module, is_package=is_pkg)
 
-                if target in builtin_modules:
+                if _is_builtin(target, builtin_modules):
                     new_builtin.append(imp)
+                    continue
 
-                elif target in allowed:
+                if target in allowed:
                     if imp.is_from:
                         for entry in imp.names:
                             orig, alias = parse_name_entry(entry)

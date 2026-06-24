@@ -9,21 +9,61 @@ from plg_reader import IRFile, build_python_file
 from ..shared import module_name_from_relative_path, resolve_target_module
 
 
-def _find_module_file(
-    search_roots: list[Path], module_name: str
-) -> tuple[Path, Path] | None:
-    rel = module_name.replace(".", "/")
-    candidates = [
-        rel + ".py",
-        rel + ".pyi",
-        rel + "/__init__.py",
-        rel + "/__init__.pyi",
-    ]
+def _find_module(root: Path, rel_path: str) -> Path | None:
+    if rel_path:
+        candidates = [
+            rel_path + ".py",
+            rel_path + ".pyi",
+            rel_path + "/__init__.py",
+            rel_path + "/__init__.pyi",
+        ]
+    else:
+        candidates = ["__init__.py", "__init__.pyi"]
+
+    for cand in candidates:
+        full = root / cand
+        if full.is_file():
+            return full
+
+    return None
+
+
+def _resolve_module_path(
+    target_module: str,
+    search_roots: list[Path],
+    prefix_roots: dict[str, Path],
+) -> tuple[Path, str] | None:
+    for prefix, root in prefix_roots.items():
+        if not target_module.startswith(prefix):
+            continue
+        suffix = target_module[len(prefix) :]
+        if suffix.startswith("."):
+            suffix = suffix[1:]
+
+        rel = suffix.replace(".", "/")
+        abs_path = _find_module(root, rel)
+        if abs_path is None:
+            continue
+
+        prefix_path = prefix.replace(".", "/")
+        if rel:
+            if abs_path.name in ("__init__.py", "__init__.pyi"):
+                key = f"{prefix_path}/{rel}/__init__.py"
+
+            else:
+                key = f"{prefix_path}/{rel}.py"
+
+        else:
+            key = f"{prefix_path}/__init__.py"
+
+        return abs_path, key
+
+    rel = target_module.replace(".", "/")
     for root in search_roots:
-        for cand in candidates:
-            full = root / cand
-            if full.is_file():
-                return root, full
+        abs_path = _find_module(root, rel)
+        if abs_path is not None:
+            key = abs_path.relative_to(root).as_posix()
+            return abs_path, key
 
     return None
 
@@ -34,11 +74,12 @@ class ImportCollector:
         initial_irs: dict[str, IRFile],
         search_roots: list[Path],
         builtin_modules: frozenset[str] = frozenset(),
+        prefix_roots: dict[str, Path] | None = None,
     ) -> dict[str, IRFile]:
-        """Собирает недостающие модули рекурсивно из search_roots."""
         if not initial_irs:
             return {}
 
+        prefix_roots = prefix_roots or {}
         resolved = dict(initial_irs)
         queue: Deque[str] = deque(resolved.keys())
         processed: set[str] = set()
@@ -49,11 +90,15 @@ class ImportCollector:
                 continue
 
             processed.add(rel_key)
+
             ir_file = resolved[rel_key]
             current_module = module_name_from_relative_path(rel_key)
+            is_pkg = rel_key.endswith("__init__.py")
 
             for imp in ir_file.imports:
-                target_module = resolve_target_module(imp, current_module)
+                target_module = resolve_target_module(
+                    imp, current_module, is_package=is_pkg
+                )
 
                 if target_module in builtin_modules:
                     continue
@@ -63,13 +108,12 @@ class ImportCollector:
                 ):
                     continue
 
-                found = _find_module_file(search_roots, target_module)
-                if found is None:
+                result = _resolve_module_path(target_module, search_roots, prefix_roots)
+                if result is None:
                     continue
 
-                root, abs_path = found
+                abs_path, new_rel = result
                 ir = build_python_file(abs_path, strip_comments=False)
-                new_rel = abs_path.relative_to(root).as_posix()
                 resolved[new_rel] = ir
                 queue.append(new_rel)
 

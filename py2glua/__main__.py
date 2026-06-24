@@ -1,8 +1,8 @@
 from pathlib import Path
 
 from _compiler import Compiler
-from plg_reader import clii
 from _utils import Config, Shutdown, init_log_config
+from plg_reader import clii
 
 cli = clii.App(description=__doc__)
 

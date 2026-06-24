@@ -1,6 +1,8 @@
 import enum
 from typing import Any, Callable
 
+__realm__ = "stub"
+
 
 class RealmType:
     """TODO: Docs"""
@@ -45,6 +47,9 @@ class Realm(enum.Enum):
     """TODO: Docs"""
 
     MENU: RealmType
+    """TODO: Docs"""
+
+    STUB: RealmType
     """TODO: Docs"""
 
 
@@ -97,6 +102,29 @@ class CompileUtils:
             name str: Имя в которое будет транслировано
             realms list[Realm]: Реалмы в которых данный метод работает
             *args Any: Параметры которые будут подставлены по дефолту
+
+        """
+        ...
+
+    @staticmethod
+    def inline(func: Callable) -> Callable:
+        """TODO: Docs
+
+        Примеры использования:
+        ```
+            @CompileUtils.inline
+            def foo(x: int) -> int:
+                return x * x
+
+            x = 2
+            y = foo(x)
+        ```
+            ->
+        ```
+            x = 2
+            y = x * x
+        ```
+        ---
 
         """
         ...

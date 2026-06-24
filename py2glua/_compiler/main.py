@@ -2,19 +2,17 @@ from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter
 
-from plg_reader import build_python_files_dir
 from _utils import Config, Shutdown, logger
+from plg_reader import build_python_files_dir
 
 from .dgc import DependencyGraphConstructor
 from .dt import CompilationUnit
 from .import_work import ImportCollector, ImportResolver
 from .symbol_table import SymlinkResolver
-from .transforms import CallNormalizer, ConstructorResolver
+from .transforms import CallNormalizer, ConstructorResolver, RealmCollector
 
 SUPPORTED_IMPORTS = frozenset(
     {
-        "py2glua",
-        #
         "typing",
         "enum",
     }
@@ -23,29 +21,30 @@ SUPPORTED_IMPORTS = frozenset(
 
 class Compiler:
     _TRANSFORMS: list[Callable[[CompilationUnit], CompilationUnit]] = [
+        RealmCollector.collect,  # Сборка и обработка __realm__
         ConstructorResolver.resolve,  # Class() -> Class.__init__()
         CallNormalizer.normalize,  # kwargs -> args
     ]
 
     @classmethod
-    def _preparation(cls, input_path: Path, py2glua_root: Path) -> CompilationUnit:
+    def _preparation(cls, input_path: Path, std_dir: Path) -> CompilationUnit:
         try:
-            irs = build_python_files_dir(input_path)  # Парсинг и сборка в IR
+            irs = build_python_files_dir(input_path)
 
         except Exception as e:
             Shutdown.user_error(str(e))
 
-        # Дособираем необходимые модули
-        irs = ImportCollector.collect(irs, search_roots=[input_path, py2glua_root])
-        # Проверяем что валидно всё
+        irs = ImportCollector.collect(
+            irs,
+            search_roots=[input_path],
+            builtin_modules=SUPPORTED_IMPORTS,
+            prefix_roots={"py2glua.std": std_dir},
+        )
         irs = ImportResolver.resolve_imports(irs, builtin_modules=SUPPORTED_IMPORTS)
 
-        graph = DependencyGraphConstructor.build(irs)  # Граф зависимости
-
-        # Создание сим таблицы
+        graph = DependencyGraphConstructor.build(irs)
         irs, module_scopes, node_to_scope = SymlinkResolver.resolve(irs)
-        unit = CompilationUnit(irs, module_scopes, node_to_scope, graph)
-
+        unit = CompilationUnit(irs, module_scopes, node_to_scope, graph, {})
         return unit
 
     @classmethod
@@ -57,15 +56,15 @@ class Compiler:
 
     @classmethod
     def compile(cls) -> None:
-        input_path, output_path, py2glua_root = (  # noqa: F841
+        input_path, output_path, p2g_root_dir = (  # noqa: F841
             Config.get_path_input(),
             Config.get_path_output(),
-            Config.get_path_plg(),
+            Config.get_plg_root_path(),
         )
         logger.info("Компиляция запущена, ожидайте...")
         t0 = perf_counter()
 
-        unit = cls._preparation(input_path, py2glua_root)
+        unit = cls._preparation(input_path, p2g_root_dir / "std")
         unit = cls._apply_transforms(unit)
 
         dt = perf_counter() - t0

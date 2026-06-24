@@ -42,3 +42,4 @@ class CompilationUnit:
     module_scopes: dict[str, Scope]
     node_to_scope: dict[int, Scope]
     dependency_graph: dict[str, list[str]] = field(default_factory=dict)
+    realm_dict: dict[str, str] = field(default_factory=dict)
