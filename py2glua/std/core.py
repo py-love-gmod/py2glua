@@ -179,11 +179,13 @@ class CompileUtils:
             @CompileUtils.anonymous
             def foo(): ...
 
+            foo
             foo()
         ```
             ->
         ```
             function() ... end
+            function() ... end()
         ```
 
         """
