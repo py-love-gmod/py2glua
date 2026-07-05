@@ -157,7 +157,7 @@ class CompileUtils:
             ->
         ```
             1
-            "foo"
+            "boo"
             _G
             {1,2,3}
         ```
