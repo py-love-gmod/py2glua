@@ -55,6 +55,21 @@ class Compiler:
         return unit
 
     @classmethod
+    def _format_time(cls, s: float) -> str:
+        hours = int(s // 3600)
+        minutes = int((s % 3600) // 60)
+        seconds = s % 60
+
+        if hours > 0:
+            return f"{hours:02d}:{minutes:02d}:{seconds:06.3f}"
+
+        elif minutes > 0:
+            return f"{minutes:02d}:{seconds:06.3f}"
+
+        else:
+            return f"{seconds:.3f}s"
+
+    @classmethod
     def compile(cls) -> None:
         input_path, output_path, p2g_root_dir = (
             Config.get_path_input(),
@@ -68,7 +83,11 @@ class Compiler:
         unit = cls._apply_transforms(unit)
 
         dt = perf_counter() - t0
-        logger.info("Компиляция выполнена за %.3fs", dt)
+        logger.info("Компиляция выполнена за %s", cls._format_time(dt))
+
+        logger.info(
+            "Запущен процесс создания аддона"
+        )  # TODO: Потом добавить создание аналогов .a .so. Пока что просто дампим как аддон
         logger.info(
             f"Но файлы из {output_path} спиздили гомогномики. https://www.youtube.com/watch?v=j3hOd7u35no"
         )
