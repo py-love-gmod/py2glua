@@ -100,8 +100,8 @@ class CompileUtils:
         ---
         Args:
             name str: Имя в которое будет транслировано
-            realms list[Realm]: Реалмы в которых данный метод работает
-            *args Any: Параметры которые будут подставлены по дефолту
+            realms list[Realm]: Реалмы в которых данный метод работает. Является компалй тайм проверкой
+            *args Any: Параметры которые будут подставлены по дефолту. Дополнительные аргументы подставляются в начало списка аргументов при вызове
 
         """
         ...
@@ -229,7 +229,7 @@ class CompileUtils:
         ```
             pre
             body
-            pos
+            post
         ```
         """
         ...
@@ -241,7 +241,7 @@ class CompileUtils:
     """Флаг сборки для `debug` режима.
     В отличии от рантайм `developer` переменной является литералом определённым на момент запуска компиляции
     
-    `py2glua build -d` => `CompileUtils.DEBUG_BUILD == True`
+    `py2glua build -d` => `CompileUtils.DEBUG_BUILD = True`
     
-    `py2glua build` => `CompileUtils.DEBUG_BUILD == False`
+    `py2glua build` => `CompileUtils.DEBUG_BUILD = False`
     """
